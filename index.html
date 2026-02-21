@@ -333,6 +333,7 @@
     <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)" />
     <button class="btn btn-ghost btn-sm employee-only" onclick="openMySettings()">⚙ Settings</button>
     <button class="btn btn-ghost btn-sm admin-only" onclick="openSettings()">⚙ Settings</button>
+    <button class="btn btn-ghost btn-sm admin-only" onclick="openSplitPay()">÷ Split Pay</button>
     <button class="btn btn-primary admin-only" onclick="openNewJobModal()">+ New Job</button>
   </div>
 </div>
@@ -649,6 +650,46 @@
     </div>
   </div>
 </div>
+<!-- SPLIT PAY MODAL -->
+<div id="splitPayModal" class="modal-overlay hidden">
+  <div class="modal modal-wide">
+    <div class="modal-title">Split Employee Payment</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Total Amount ($)</label>
+        <input class="form-input" id="sp_total" type="number" step="0.01" placeholder="0.00" oninput="updateSplitTotals()" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Date</label>
+        <input class="form-input" id="sp_date" type="date" />
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Description (optional)</label>
+        <input class="form-input" id="sp_label" placeholder="e.g. Weekly pay" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Type</label>
+        <select class="form-input" id="sp_paytype">
+          <option value="">— General</option>
+          <option value="advance">Advance</option>
+          <option value="final">Final Pay</option>
+        </select>
+      </div>
+    </div>
+    <div style="border-top:1px solid var(--border);padding-top:14px;margin-top:4px">
+      <div class="form-label" style="margin-bottom:10px">Allocate to Jobs</div>
+      <div id="sp_jobList"></div>
+    </div>
+    <div id="sp_totals" style="background:var(--bg3);border:1px solid var(--border2);border-radius:3px;padding:12px 16px;font-family:var(--mono);font-size:15px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-top:14px"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('splitPayModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSplitPay()">Save Payment</button>
+    </div>
+  </div>
+</div>
+
 <!-- EMPLOYEE SETTINGS MODAL -->
 <div id="mySettingsModal" class="modal-overlay hidden">
   <div class="modal">
@@ -994,6 +1035,23 @@ function badgeHtml(status, jobId, itemType, idx) {
   return `<span class="status-badge ${cls}" onclick="cycleStatus('${jobId}','${itemType}',${idx})" title="Click to cycle">${label}</span>`;
 }
 
+function payTypeBadgeHtml(payType, jobId, idx) {
+  const cfg = {
+    '':       { cls:'badge-pending',   label:'— Pay'      },
+    'advance': { cls:'badge-invoiced',  label:'◑ Advance'  },
+    'final':   { cls:'badge-collected', label:'✓ Final Pay'}
+  };
+  const { cls, label } = cfg[payType] || cfg[''];
+  return `<span class="status-badge ${cls}" onclick="cyclePayType('${jobId}',${idx})" title="Click to cycle type">${label}</span>`;
+}
+function cyclePayType(jobId, idx) {
+  const job = state.jobs.find(j=>j.id===jobId);
+  if (!job||!job.advances||job.advances[idx]===undefined) return;
+  const cycle = {'':'advance','advance':'final','final':''};
+  job.advances[idx].payType = cycle[job.advances[idx].payType||''];
+  save(); renderJobs();
+}
+
 function jobDetail(job, c) {
   const en = esc(state.settings.empName || 'Employee');
 
@@ -1016,6 +1074,7 @@ function jobDetail(job, c) {
       <div style="display:flex;align-items:center;gap:8px">
         <div class="line-item-value ${st==='collected'?'green':'dim'}">${fmt(a.amount)}</div>
         ${badgeHtml(st,job.id,'addOns',i)}
+        <button class="btn btn-ghost btn-sm" onclick="openAddItem('${job.id}','addon','${a.id}')">✏</button>
         <button class="btn btn-danger btn-sm" onclick="removeItem('${job.id}','addOns',${i})">✕</button>
       </div>
     </div>`;
@@ -1026,15 +1085,18 @@ function jobDetail(job, c) {
       <div class="line-item-label">${esc(m.label||'Materials')}<span class="tag ${m.who==='owner'?'tag-mine':'tag-his'}">${m.who==='owner'?'mine':en}</span></div>
       <div style="display:flex;align-items:center;gap:8px">
         <div class="line-item-value red">${fmt(m.amount)}</div>
+        <button class="btn btn-ghost btn-sm" onclick="openAddItem('${job.id}','material','${m.id}')">✏</button>
         <button class="btn btn-danger btn-sm" onclick="removeItem('${job.id}','materials',${i})">✕</button>
       </div>
     </div>`).join('');
 
   const advHtml = (job.advances||[]).map((a,i) => `
     <div class="line-item">
-      <div class="line-item-label">${esc(a.label||'Advance')} <span style="font-size:15px;color:var(--text3)">${a.date||''}</span></div>
+      <div class="line-item-label">${esc(a.label||'Pay')} <span style="font-size:15px;color:var(--text3)">${fmtDate(a.date)||''}</span></div>
       <div style="display:flex;align-items:center;gap:8px">
         <div class="line-item-value red">${fmt(a.amount)}</div>
+        ${payTypeBadgeHtml(a.payType||'', job.id, i)}
+        <button class="btn btn-ghost btn-sm" onclick="openAddItem('${job.id}','advance','${a.id}')">✏</button>
         <button class="btn btn-danger btn-sm" onclick="removeItem('${job.id}','advances',${i})">✕</button>
       </div>
     </div>`).join('');
@@ -1068,10 +1130,10 @@ function jobDetail(job, c) {
         </div>
         <div class="total-line"><span style="color:var(--text2)">Total Materials</span><span class="line-item-value red">-${fmt(c.totalMats)}</span></div>
         <div class="divider"></div>
-        <div class="detail-section-title" style="margin-top:4px">Employee Advances</div>
+        <div class="detail-section-title" style="margin-top:4px">Employee Pay</div>
         ${advHtml||'<div style="color:var(--text3);font-size:16px;padding:4px 0">None logged</div>'}
-        <div class="add-item-row"><button class="btn btn-ghost btn-sm" onclick="openAddItem('${job.id}','advance')">+ Advance</button></div>
-        <div class="total-line"><span style="color:var(--text2)">Total Advances</span><span class="line-item-value red">-${fmt(c.advancesPaid)}</span></div>
+        <div class="add-item-row"><button class="btn btn-ghost btn-sm" onclick="openAddItem('${job.id}','advance')">+ Employee Pay</button></div>
+        <div class="total-line"><span style="color:var(--text2)">Total Paid</span><span class="line-item-value red">-${fmt(c.advancesPaid)}</span></div>
       </div>
     </div>
 
@@ -1094,7 +1156,7 @@ function jobDetail(job, c) {
             <div style="font-size:16px;color:var(--text2);font-family:var(--mono)">Profit share: ${fmt(c.empProfit)}</div>
             <div style="font-size:16px;color:var(--text2);font-family:var(--mono)">+ Mats back: ${fmt(c.empMats)}</div>
             <div style="font-size:16px;color:var(--text2);font-family:var(--mono);border-top:1px solid var(--border);padding-top:4px;margin-top:4px">= Total owed: ${fmt(c.empTotalOwed)}</div>
-            <div style="font-size:16px;color:var(--text2);font-family:var(--mono)">− Advances paid: ${fmt(c.advancesPaid)}</div>
+            <div style="font-size:16px;color:var(--text2);font-family:var(--mono)">− Paid out: ${fmt(c.advancesPaid)}</div>
           </div>
           <div style="font-size:15px;color:var(--text3);font-family:var(--mono);margin-top:6px">Profit pool: ${fmt(c.profitPool)}</div>
         </div>
@@ -1132,6 +1194,72 @@ function deleteDebtPayment(id) {
   if (!confirm('Remove this payment?')) return;
   state.debtPayments = (state.debtPayments || []).filter(p => p.id !== id);
   save(); renderJobs();
+}
+
+// ─── SPLIT PAY ────────────────────────────────────────────────────────────────
+function openSplitPay() {
+  document.getElementById('sp_total').value = '';
+  document.getElementById('sp_date').value  = today();
+  document.getElementById('sp_label').value = '';
+  document.getElementById('sp_paytype').value = '';
+  const activeJobs = state.jobs.filter(j => j.status !== 'complete');
+  const jobListEl  = document.getElementById('sp_jobList');
+  if (!activeJobs.length) {
+    jobListEl.innerHTML = '<div style="color:var(--text3);font-size:16px;padding:8px 0">No active jobs.</div>';
+  } else {
+    jobListEl.innerHTML = activeJobs.map(j => {
+      const c = calcJob(j);
+      const balColor = c.empBalance > 0 ? 'var(--accent)' : 'var(--text3)';
+      return `<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:17px;font-weight:500">${esc(j.name)}</div>
+          <div style="font-family:var(--mono);font-size:13px;color:${balColor}">owes: ${fmt(c.empBalance)}</div>
+        </div>
+        <input class="form-input" type="number" step="0.01" placeholder="0.00"
+          id="sp_job_${j.id}" style="max-width:130px" oninput="updateSplitTotals()" />
+      </div>`;
+    }).join('');
+  }
+  updateSplitTotals();
+  document.getElementById('splitPayModal').classList.remove('hidden');
+}
+function updateSplitTotals() {
+  const total = parseFloat(document.getElementById('sp_total').value) || 0;
+  let allocated = 0;
+  document.querySelectorAll('[id^="sp_job_"]').forEach(el => { allocated += parseFloat(el.value) || 0; });
+  const remaining  = total - allocated;
+  const remColor   = Math.abs(remaining) < 0.01 ? 'var(--green)' : remaining < 0 ? 'var(--red)' : 'var(--accent)';
+  const el = document.getElementById('sp_totals');
+  if (el) el.innerHTML = `
+    <span>Total: <strong>${fmt(total)}</strong></span>
+    <span>Allocated: <strong style="color:var(--green)">${fmt(allocated)}</strong></span>
+    <span>Remaining: <strong style="color:${remColor}">${fmt(remaining)}</strong></span>`;
+}
+async function saveSplitPay() {
+  const total = parseFloat(document.getElementById('sp_total').value) || 0;
+  if (total <= 0) { alert('Please enter a total amount.'); return; }
+  const date    = document.getElementById('sp_date').value;
+  const label   = document.getElementById('sp_label').value.trim();
+  const payType = document.getElementById('sp_paytype').value;
+  let allocated = 0;
+  const entries = [];
+  document.querySelectorAll('[id^="sp_job_"]').forEach(el => {
+    const amt = parseFloat(el.value) || 0;
+    if (amt > 0) { allocated += amt; entries.push({ jobId: el.id.slice('sp_job_'.length), amount: amt }); }
+  });
+  if (!entries.length) { alert('Please allocate at least one amount to a job.'); return; }
+  const remaining = total - allocated;
+  if (Math.abs(remaining) > 0.01) {
+    if (!confirm(`${fmt(Math.abs(remaining))} is ${remaining > 0 ? 'unallocated' : 'over-allocated'}. Save anyway?`)) return;
+  }
+  entries.forEach(({ jobId, amount }) => {
+    const job = state.jobs.find(j => j.id === jobId);
+    if (job) {
+      if (!job.advances) job.advances = [];
+      job.advances.push({ id: uid(), label: label || 'Split payment', amount, date, payType });
+    }
+  });
+  await save(); renderJobs(); closeModal('splitPayModal');
 }
 
 function toggleRepayment(id) {
@@ -1364,10 +1492,12 @@ function saveJob() {
 }
 
 // ─── ADD ITEM MODAL ───────────────────────────────────────────────────────────
-function openAddItem(jobId, type) {
-  addItemContext = { jobId, type };
+function openAddItem(jobId, type, itemId = null) {
+  addItemContext = { jobId, type, itemId };
   const en = esc(state.settings.empName||'Employee');
-  document.getElementById('addItemTitle').textContent = {addon:'Add Add-on',material:'Add Material',advance:'Add Advance'}[type];
+  const isEdit = !!itemId;
+  const titles = { addon: isEdit?'Edit Add-on':'Add Add-on', material: isEdit?'Edit Material':'Add Material', advance: isEdit?'Edit Employee Pay':'Add Employee Pay' };
+  document.getElementById('addItemTitle').textContent = titles[type];
   let html='';
   if (type==='addon') {
     html=`<div class="form-group"><label class="form-label">Description</label><input class="form-input" id="ai_label" placeholder="e.g. Electrical add-on" /></div>
@@ -1382,16 +1512,37 @@ function openAddItem(jobId, type) {
         <select class="form-input" id="ai_who"><option value="owner">Me</option><option value="emp">${en}</option></select>
       </div>`;
   } else if (type==='advance') {
-    html=`<div class="form-group"><label class="form-label">Description / Note</label><input class="form-input" id="ai_label" placeholder="e.g. Weekly advance" /></div>
+    html=`<div class="form-group"><label class="form-label">Description / Note</label><input class="form-input" id="ai_label" placeholder="e.g. Weekly pay" /></div>
       <div class="form-group"><label class="form-label">Amount ($)</label><input class="form-input" id="ai_amount" type="number" step="0.01" placeholder="0.00" /></div>
-      <div class="form-group"><label class="form-label">Date</label><input class="form-input" id="ai_date" type="date" value="${today()}" /></div>`;
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Date</label><input class="form-input" id="ai_date" type="date" value="${today()}" /></div>
+        <div class="form-group"><label class="form-label">Type</label>
+          <select class="form-input" id="ai_paytype">
+            <option value="">— General</option>
+            <option value="advance">Advance</option>
+            <option value="final">Final Pay</option>
+          </select>
+        </div>
+      </div>`;
   }
   document.getElementById('addItemForm').innerHTML = html;
+  if (isEdit) {
+    const job = state.jobs.find(j => j.id === jobId);
+    const arr = type==='addon' ? job?.addOns : type==='material' ? job?.materials : job?.advances;
+    const item = arr?.find(x => x.id === itemId);
+    if (item) {
+      document.getElementById('ai_label').value = item.label || '';
+      document.getElementById('ai_amount').value = item.amount || '';
+      if (type==='addon'||type==='advance') document.getElementById('ai_date').value = item.date || '';
+      if (type==='material') document.getElementById('ai_who').value = item.who || 'owner';
+      if (type==='advance') document.getElementById('ai_paytype').value = item.payType || '';
+    }
+  }
   document.getElementById('addItemModal').classList.remove('hidden');
 }
 function saveItem() {
   if (!addItemContext) return;
-  const { jobId, type } = addItemContext;
+  const { jobId, type, itemId } = addItemContext;
   const job = state.jobs.find(j=>j.id===jobId);
   if (!job) return;
   const label  = document.getElementById('ai_label')?.value.trim()||'';
@@ -1399,13 +1550,29 @@ function saveItem() {
   if (amount<=0) { alert('Please enter a valid amount.'); return; }
   if (type==='addon') {
     const date = document.getElementById('ai_date')?.value||'';
-    job.addOns.push({ id:uid(), label, amount, date, status:'pending' });
+    if (itemId) {
+      const item = job.addOns.find(x=>x.id===itemId);
+      if (item) { item.label=label; item.amount=amount; item.date=date; }
+    } else {
+      job.addOns.push({ id:uid(), label, amount, date, status:'pending' });
+    }
   } else if (type==='material') {
     const who = document.getElementById('ai_who').value;
-    job.materials.push({ id:uid(), label, amount, who });
+    if (itemId) {
+      const item = job.materials.find(x=>x.id===itemId);
+      if (item) { item.label=label; item.amount=amount; item.who=who; }
+    } else {
+      job.materials.push({ id:uid(), label, amount, who });
+    }
   } else if (type==='advance') {
     const date = document.getElementById('ai_date')?.value||'';
-    job.advances.push({ id:uid(), label, amount, date });
+    const payType = document.getElementById('ai_paytype')?.value||'';
+    if (itemId) {
+      const item = job.advances.find(x=>x.id===itemId);
+      if (item) { item.label=label; item.amount=amount; item.date=date; item.payType=payType; }
+    } else {
+      job.advances.push({ id:uid(), label, amount, date, payType });
+    }
   }
   save(); renderJobs(); closeModal('addItemModal');
 }
