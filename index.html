@@ -427,7 +427,18 @@
       <input class="form-input" id="s_debtOwnerShare" type="number" step="0.01" min="0" max="1" />
       <div class="form-hint" id="s_debtHint"></div>
     </div>
-    <div style="border-top:1px solid var(--border);padding-top:16px;margin-top:4px;display:flex;flex-wrap:wrap;gap:8px">
+    <!-- ── NOTIFICATIONS (compartmentalized — remove this block to disable) ── -->
+    <div id="notif_section" style="border-top:1px solid var(--border);padding-top:16px;margin-top:4px">
+      <div class="form-label" style="margin-bottom:6px">Notifications</div>
+      <div id="notif_status" style="font-family:var(--mono);font-size:13px;color:var(--text3);margin-bottom:8px"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" onclick="requestNotifPermission()">🔔 Enable</button>
+        <button class="btn btn-ghost btn-sm" onclick="testNotif()">⚡ Test</button>
+      </div>
+      <div class="form-hint" style="margin-top:6px">Notifies you when the employee adds a new appointment.</div>
+    </div>
+    <!-- ── END NOTIFICATIONS ── -->
+    <div style="border-top:1px solid var(--border);padding-top:16px;margin-top:16px;display:flex;flex-wrap:wrap;gap:8px">
       <button class="btn btn-ghost btn-sm" onclick="exportData()">⬇ Export Backup</button>
       <button class="btn btn-ghost btn-sm" onclick="closeModal('settingsModal');document.getElementById('importFile').click()">⬆ Import Backup</button>
       <button class="btn btn-ghost btn-sm" onclick="closeModal('settingsModal');openChangePin()">🔑 Change My PIN</button>
@@ -818,11 +829,13 @@ function load() {
   // Real-time listener — keeps all open tabs/devices in sync
   DOC.onSnapshot(doc => {
     if (doc.exists && !isSaving) {
+      const oldAppts = (state.appointments || []).slice();
       state = migrateState(doc.data());
       if (currentUser) {
         // Refresh currentUser data in case PIN/name changed
         const fresh = state.users.find(u => u.id === currentUser.id);
         if (fresh) currentUser = { id: fresh.id, name: fresh.name, isAdmin: fresh.isAdmin };
+        checkForNewAppts(oldAppts, state.appointments);
         renderAll();
       }
     }
@@ -1585,6 +1598,14 @@ function openSettings() {
   document.getElementById('s_debtOriginal').value   = state.settings.debtOriginal||2256.58;
   document.getElementById('s_debtOwnerShare').value = state.settings.debtOwnerShare||0.50;
   document.getElementById('s_debtHint').textContent = `Normal is ${(1 - state.settings.empShare).toFixed(2)}. Extra above normal counts toward debt.`;
+  // Notifications status
+  if ('Notification' in window) {
+    const labels = { granted: '✓ Enabled', denied: '✗ Blocked — check browser/site settings', default: '○ Not yet enabled' };
+    document.getElementById('notif_status').textContent = labels[Notification.permission] || '○ Unknown';
+  } else {
+    document.getElementById('notif_status').textContent = '✗ Not supported in this browser';
+    document.getElementById('notif_section').style.opacity = '0.5';
+  }
   document.getElementById('settingsModal').classList.remove('hidden');
 }
 function saveSettings() {
@@ -2109,6 +2130,40 @@ function importData(event) {
   };
   reader.readAsText(file);
 }
+
+// ─── NOTIFICATIONS (compartmentalized — remove this section to disable) ────────
+function requestNotifPermission() {
+  if (!('Notification' in window)) { alert('This browser does not support notifications.'); return; }
+  Notification.requestPermission().then(perm => {
+    const labels = { granted: '✓ Enabled', denied: '✗ Blocked — check browser/site settings', default: '○ Not yet enabled' };
+    const el = document.getElementById('notif_status');
+    if (el) el.textContent = labels[perm] || '';
+    if (perm === 'granted') {
+      new Notification('EHS Tracker', { body: 'Notifications are enabled!' });
+    } else if (perm === 'denied') {
+      alert('Notifications blocked. Open your browser site settings and allow notifications for this page, then try again.');
+    }
+  });
+}
+function testNotif() {
+  if (!('Notification' in window)) { alert('Not supported in this browser.'); return; }
+  if (Notification.permission !== 'granted') {
+    requestNotifPermission();
+    return;
+  }
+  new Notification('EHS Tracker — Test', { body: 'If you see this on your phone, notifications are working!' });
+}
+function checkForNewAppts(oldAppts, newAppts) {
+  if (!currentUser || !currentUser.isAdmin) return;
+  if (Notification.permission !== 'granted') return;
+  const oldIds = new Set((oldAppts || []).map(a => a.id));
+  const added  = (newAppts || []).filter(a => !oldIds.has(a.id) && a.createdBy !== currentUser.id);
+  added.forEach(a => {
+    const when = a.date ? ` on ${fmtDate(a.date)}${a.time ? ' at ' + fmtTime(a.time) : ''}` : '';
+    new Notification('New Appointment Added', { body: `${a.clientName || 'Appointment'}${when}` });
+  });
+}
+// ─── END NOTIFICATIONS ────────────────────────────────────────────────────────
 
 load();
 </script>
