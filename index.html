@@ -761,6 +761,7 @@ let state = {
 };
 let editingJobId = null;
 let addItemContext = null;
+let expandedJobs = new Set(); // local only — never saved to Firestore
 let notesJobId = null;
 let hoursJobId = null;
 let editNoteCtx = null;
@@ -792,6 +793,7 @@ function migrateState(s) {
     s.users.push({ id: 'admin_default', name: 'Ty', pin: '1234', isAdmin: true });
   }
   (s.jobs || []).forEach(job => {
+    delete job._expanded; // moved to local localStorage — not stored in Firestore
     if (job.repaymentMode === undefined) job.repaymentMode = false;
     if (!job.jobNotes) {
       job.jobNotes = [];
@@ -1050,7 +1052,7 @@ function emptyState(msg) { return `<div class="empty-state"><div class="empty-st
 
 function jobCard(job) {
   const c = calcJob(job);
-  const isExp = job._expanded;
+  const isExp = expandedJobs.has(job.id);
   const sc    = job.status === 'complete' ? 'complete' : 'active';
   const sl    = job.status === 'complete' ? 'Complete' : 'Active';
   const sb    = job.status === 'complete' ? 'status-complete' : 'status-active';
@@ -1379,8 +1381,9 @@ function toggleRepayment(id) {
   save(); renderJobs();
 }
 function toggleJob(id) {
-  const j = state.jobs.find(j=>j.id===id);
-  if (j) { j._expanded = !j._expanded; save(); renderJobs(); }
+  if (expandedJobs.has(id)) expandedJobs.delete(id); else expandedJobs.add(id);
+  saveExpandedState();
+  renderJobs();
 }
 function cycleStatus(jobId, itemType, idx) {
   const job = state.jobs.find(j=>j.id===jobId);
@@ -1647,8 +1650,11 @@ function saveJob() {
       job.milestones=milestones;
     }
   } else {
-    state.jobs.push({ id:uid(), name, quote, date, isItemized, quoteItems, status:'active',
-      milestones, addOns:[], subtractions:[], materials:[], advances:[], fees:[], jobNotes:[], hours:[], repaymentMode:false, _expanded:true });
+    const newId = uid();
+    expandedJobs.add(newId);
+    saveExpandedState();
+    state.jobs.push({ id:newId, name, quote, date, isItemized, quoteItems, status:'active',
+      milestones, addOns:[], subtractions:[], materials:[], advances:[], fees:[], jobNotes:[], hours:[], repaymentMode:false });
   }
   save(); renderJobs(); closeModal('jobModal');
 }
@@ -1999,8 +2005,22 @@ function signOut() {
   showLogin();
 }
 
+function loadExpandedState() {
+  try {
+    const key = `exp_${currentUser?.id || 'default'}`;
+    const saved = JSON.parse(localStorage.getItem(key) || '[]');
+    expandedJobs = new Set(saved);
+  } catch(e) { expandedJobs = new Set(); }
+}
+function saveExpandedState() {
+  try {
+    const key = `exp_${currentUser?.id || 'default'}`;
+    localStorage.setItem(key, JSON.stringify([...expandedJobs]));
+  } catch(e) {}
+}
 function applyUserView() {
   const isAdmin = currentUser && currentUser.isAdmin;
+  loadExpandedState();
   // Header elements
   const lbl = document.getElementById('headerUserLabel');
   const sob = document.getElementById('signOutBtn');
