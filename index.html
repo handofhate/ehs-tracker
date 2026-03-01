@@ -364,15 +364,28 @@
       <label class="form-label">Client Name</label>
       <input class="form-input" id="f_name" placeholder="e.g. Griffin, Mendoza..." />
     </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Quote Amount ($)</label>
-        <input class="form-input" id="f_quote" type="number" step="0.01" placeholder="0.00" oninput="updateMilestonePreview()" />
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+      <input type="checkbox" id="f_itemized" onchange="toggleItemizedQuote()" style="width:16px;height:16px;cursor:pointer;accent-color:var(--accent)" />
+      <label for="f_itemized" style="cursor:pointer;font-family:var(--mono);font-size:15px;color:var(--text2);user-select:none">Itemized Quote</label>
+    </div>
+    <div id="f_quote_wrap" class="form-group">
+      <label class="form-label">Quote Amount ($)</label>
+      <input class="form-input" id="f_quote" type="number" step="0.01" placeholder="0.00" oninput="updateMilestonePreview()" />
+    </div>
+    <div id="f_items_wrap" style="display:none;margin-bottom:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <label class="form-label" style="margin-bottom:0">Line Items</label>
+        <button class="btn btn-ghost btn-sm" onclick="addQuoteItemField()">+ Add Item</button>
       </div>
-      <div class="form-group">
-        <label class="form-label">Start Date</label>
-        <input class="form-input" id="f_date" type="date" />
+      <div id="quoteItemList"></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--border);font-family:var(--mono)">
+        <span style="color:var(--text2);font-size:15px">Quote Total</span>
+        <span style="color:var(--accent);font-size:17px" id="quoteItemTotal">$0.00</span>
       </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Start Date</label>
+      <input class="form-input" id="f_date" type="date" />
     </div>
     <div class="form-group">
       <label class="form-label">Payment Structure — Milestones</label>
@@ -779,6 +792,8 @@ function migrateState(s) {
       if (a.status === undefined) { a.status = 'pending'; }
       if (a.date === undefined) a.date = '';
     });
+    if (job.isItemized === undefined) job.isItemized = false;
+    if (!job.quoteItems) job.quoteItems = [];
   });
   return s;
 }
@@ -1134,14 +1149,14 @@ function jobDetail(job, c) {
         <div class="line-item"><div class="line-item-label">Base Quote</div><div class="line-item-value">${fmt(job.quote)}</div></div>
         ${milestonesHtml}
         <div class="divider"></div>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
           <div style="font-size:15px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.08em">Subtractions</div>
           <button class="btn btn-ghost btn-sm" style="padding:2px 8px" onclick="openAddItem('${job.id}','subtraction')">+</button>
         </div>
         ${subtractionsHtml||'<div style="color:var(--text3);font-size:16px;padding:4px 0">None</div>'}
         ${c.subtractionTotal>0?`<div style="display:flex;justify-content:space-between;padding:5px 0 2px;font-family:var(--mono);font-size:15px"><span style="color:var(--text3)">Subtotal</span><span style="color:var(--red)">-${fmt(c.subtractionTotal)}</span></div>`:''}
         <div class="divider"></div>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
           <div style="font-size:15px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.08em">Additions</div>
           <button class="btn btn-ghost btn-sm" style="padding:2px 8px" onclick="openAddItem('${job.id}','addon')">+</button>
         </div>
@@ -1156,7 +1171,7 @@ function jobDetail(job, c) {
       </div>
 
       <div class="detail-section">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
           <div style="font-family:var(--mono);font-size:14px;text-transform:uppercase;letter-spacing:0.1em;color:var(--text3)">Materials</div>
           <button class="btn btn-ghost btn-sm" style="padding:2px 8px" onclick="openAddItem('${job.id}','material')">+</button>
         </div>
@@ -1167,7 +1182,7 @@ function jobDetail(job, c) {
         </div>
         <div class="total-line"><span style="color:var(--text2)">Total Materials</span><span class="line-item-value red">-${fmt(c.totalMats)}</span></div>
         <div class="divider"></div>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
           <div style="font-family:var(--mono);font-size:14px;text-transform:uppercase;letter-spacing:0.1em;color:var(--text3)">Employee Pay</div>
           <button class="btn btn-ghost btn-sm" style="padding:2px 8px" onclick="openAddItem('${job.id}','advance')">+</button>
         </div>
@@ -1459,12 +1474,17 @@ function deleteHoursEntry(hId) {
 
 // ─── JOB MODAL ────────────────────────────────────────────────────────────────
 let milestoneCount = 0;
+let quoteItemCount = 0;
 function openNewJobModal() {
   editingJobId = null;
   document.getElementById('jobModalTitle').textContent = 'New Job';
   document.getElementById('f_name').value = '';
   document.getElementById('f_quote').value = '';
   document.getElementById('f_date').value = today();
+  document.getElementById('f_itemized').checked = false;
+  document.getElementById('quoteItemList').innerHTML = '';
+  quoteItemCount = 0;
+  toggleItemizedQuote();
   document.getElementById('milestoneList').innerHTML = '';
   milestoneCount = 0;
   addMilestoneField('Deposit (50%)', 50);
@@ -1480,6 +1500,13 @@ function editJob(id) {
   document.getElementById('f_name').value  = job.name;
   document.getElementById('f_quote').value = job.quote;
   document.getElementById('f_date').value  = job.date||'';
+  document.getElementById('f_itemized').checked = job.isItemized||false;
+  document.getElementById('quoteItemList').innerHTML = '';
+  quoteItemCount = 0;
+  if (job.isItemized && job.quoteItems?.length) {
+    job.quoteItems.forEach(qi => addQuoteItemField(qi.label, qi.amount));
+  }
+  toggleItemizedQuote();
   document.getElementById('milestoneList').innerHTML = '';
   milestoneCount = 0;
   (job.milestones||[]).forEach(m=>addMilestoneField(m.label,m.pct));
@@ -1503,11 +1530,51 @@ function updateMilestonePreview() {
   const err = document.getElementById('milestoneError');
   err.textContent = (Math.abs(total-100)>0.01&&total>0) ? `Milestones total ${total}% — must equal 100%` : '';
 }
+function toggleItemizedQuote() {
+  const on = document.getElementById('f_itemized').checked;
+  document.getElementById('f_quote_wrap').style.display = on ? 'none' : '';
+  document.getElementById('f_items_wrap').style.display = on ? '' : 'none';
+  if (on && document.getElementById('quoteItemList').children.length === 0) {
+    addQuoteItemField();
+  }
+}
+function addQuoteItemField(label='', amount='') {
+  quoteItemCount++;
+  const id = quoteItemCount;
+  const div = document.createElement('div');
+  div.id = `qitem_${id}`;
+  div.style.cssText = 'display:flex;gap:8px;margin-bottom:8px;align-items:center';
+  div.innerHTML = `
+    <input class="form-input" placeholder="Description" value="${label}" id="qilabel_${id}" style="flex:2" />
+    <input class="form-input" placeholder="$0.00" type="number" step="0.01" value="${amount}" id="qiamt_${id}" style="flex:1;max-width:100px" oninput="updateQuoteItemTotal()" />
+    <button class="btn btn-danger btn-sm" onclick="document.getElementById('qitem_${id}').remove();updateQuoteItemTotal()">✕</button>`;
+  document.getElementById('quoteItemList').appendChild(div);
+  updateQuoteItemTotal();
+}
+function updateQuoteItemTotal() {
+  let total = 0;
+  document.querySelectorAll('[id^="qiamt_"]').forEach(el => { total += parseFloat(el.value)||0; });
+  const el = document.getElementById('quoteItemTotal');
+  if (el) el.textContent = '$' + total.toFixed(2);
+}
 function saveJob() {
-  const name  = document.getElementById('f_name').value.trim();
-  const quote = parseFloat(document.getElementById('f_quote').value)||0;
-  const date  = document.getElementById('f_date').value;
+  const name = document.getElementById('f_name').value.trim();
+  const date = document.getElementById('f_date').value;
+  const isItemized = document.getElementById('f_itemized').checked;
   if (!name) { alert('Please enter a client name.'); return; }
+  let quote, quoteItems = [];
+  if (isItemized) {
+    document.querySelectorAll('[id^="qiamt_"]').forEach((el, i) => {
+      const amt = parseFloat(el.value)||0;
+      const qId = el.id.slice('qiamt_'.length);
+      const lbl = document.getElementById(`qilabel_${qId}`)?.value.trim()||`Item ${i+1}`;
+      quoteItems.push({ id: uid(), label: lbl, amount: amt });
+    });
+    if (quoteItems.length === 0) { alert('Please add at least one line item.'); return; }
+    quote = quoteItems.reduce((s, qi) => s + (qi.amount||0), 0);
+  } else {
+    quote = parseFloat(document.getElementById('f_quote').value)||0;
+  }
   const milestones=[]; let total=0;
   document.querySelectorAll('[id^="mpct_"]').forEach((el,i)=>{
     const pct = parseFloat(el.value)||0;
@@ -1519,12 +1586,12 @@ function saveJob() {
   if (editingJobId) {
     const job = state.jobs.find(j=>j.id===editingJobId);
     if (job) {
-      job.name=name; job.quote=quote; job.date=date;
+      job.name=name; job.quote=quote; job.date=date; job.isItemized=isItemized; job.quoteItems=quoteItems;
       milestones.forEach((m,i)=>{ if(job.milestones[i]) m.status=job.milestones[i].status||'pending'; });
       job.milestones=milestones;
     }
   } else {
-    state.jobs.push({ id:uid(), name, quote, date, status:'active',
+    state.jobs.push({ id:uid(), name, quote, date, isItemized, quoteItems, status:'active',
       milestones, addOns:[], subtractions:[], materials:[], advances:[], fees:[], jobNotes:[], hours:[], repaymentMode:false, _expanded:true });
   }
   save(); renderJobs(); closeModal('jobModal');
@@ -1545,7 +1612,14 @@ function openAddItem(jobId, type, itemId = null) {
         <div class="form-group"><label class="form-label">Date</label><input class="form-input" id="ai_date" type="date" value="${today()}" /></div>
       </div>`;
   } else if (type==='subtraction') {
-    html=`<div class="form-group"><label class="form-label">Description</label><input class="form-input" id="ai_label" placeholder="e.g. Discount, returned materials..." /></div>
+    const subJob = state.jobs.find(j => j.id === jobId);
+    const hasItems = subJob?.isItemized && subJob?.quoteItems?.length > 0;
+    const sourceHtml = hasItems ? `<div class="form-group"><label class="form-label">Subtract from</label>
+      <select class="form-input" id="ai_source" onchange="fillSubtractionFromItem()">
+        <option value="">— Manual entry</option>
+        ${(subJob.quoteItems).map(qi=>`<option value="${qi.id}">${esc(qi.label)} (${fmt(qi.amount)})</option>`).join('')}
+      </select></div>` : '';
+    html=sourceHtml+`<div class="form-group"><label class="form-label">Description</label><input class="form-input" id="ai_label" placeholder="e.g. Discount, returned materials..." /></div>
       <div class="form-row">
         <div class="form-group"><label class="form-label">Amount to subtract ($)</label><input class="form-input" id="ai_amount" type="number" step="0.01" placeholder="0.00" /></div>
         <div class="form-group"><label class="form-label">Date</label><input class="form-input" id="ai_date" type="date" value="${today()}" /></div>
@@ -1628,6 +1702,25 @@ function saveItem() {
     }
   }
   save(); renderJobs(); closeModal('addItemModal');
+}
+function fillSubtractionFromItem() {
+  const sel = document.getElementById('ai_source');
+  if (!sel) return;
+  const qid = sel.value;
+  const amtEl = document.getElementById('ai_amount');
+  const lblEl = document.getElementById('ai_label');
+  if (!qid) {
+    amtEl.readOnly = false;
+    amtEl.style.opacity = '';
+    return;
+  }
+  const job = state.jobs.find(j => j.id === addItemContext?.jobId);
+  const qi = (job?.quoteItems||[]).find(x => x.id === qid);
+  if (!qi) return;
+  lblEl.value = qi.label;
+  amtEl.value = qi.amount;
+  amtEl.readOnly = true;
+  amtEl.style.opacity = '0.65';
 }
 
 // ─── SETTINGS ─────────────────────────────────────────────────────────────────
