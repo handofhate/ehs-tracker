@@ -703,6 +703,17 @@
   </div>
 </div>
 
+<!-- QUOTE SNAPSHOT MODAL -->
+<div id="quoteSnapshotModal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:540px" id="quoteSnapshotInner">
+    <div id="quoteSnapshotContent"></div>
+    <div class="modal-actions" style="margin-top:16px" id="quoteSnapshotActions">
+      <button class="btn btn-ghost btn-sm" onclick="printQuoteSnapshot()">🖨 Print</button>
+      <button class="btn btn-ghost" onclick="closeModal('quoteSnapshotModal')">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- EMPLOYEE SETTINGS MODAL -->
 <div id="mySettingsModal" class="modal-overlay hidden">
   <div class="modal">
@@ -791,6 +802,7 @@ function migrateState(s) {
     (job.subtractions || []).forEach(a => {
       if (a.status === undefined) { a.status = 'pending'; }
       if (a.date === undefined) a.date = '';
+      if (a.sourceItemId === undefined) a.sourceItemId = null;
     });
     if (job.isItemized === undefined) job.isItemized = false;
     if (!job.quoteItems) job.quoteItems = [];
@@ -1028,9 +1040,12 @@ function jobCard(job) {
   <div class="job-card ${sc} ${isExp?'expanded':''}" id="job_${job.id}">
     <div class="job-header">
       <div class="job-header-main" onclick="toggleJob('${job.id}')">
-        <div>
-          <div class="job-name">${esc(job.name)}</div>
-          <div style="font-size:15px;color:var(--text3);margin-top:2px;font-family:var(--mono)">${job.date||''}</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          ${job.isItemized ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openQuoteSnapshot('${job.id}')" title="View Quote Snapshot" style="padding:4px 9px;font-size:16px;flex-shrink:0;color:var(--accent);border-color:var(--accent)">📋</button>` : ''}
+          <div>
+            <div class="job-name">${esc(job.name)}</div>
+            <div style="font-size:15px;color:var(--text3);margin-top:2px;font-family:var(--mono)">${job.date||''}</div>
+          </div>
         </div>
         <span class="job-status ${sb}">${sl}</span>
         <div class="job-quick-stats">
@@ -1614,11 +1629,21 @@ function openAddItem(jobId, type, itemId = null) {
   } else if (type==='subtraction') {
     const subJob = state.jobs.find(j => j.id === jobId);
     const hasItems = subJob?.isItemized && subJob?.quoteItems?.length > 0;
-    const sourceHtml = hasItems ? `<div class="form-group"><label class="form-label">Subtract from</label>
-      <select class="form-input" id="ai_source" onchange="fillSubtractionFromItem()">
-        <option value="">— Manual entry</option>
-        ${(subJob.quoteItems).map(qi=>`<option value="${qi.id}">${esc(qi.label)} (${fmt(qi.amount)})</option>`).join('')}
-      </select></div>` : '';
+    const usedSourceIds = (subJob?.subtractions||[]).filter(s => s.id !== itemId && s.sourceItemId).map(s => s.sourceItemId);
+    const sourceHtml = hasItems ? `
+      <div class="form-group"><label class="form-label">Line Item</label>
+        <select class="form-input" id="ai_source" onchange="fillSubtractionFromItem()">
+          <option value="">— Select a line item</option>
+          ${(subJob.quoteItems).map(qi => {
+            const used = usedSourceIds.includes(qi.id);
+            return `<option value="${qi.id}"${used ? ' disabled' : ''}>${esc(qi.label)} (${fmt(qi.amount)})${used ? ' — already subtracted' : ''}</option>`;
+          }).join('')}
+        </select>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+        <input type="checkbox" id="ai_manual" onchange="toggleManualSubtraction()" style="width:16px;height:16px;cursor:pointer;accent-color:var(--accent)" />
+        <label for="ai_manual" style="cursor:pointer;font-family:var(--mono);font-size:14px;color:var(--text3);user-select:none">Manual entry (not a line item)</label>
+      </div>` : '';
     html=sourceHtml+`<div class="form-group"><label class="form-label">Description</label><input class="form-input" id="ai_label" placeholder="e.g. Discount, returned materials..." /></div>
       <div class="form-row">
         <div class="form-group"><label class="form-label">Amount to subtract ($)</label><input class="form-input" id="ai_amount" type="number" step="0.01" placeholder="0.00" /></div>
@@ -1655,6 +1680,18 @@ function openAddItem(jobId, type, itemId = null) {
       if (type==='addon'||type==='subtraction'||type==='advance') document.getElementById('ai_date').value = item.date || '';
       if (type==='material') document.getElementById('ai_who').value = item.who || 'owner';
       if (type==='advance') document.getElementById('ai_paytype').value = item.payType || '';
+      if (type==='subtraction') {
+        const sel = document.getElementById('ai_source');
+        if (sel) {
+          if (item.sourceItemId) {
+            sel.value = item.sourceItemId;
+            fillSubtractionFromItem();
+          } else {
+            document.getElementById('ai_manual').checked = true;
+            toggleManualSubtraction();
+          }
+        }
+      }
     }
   }
   document.getElementById('addItemModal').classList.remove('hidden');
@@ -1677,11 +1714,14 @@ function saveItem() {
     }
   } else if (type==='subtraction') {
     const date = document.getElementById('ai_date')?.value||'';
+    const sourceEl = document.getElementById('ai_source');
+    const isManual = !sourceEl || document.getElementById('ai_manual')?.checked;
+    const sourceItemId = (!isManual && sourceEl?.value) ? sourceEl.value : null;
     if (itemId) {
       const item = job.subtractions.find(x=>x.id===itemId);
-      if (item) { item.label=label; item.amount=amount; item.date=date; }
+      if (item) { item.label=label; item.amount=amount; item.date=date; item.sourceItemId=sourceItemId; }
     } else {
-      job.subtractions.push({ id:uid(), label, amount, date, status:'pending' });
+      job.subtractions.push({ id:uid(), label, amount, date, status:'pending', sourceItemId });
     }
   } else if (type==='material') {
     const who = document.getElementById('ai_who').value;
@@ -1703,9 +1743,23 @@ function saveItem() {
   }
   save(); renderJobs(); closeModal('addItemModal');
 }
-function fillSubtractionFromItem() {
+function toggleManualSubtraction() {
+  const manual = document.getElementById('ai_manual')?.checked;
   const sel = document.getElementById('ai_source');
   if (!sel) return;
+  sel.disabled = manual;
+  sel.style.opacity = manual ? '0.4' : '';
+  if (manual) {
+    sel.value = '';
+    document.getElementById('ai_amount').readOnly = false;
+    document.getElementById('ai_amount').style.opacity = '';
+  } else {
+    fillSubtractionFromItem();
+  }
+}
+function fillSubtractionFromItem() {
+  const sel = document.getElementById('ai_source');
+  if (!sel || document.getElementById('ai_manual')?.checked) return;
   const qid = sel.value;
   const amtEl = document.getElementById('ai_amount');
   const lblEl = document.getElementById('ai_label');
@@ -1721,6 +1775,83 @@ function fillSubtractionFromItem() {
   amtEl.value = qi.amount;
   amtEl.readOnly = true;
   amtEl.style.opacity = '0.65';
+}
+
+// ─── QUOTE SNAPSHOT ───────────────────────────────────────────────────────────
+function openQuoteSnapshot(jobId) {
+  const job = state.jobs.find(j => j.id === jobId);
+  if (!job) return;
+
+  const usedIds = (job.subtractions||[]).filter(s => s.sourceItemId).map(s => s.sourceItemId);
+  const lineItemSubs = (job.subtractions||[]).filter(s => s.sourceItemId);
+  const manualSubs   = (job.subtractions||[]).filter(s => !s.sourceItemId);
+  const addOns       = job.addOns||[];
+
+  const activeItemsTotal = (job.quoteItems||[]).filter(qi => !usedIds.includes(qi.id)).reduce((s,qi) => s+(qi.amount||0), 0);
+  const addOnTotal       = addOns.reduce((s,a) => s+(a.amount||0), 0);
+  const manualSubTotal   = manualSubs.reduce((s,a) => s+(a.amount||0), 0);
+  const grandTotal       = activeItemsTotal + addOnTotal - manualSubTotal;
+
+  const row = (label, value, opts={}) => {
+    const {color='var(--text)', strikethrough=false, sub=''} = opts;
+    return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <span style="font-size:17px;${strikethrough?'text-decoration:line-through;color:var(--text3)':''}">${label}</span>
+        <span style="font-family:var(--mono);font-size:17px;${strikethrough?'text-decoration:line-through;color:var(--text3)':'color:'+color}">${value}</span>
+      </div>${sub ? `<div style="font-size:13px;font-family:var(--mono);color:var(--red);margin-top:4px">${sub}</div>` : ''}
+    </div>`;
+  };
+
+  const lineItemsHtml = (job.quoteItems||[]).map(qi => {
+    const sub = lineItemSubs.find(s => s.sourceItemId === qi.id);
+    return sub
+      ? row(esc(qi.label), fmt(qi.amount), { strikethrough:true, sub:`✕ Removed${sub.label ? ': ' + esc(sub.label) : ''}` })
+      : row(esc(qi.label), fmt(qi.amount));
+  }).join('');
+
+  const sectionHead = (title) =>
+    `<div style="font-family:var(--mono);font-size:11px;letter-spacing:0.15em;text-transform:uppercase;color:var(--text3);padding-bottom:6px;border-bottom:2px solid var(--border2);margin-bottom:2px">${title}</div>`;
+
+  const addOnsHtml = addOns.length ? `<div style="margin-top:22px">${sectionHead('Additions')}${addOns.map(a=>row(esc(a.label),'+'+fmt(a.amount),{color:'var(--purple)'})).join('')}</div>` : '';
+  const manualSubsHtml = manualSubs.length ? `<div style="margin-top:22px">${sectionHead('Deductions')}${manualSubs.map(a=>row(esc(a.label),'-'+fmt(a.amount),{color:'var(--red)'})).join('')}</div>` : '';
+
+  document.getElementById('quoteSnapshotContent').innerHTML = `
+    <div style="text-align:center;padding-bottom:20px;border-bottom:2px solid var(--accent);margin-bottom:24px">
+      <div style="font-family:var(--mono);font-size:11px;letter-spacing:0.2em;color:var(--text3);text-transform:uppercase;margin-bottom:8px">Quote Snapshot</div>
+      <div style="font-size:26px;font-weight:600;letter-spacing:0.02em">${esc(job.name)}</div>
+      ${job.date ? `<div style="font-family:var(--mono);font-size:14px;color:var(--text3);margin-top:6px">${fmtDate(job.date)}</div>` : ''}
+    </div>
+
+    ${sectionHead('Scope of Work')}
+    ${lineItemsHtml}
+    <div style="display:flex;justify-content:space-between;padding:10px 0;margin-bottom:2px">
+      <span style="font-family:var(--mono);font-size:14px;color:var(--text3)">Scope subtotal</span>
+      <span style="font-family:var(--mono);font-size:14px;color:var(--text2)">${fmt(activeItemsTotal)}</span>
+    </div>
+
+    ${addOnsHtml}
+    ${manualSubsHtml}
+
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:24px;padding-top:18px;border-top:2px solid var(--accent)">
+      <span style="font-family:var(--mono);font-size:15px;font-weight:600;color:var(--text2);letter-spacing:0.1em;text-transform:uppercase">Project Total</span>
+      <span style="font-family:var(--mono);font-size:28px;font-weight:600;color:var(--accent)">${fmt(grandTotal)}</span>
+    </div>`;
+
+  document.getElementById('quoteSnapshotModal').classList.remove('hidden');
+}
+function printQuoteSnapshot() {
+  const content = document.getElementById('quoteSnapshotContent').innerHTML;
+  const win = window.open('', '_blank', 'width=600,height=800');
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Quote Snapshot</title>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'IBM Plex Sans', sans-serif; background:#fff; color:#111; padding:40px; max-width:520px; margin:0 auto; font-size:16px; }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    span[style*="line-through"] { text-decoration:line-through; color:#999 !important; }
+  </style></head><body>${content}</body></html>`);
+  win.document.close();
+  win.focus();
+  win.print();
 }
 
 // ─── SETTINGS ─────────────────────────────────────────────────────────────────
