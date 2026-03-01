@@ -551,6 +551,15 @@
         <input class="form-input" id="dp_date" type="date" />
       </div>
     </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+      <input type="checkbox" id="dp_linkJob" onchange="toggleDpJobLink()" style="width:16px;height:16px;cursor:pointer;accent-color:var(--accent)" />
+      <label for="dp_linkJob" style="cursor:pointer;font-family:var(--mono);font-size:14px;color:var(--text2);user-select:none">Apply against a job's employee balance</label>
+    </div>
+    <div id="dp_jobWrap" style="display:none" class="form-group">
+      <label class="form-label">Active Job</label>
+      <select class="form-input" id="dp_jobSelect"></select>
+      <div class="form-hint" style="margin-top:6px">This payment will reduce the employee's outstanding balance on the selected job, the same way a pay advance does.</div>
+    </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('debtPaymentModal')">Cancel</button>
       <button class="btn btn-primary" onclick="saveDebtPayment()">Save Payment</button>
@@ -775,6 +784,7 @@ function migrateState(s) {
   if (s.settings.debtOriginal === undefined) s.settings.debtOriginal = 2256.58;
   if (s.settings.debtOwnerShare === undefined) s.settings.debtOwnerShare = 0.50;
   if (!s.debtPayments) s.debtPayments = [];
+  (s.debtPayments).forEach(p => { if (p.linkedJobId === undefined) p.linkedJobId = null; });
   if (!s.users) s.users = [];
   if (!s.appointments) s.appointments = [];
   // Ensure there's always at least one admin user seeded
@@ -920,16 +930,17 @@ function calcJob(job) {
   const empProfit   = profitPool * effectiveEmpShare;
   const ownerProfit = profitPool * effectiveOwnerShare;
   const debtContribution = job.repaymentMode ? Math.max(0, profitPool * ((debtOwnerShare||0.50) - normalOwnerShare)) : 0;
-  const empTotalOwed = empProfit + empMats;
-  const advancesPaid = (job.advances||[]).reduce((s,a)=>s+(a.amount||0),0);
-  const empBalance   = empTotalOwed - advancesPaid;
-  const ownerTotal   = ownerProfit + ownerMats;
-  const totalHours   = (job.hours||[]).reduce((s,h)=>s+(h.hours||0),0);
+  const empTotalOwed    = empProfit + empMats;
+  const advancesPaid    = (job.advances||[]).reduce((s,a)=>s+(a.amount||0),0);
+  const linkedDebtPaid  = (state.debtPayments||[]).filter(p=>p.linkedJobId===job.id).reduce((s,p)=>s+(p.amount||0),0);
+  const empBalance      = empTotalOwed - advancesPaid - linkedDebtPaid;
+  const ownerTotal      = ownerProfit + ownerMats;
+  const totalHours      = (job.hours||[]).reduce((s,h)=>s+(h.hours||0),0);
 
   return { contractTotal, addOnTotal, subtractionTotal, collectedGross, pendingGross,
     totalFees, netRevenue, totalMats, ownerMats, empMats,
     profitPool, empProfit, ownerProfit, debtContribution,
-    empTotalOwed, advancesPaid, empBalance, ownerTotal, totalHours };
+    empTotalOwed, advancesPaid, linkedDebtPaid, empBalance, ownerTotal, totalHours };
 }
 
 // ─── DEBT PANEL ───────────────────────────────────────────────────────────────
@@ -950,14 +961,17 @@ function renderDebtPanel() {
   const repayPct  = Math.round((s.debtOwnerShare || 0.50) * 100);
 
   const paymentsHtml = (state.debtPayments || []).length
-    ? [...state.debtPayments].reverse().map(p => `
-        <div class="line-item" style="padding:6px 0">
-          <div class="line-item-label" style="font-size:15px">${esc(p.label||'Manual payment')}<span style="font-size:11px;color:var(--text3);margin-left:8px;font-family:var(--mono)">${fmtDate(p.date)||''}</span></div>
+    ? [...state.debtPayments].reverse().map(p => {
+        const linkedJob = p.linkedJobId ? state.jobs.find(j => j.id === p.linkedJobId) : null;
+        const jobTag = linkedJob ? `<span style="font-size:11px;background:rgba(91,141,239,0.15);color:var(--blue);border-radius:2px;padding:1px 6px;font-family:var(--mono);margin-left:6px">⇒ ${esc(linkedJob.name)}</span>` : '';
+        return `<div class="line-item" style="padding:6px 0">
+          <div class="line-item-label" style="font-size:15px">${esc(p.label||'Manual payment')}${jobTag}<span style="font-size:11px;color:var(--text3);margin-left:8px;font-family:var(--mono)">${fmtDate(p.date)||''}</span></div>
           <div style="display:flex;align-items:center;gap:8px">
             <div class="line-item-value green">+${fmt(p.amount)}</div>
             <button class="btn btn-danger btn-sm" onclick="deleteDebtPayment('${p.id}')">✕</button>
           </div>
-        </div>`).join('')
+        </div>`;
+      }).join('')
     : '';
 
   document.getElementById('debtPanel').innerHTML = `
@@ -1236,6 +1250,7 @@ function jobDetail(job, c) {
             <div style="font-size:16px;color:var(--text2);font-family:var(--mono)">+ Mats back: ${fmt(c.empMats)}</div>
             <div style="font-size:16px;color:var(--text2);font-family:var(--mono);border-top:1px solid var(--border);padding-top:4px;margin-top:4px">= Total owed: ${fmt(c.empTotalOwed)}</div>
             <div style="font-size:16px;color:var(--text2);font-family:var(--mono)">− Paid out: ${fmt(c.advancesPaid)}</div>
+            ${c.linkedDebtPaid>0?`<div style="font-size:16px;color:var(--red);font-family:var(--mono)">− Debt repayment: ${fmt(c.linkedDebtPaid)}</div>`:''}
           </div>
           <div style="font-size:15px;color:var(--text3);font-family:var(--mono);margin-top:6px">Profit pool: ${fmt(c.profitPool)}</div>
         </div>
@@ -1258,15 +1273,31 @@ function openAddDebtPayment() {
   document.getElementById('dp_label').value  = '';
   document.getElementById('dp_amount').value = '';
   document.getElementById('dp_date').value   = today();
+  document.getElementById('dp_linkJob').checked = false;
+  document.getElementById('dp_jobWrap').style.display = 'none';
+  const activeJobs = state.jobs.filter(j => j.status !== 'complete');
+  document.getElementById('dp_jobSelect').innerHTML =
+    '<option value="">— Select a job</option>' +
+    activeJobs.map(j => {
+      const bal = calcJob(j).empBalance;
+      return `<option value="${j.id}">${esc(j.name)} (employee owed: ${fmt(bal)})</option>`;
+    }).join('');
   document.getElementById('debtPaymentModal').classList.remove('hidden');
+}
+function toggleDpJobLink() {
+  const on = document.getElementById('dp_linkJob').checked;
+  document.getElementById('dp_jobWrap').style.display = on ? '' : 'none';
 }
 function saveDebtPayment() {
   const amount = parseFloat(document.getElementById('dp_amount').value);
   if (!amount || amount <= 0) { alert('Please enter a valid amount.'); return; }
   const label = document.getElementById('dp_label').value.trim();
   const date  = document.getElementById('dp_date').value;
+  const linked = document.getElementById('dp_linkJob').checked;
+  const linkedJobId = linked ? (document.getElementById('dp_jobSelect').value || null) : null;
+  if (linked && !linkedJobId) { alert('Please select a job to link this payment to.'); return; }
   if (!state.debtPayments) state.debtPayments = [];
-  state.debtPayments.push({ id: uid(), label, amount, date });
+  state.debtPayments.push({ id: uid(), label, amount, date, linkedJobId });
   save(); renderJobs(); closeModal('debtPaymentModal');
 }
 function deleteDebtPayment(id) {
