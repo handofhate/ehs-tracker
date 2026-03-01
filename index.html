@@ -1025,6 +1025,12 @@ function renderJobs() {
   document.getElementById('activeJobsList').innerHTML   = active.length   ? active.map(jobCard).join('')   : emptyState('No active jobs. Click + New Job to get started.');
   document.getElementById('completeJobsList').innerHTML = complete.length ? complete.map(jobCard).join('') : emptyState('No completed jobs yet.');
   document.getElementById('allJobsList').innerHTML      = state.jobs.length ? state.jobs.map(jobCard).join('') : emptyState('No jobs yet.');
+  applyAdminClasses();
+}
+function applyAdminClasses() {
+  const isAdmin = currentUser?.isAdmin;
+  document.querySelectorAll('.admin-only').forEach(el => { el.style.display = isAdmin ? '' : 'none'; });
+  document.querySelectorAll('.employee-only').forEach(el => { el.style.display = isAdmin ? 'none' : ''; });
 }
 function emptyState(msg) { return `<div class="empty-state"><div class="empty-state-icon">📋</div>${msg}</div>`; }
 
@@ -1040,12 +1046,9 @@ function jobCard(job) {
   <div class="job-card ${sc} ${isExp?'expanded':''}" id="job_${job.id}">
     <div class="job-header">
       <div class="job-header-main" onclick="toggleJob('${job.id}')">
-        <div style="display:flex;align-items:center;gap:10px">
-          ${job.isItemized ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openQuoteSnapshot('${job.id}')" title="View Quote Snapshot" style="padding:4px 9px;font-size:16px;flex-shrink:0;color:var(--accent);border-color:var(--accent)">📋</button>` : ''}
-          <div>
-            <div class="job-name">${esc(job.name)}</div>
-            <div style="font-size:15px;color:var(--text3);margin-top:2px;font-family:var(--mono)">${job.date||''}</div>
-          </div>
+        <div>
+          <div class="job-name">${esc(job.name)}</div>
+          <div style="font-size:15px;color:var(--text3);margin-top:2px;font-family:var(--mono)">${job.date||''}</div>
         </div>
         <span class="job-status ${sb}">${sl}</span>
         <div class="job-quick-stats">
@@ -1057,9 +1060,10 @@ function jobCard(job) {
         </div>
       </div>
       <div class="job-header-btns">
+        ${job.isItemized ? `<button class="btn btn-ghost btn-sm" onclick="openQuoteSnapshot('${job.id}')" title="View Quote Snapshot" style="color:var(--accent);border-color:var(--accent)">📋</button>` : ''}
         <button class="btn btn-ghost btn-sm" onclick="openNotes('${job.id}')" title="Notes">📝${nc>0?` ${nc}`:''}</button>
         <button class="btn btn-ghost btn-sm" onclick="openHours('${job.id}')" title="Hours">⏱${th>0?` ${th}h`:''}</button>
-        <button class="repay-toggle${job.repaymentMode?' active':''}" onclick="toggleRepayment('${job.id}')" title="Toggle debt repayment split for this job">${job.repaymentMode?'⚖ Repaying':'⚖ Normal'}</button>
+        <button class="repay-toggle${job.repaymentMode?' active':''} admin-only" onclick="toggleRepayment('${job.id}')" title="Toggle debt repayment split for this job">${job.repaymentMode?'⚖ Repaying':'⚖ Normal'}</button>
         <div class="job-chevron" onclick="toggleJob('${job.id}')">▾</div>
       </div>
     </div>
@@ -1074,7 +1078,8 @@ function badgeHtml(status, jobId, itemType, idx) {
     collected: { cls:'badge-collected', label:'✓ Collected'}
   };
   const { cls, label } = cfg[status] || cfg.pending;
-  return `<span class="status-badge ${cls}" onclick="cycleStatus('${jobId}','${itemType}',${idx})" title="Click to cycle">${label}</span>`;
+  const admin = currentUser?.isAdmin;
+  return `<span class="status-badge ${cls}"${admin ? ` onclick="cycleStatus('${jobId}','${itemType}',${idx})" title="Click to cycle"` : ''}>${label}</span>`;
 }
 
 function payTypeBadgeHtml(payType, jobId, idx) {
@@ -1084,7 +1089,8 @@ function payTypeBadgeHtml(payType, jobId, idx) {
     'final':   { cls:'badge-collected', label:'✓ Final Pay'}
   };
   const { cls, label } = cfg[payType] || cfg[''];
-  return `<span class="status-badge ${cls}" onclick="cyclePayType('${jobId}',${idx})" title="Click to cycle type">${label}</span>`;
+  const admin = currentUser?.isAdmin;
+  return `<span class="status-badge ${cls}"${admin ? ` onclick="cyclePayType('${jobId}',${idx})" title="Click to cycle type"` : ''}>${label}</span>`;
 }
 function cyclePayType(jobId, idx) {
   const job = state.jobs.find(j=>j.id===jobId);
@@ -1095,7 +1101,9 @@ function cyclePayType(jobId, idx) {
 }
 
 function jobDetail(job, c) {
-  const en = esc(state.settings.empName || 'Employee');
+  const en    = esc(state.settings.empName || 'Employee');
+  const admin = currentUser?.isAdmin;
+  const empPct = Math.round((job.repaymentMode?(1-(state.settings.debtOwnerShare||0.5)):state.settings.empShare)*100);
 
   const milestonesHtml = (job.milestones||[]).map((m,i) => {
     const amt = (m.pct/100)*(job.quote||0);
@@ -1116,8 +1124,8 @@ function jobDetail(job, c) {
       <div style="display:flex;align-items:center;gap:8px">
         <div class="line-item-value red">-${fmt(a.amount)}</div>
         ${badgeHtml(st,job.id,'subtractions',i)}
-        <button class="btn btn-ghost btn-sm" onclick="openAddItem('${job.id}','subtraction','${a.id}')">✏</button>
-        <button class="btn btn-danger btn-sm" onclick="removeItem('${job.id}','subtractions',${i})">✕</button>
+        <button class="btn btn-ghost btn-sm admin-only" onclick="openAddItem('${job.id}','subtraction','${a.id}')">✏</button>
+        <button class="btn btn-danger btn-sm admin-only" onclick="removeItem('${job.id}','subtractions',${i})">✕</button>
       </div>
     </div>`;
   }).join('');
@@ -1129,8 +1137,8 @@ function jobDetail(job, c) {
       <div style="display:flex;align-items:center;gap:8px">
         <div class="line-item-value ${st==='collected'?'green':'dim'}">${fmt(a.amount)}</div>
         ${badgeHtml(st,job.id,'addOns',i)}
-        <button class="btn btn-ghost btn-sm" onclick="openAddItem('${job.id}','addon','${a.id}')">✏</button>
-        <button class="btn btn-danger btn-sm" onclick="removeItem('${job.id}','addOns',${i})">✕</button>
+        <button class="btn btn-ghost btn-sm admin-only" onclick="openAddItem('${job.id}','addon','${a.id}')">✏</button>
+        <button class="btn btn-danger btn-sm admin-only" onclick="removeItem('${job.id}','addOns',${i})">✕</button>
       </div>
     </div>`;
   }).join('');
@@ -1140,8 +1148,8 @@ function jobDetail(job, c) {
       <div class="line-item-label">${esc(m.label||'Materials')}<span class="tag ${m.who==='owner'?'tag-mine':'tag-his'}">${m.who==='owner'?'mine':en}</span></div>
       <div style="display:flex;align-items:center;gap:8px">
         <div class="line-item-value red">${fmt(m.amount)}</div>
-        <button class="btn btn-ghost btn-sm" onclick="openAddItem('${job.id}','material','${m.id}')">✏</button>
-        <button class="btn btn-danger btn-sm" onclick="removeItem('${job.id}','materials',${i})">✕</button>
+        <button class="btn btn-ghost btn-sm admin-only" onclick="openAddItem('${job.id}','material','${m.id}')">✏</button>
+        <button class="btn btn-danger btn-sm admin-only" onclick="removeItem('${job.id}','materials',${i})">✕</button>
       </div>
     </div>`).join('');
 
@@ -1151,8 +1159,8 @@ function jobDetail(job, c) {
       <div style="display:flex;align-items:center;gap:8px">
         <div class="line-item-value red">${fmt(a.amount)}</div>
         ${payTypeBadgeHtml(a.payType||'', job.id, i)}
-        <button class="btn btn-ghost btn-sm" onclick="openAddItem('${job.id}','advance','${a.id}')">✏</button>
-        <button class="btn btn-danger btn-sm" onclick="removeItem('${job.id}','advances',${i})">✕</button>
+        <button class="btn btn-ghost btn-sm admin-only" onclick="openAddItem('${job.id}','advance','${a.id}')">✏</button>
+        <button class="btn btn-danger btn-sm admin-only" onclick="removeItem('${job.id}','advances',${i})">✕</button>
       </div>
     </div>`).join('');
 
@@ -1166,40 +1174,42 @@ function jobDetail(job, c) {
         <div class="divider"></div>
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
           <div style="font-size:15px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.08em">Subtractions</div>
-          <button class="btn btn-ghost btn-sm" style="padding:2px 8px" onclick="openAddItem('${job.id}','subtraction')">+</button>
+          <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','subtraction')">+</button>
         </div>
         ${subtractionsHtml||'<div style="color:var(--text3);font-size:16px;padding:4px 0">None</div>'}
         ${c.subtractionTotal>0?`<div style="display:flex;justify-content:space-between;padding:5px 0 2px;font-family:var(--mono);font-size:15px"><span style="color:var(--text3)">Subtotal</span><span style="color:var(--red)">-${fmt(c.subtractionTotal)}</span></div>`:''}
         <div class="divider"></div>
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
           <div style="font-size:15px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.08em">Additions</div>
-          <button class="btn btn-ghost btn-sm" style="padding:2px 8px" onclick="openAddItem('${job.id}','addon')">+</button>
+          <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','addon')">+</button>
         </div>
         ${addOnsHtml||'<div style="color:var(--text3);font-size:16px;padding:4px 0">None</div>'}
         ${c.addOnTotal>0?`<div style="display:flex;justify-content:space-between;padding:5px 0 2px;font-family:var(--mono);font-size:15px"><span style="color:var(--text3)">Subtotal</span><span style="color:var(--purple)">+${fmt(c.addOnTotal)}</span></div>`:''}
         <div class="total-line"><span style="color:var(--text2)">Collected (gross)</span><span class="line-item-value green">${fmt(c.collectedGross)}</span></div>
-        <div class="line-item" style="padding-top:6px">
-          <div class="line-item-label" style="font-size:16px">Est. Square fees (~${(state.settings.feeRate*100).toFixed(1)}%)</div>
-          <div class="line-item-value red" style="font-size:16px">-${fmt(c.totalFees)}</div>
+        <div class="admin-only">
+          <div class="line-item" style="padding-top:6px">
+            <div class="line-item-label" style="font-size:16px">Est. Square fees (~${(state.settings.feeRate*100).toFixed(1)}%)</div>
+            <div class="line-item-value red" style="font-size:16px">-${fmt(c.totalFees)}</div>
+          </div>
+          <div class="total-line"><span style="color:var(--text2)">Net Revenue</span><span class="line-item-value orange">${fmt(c.netRevenue)}</span></div>
         </div>
-        <div class="total-line"><span style="color:var(--text2)">Net Revenue</span><span class="line-item-value orange">${fmt(c.netRevenue)}</span></div>
       </div>
 
       <div class="detail-section">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
           <div style="font-family:var(--mono);font-size:14px;text-transform:uppercase;letter-spacing:0.1em;color:var(--text3)">Materials</div>
-          <button class="btn btn-ghost btn-sm" style="padding:2px 8px" onclick="openAddItem('${job.id}','material')">+</button>
+          <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','material')">+</button>
         </div>
         ${matsHtml||'<div style="color:var(--text3);font-size:16px;padding:4px 0">None logged</div>'}
         <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
-          <div class="line-item"><div class="line-item-label" style="font-size:16px">My materials</div><div class="line-item-value dim" style="font-size:16px">-${fmt(c.ownerMats)}</div></div>
+          <div class="line-item admin-only"><div class="line-item-label" style="font-size:16px">My materials</div><div class="line-item-value dim" style="font-size:16px">-${fmt(c.ownerMats)}</div></div>
           <div class="line-item"><div class="line-item-label" style="font-size:16px">${en}'s materials</div><div class="line-item-value dim" style="font-size:16px">-${fmt(c.empMats)}</div></div>
         </div>
         <div class="total-line"><span style="color:var(--text2)">Total Materials</span><span class="line-item-value red">-${fmt(c.totalMats)}</span></div>
         <div class="divider"></div>
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
           <div style="font-family:var(--mono);font-size:14px;text-transform:uppercase;letter-spacing:0.1em;color:var(--text3)">Employee Pay</div>
-          <button class="btn btn-ghost btn-sm" style="padding:2px 8px" onclick="openAddItem('${job.id}','advance')">+</button>
+          <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','advance')">+</button>
         </div>
         ${advHtml||'<div style="color:var(--text3);font-size:16px;padding:4px 0">None logged</div>'}
         <div class="total-line"><span style="color:var(--text2)">Total Paid</span><span class="line-item-value red">-${fmt(c.advancesPaid)}</span></div>
@@ -1208,8 +1218,8 @@ function jobDetail(job, c) {
 
     <div class="settlement-box">
       <div class="settlement-title">Settlement Breakdown${job.repaymentMode?` <span style="color:var(--red);font-size:14px;margin-left:8px">⚖ REPAYMENT SPLIT ${Math.round((state.settings.debtOwnerShare||0.5)*100)}/${Math.round((1-(state.settings.debtOwnerShare||0.5))*100)}</span>`:''}</div>
-      <div class="settlement-grid">
-        <div>
+      <div class="settlement-grid" style="${admin?'':'grid-template-columns:1fr'}">
+        <div class="admin-only">
           <div class="settlement-col-title">Your ${Math.round((job.repaymentMode?(state.settings.debtOwnerShare||0.5):(1-state.settings.empShare))*100)}%</div>
           <div class="settlement-big orange">${fmt(c.ownerProfit)}</div>
           <div style="font-size:16px;color:var(--text3);font-family:var(--mono)">profit share</div>
@@ -1218,9 +1228,9 @@ function jobDetail(job, c) {
           <div style="font-size:17px;color:var(--green);font-family:var(--mono);font-weight:600;margin-top:6px;border-top:1px solid var(--border);padding-top:6px">= ${fmt(c.ownerTotal)} total</div>
         </div>
         <div>
-          <div class="settlement-col-title">${en} (${Math.round((job.repaymentMode?(1-(state.settings.debtOwnerShare||0.5)):state.settings.empShare)*100)}%)</div>
+          <div class="settlement-col-title">${admin ? `${en} (${empPct}%)` : `Your share (${empPct}%)`}</div>
           <div class="settlement-big ${c.empBalance>0?'orange':'green'}">${fmt(Math.abs(c.empBalance))}</div>
-          <div style="font-size:16px;color:var(--text3);font-family:var(--mono)">${c.empBalance>0?'still owed':'he owes you'}</div>
+          <div style="font-size:16px;color:var(--text3);font-family:var(--mono)">${c.empBalance>0?'still owed':(admin?'he owes you':'you owe')}</div>
           <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
             <div style="font-size:16px;color:var(--text2);font-family:var(--mono)">Profit share: ${fmt(c.empProfit)}</div>
             <div style="font-size:16px;color:var(--text2);font-family:var(--mono)">+ Mats back: ${fmt(c.empMats)}</div>
@@ -1232,7 +1242,7 @@ function jobDetail(job, c) {
       </div>
     </div>
 
-    <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+    <div class="admin-only" style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
       <button class="btn btn-ghost btn-sm" onclick="editJob('${job.id}')">✏ Edit Job</button>
       <button class="btn btn-${job.status==='complete'?'ghost':'green'} btn-sm" onclick="toggleComplete('${job.id}')">
         ${job.status==='complete'?'↩ Reopen':'✓ Mark Complete'}
@@ -1966,26 +1976,15 @@ function applyUserView() {
   if (lbl) { lbl.textContent = currentUser ? currentUser.name : ''; lbl.style.display = 'inline'; }
   if (sob) sob.style.display = 'inline-block';
 
-  // Admin-only header buttons
-  ['exportData', 'importFile', 'openSettings', 'openNewJobModal'].forEach(() => {});
-  document.querySelectorAll('.admin-only').forEach(el => {
-    el.style.display = isAdmin ? '' : 'none';
-  });
-  document.querySelectorAll('.employee-only').forEach(el => {
-    el.style.display = isAdmin ? 'none' : '';
-  });
+  // Apply admin-only / employee-only visibility
+  applyAdminClasses();
 
-  // Tabs: non-admin only sees schedule
-  document.querySelectorAll('.job-tab').forEach(el => {
-    el.style.display = isAdmin ? '' : 'none';
-  });
-
-  // Summary + debt panel
+  // All tabs visible for everyone; debt/summary panels are admin-only
   document.getElementById('summaryCards').style.display = isAdmin ? '' : 'none';
   document.getElementById('debtPanel').style.display = isAdmin ? '' : 'none';
 
   if (!isAdmin) {
-    switchTab('schedule', document.getElementById('schedTab'));
+    switchTab('active', document.querySelector('.job-tab'));
   }
 }
 
