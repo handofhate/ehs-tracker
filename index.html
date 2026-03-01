@@ -774,6 +774,11 @@ function migrateState(s) {
       if (a.status === undefined) { a.status = a.collected ? 'collected' : 'pending'; delete a.collected; }
       if (a.date === undefined) a.date = '';
     });
+    if (!job.subtractions) job.subtractions = [];
+    (job.subtractions || []).forEach(a => {
+      if (a.status === undefined) { a.status = 'pending'; }
+      if (a.date === undefined) a.date = '';
+    });
   });
   return s;
 }
@@ -850,8 +855,9 @@ function calcJob(job) {
   const effectiveEmpShare   = 1 - effectiveOwnerShare;
   const ownerShare = effectiveOwnerShare;
 
-  const addOnTotal = (job.addOns || []).reduce((s,a) => s + (a.amount||0), 0);
-  const contractTotal = (job.quote || 0) + addOnTotal;
+  const addOnTotal      = (job.addOns       || []).reduce((s,a) => s + (a.amount||0), 0);
+  const subtractionTotal= (job.subtractions || []).reduce((s,a) => s + (a.amount||0), 0);
+  const contractTotal   = (job.quote || 0) + addOnTotal - subtractionTotal;
 
   let collectedGross = 0, estimatedFees = 0;
   (job.milestones || []).forEach(m => {
@@ -865,13 +871,19 @@ function calcJob(job) {
       collectedGross += a.amount||0; estimatedFees += (a.amount||0) * feeRate;
     }
   });
+  (job.subtractions || []).forEach(a => {
+    if (a.status === 'collected') {
+      collectedGross -= a.amount||0; estimatedFees -= (a.amount||0) * feeRate;
+    }
+  });
   const manualFees = (job.fees || []).reduce((s,f) => s + (f.amount||0), 0);
   const totalFees = estimatedFees + manualFees;
   const netRevenue = collectedGross - totalFees;
 
   let pendingGross = 0;
   (job.milestones || []).forEach(m => { if (m.status !== 'collected') pendingGross += (m.pct/100)*(job.quote||0); });
-  (job.addOns || []).forEach(a => { if (a.status !== 'collected') pendingGross += a.amount||0; });
+  (job.addOns       || []).forEach(a => { if (a.status !== 'collected') pendingGross += a.amount||0; });
+  (job.subtractions || []).forEach(a => { if (a.status !== 'collected') pendingGross -= a.amount||0; });
 
   const ownerMats = (job.materials||[]).filter(m=>m.who==='owner').reduce((s,m)=>s+(m.amount||0),0);
   const empMats   = (job.materials||[]).filter(m=>m.who==='emp').reduce((s,m)=>s+(m.amount||0),0);
@@ -887,7 +899,7 @@ function calcJob(job) {
   const ownerTotal   = ownerProfit + ownerMats;
   const totalHours   = (job.hours||[]).reduce((s,h)=>s+(h.hours||0),0);
 
-  return { contractTotal, addOnTotal, collectedGross, pendingGross,
+  return { contractTotal, addOnTotal, subtractionTotal, collectedGross, pendingGross,
     totalFees, netRevenue, totalMats, ownerMats, empMats,
     profitPool, empProfit, ownerProfit, debtContribution,
     empTotalOwed, advancesPaid, empBalance, ownerTotal, totalHours };
@@ -1008,7 +1020,7 @@ function jobCard(job) {
         <span class="job-status ${sb}">${sl}</span>
         <div class="job-quick-stats">
           <div class="job-stat"><div class="job-stat-label">Quote</div><div class="job-stat-value">${fmt(job.quote)}</div></div>
-          <div class="job-stat"><div class="job-stat-label">Add-ons</div><div class="job-stat-value" style="color:var(--purple)">${fmt(c.addOnTotal)}</div></div>
+          <div class="job-stat"><div class="job-stat-label">Adjustments</div><div class="job-stat-value" style="color:${c.addOnTotal-c.subtractionTotal>=0?'var(--purple)':'var(--red)'}">${fmt(c.addOnTotal-c.subtractionTotal)}</div></div>
           <div class="job-stat"><div class="job-stat-label">Contract Total</div><div class="job-stat-value">${fmt(c.contractTotal)}</div></div>
           <div class="job-stat"><div class="job-stat-label">Collected</div><div class="job-stat-value" style="color:var(--green)">${fmt(c.collectedGross)}</div></div>
           <div class="job-stat"><div class="job-stat-label">Emp. Balance</div><div class="job-stat-value" style="color:var(--accent)">${fmt(c.empBalance)}</div></div>
@@ -1067,10 +1079,23 @@ function jobDetail(job, c) {
     </div>`;
   }).join('');
 
+  const subtractionsHtml = (job.subtractions||[]).map((a,i) => {
+    const st = a.status||'pending';
+    return `<div class="line-item">
+      <div class="line-item-label">${esc(a.label||'Subtraction')}${a.date?`<span style="font-size:14px;color:var(--text3);margin-left:6px">${fmtDate(a.date)}</span>`:''}</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="line-item-value red">-${fmt(a.amount)}</div>
+        ${badgeHtml(st,job.id,'subtractions',i)}
+        <button class="btn btn-ghost btn-sm" onclick="openAddItem('${job.id}','subtraction','${a.id}')">✏</button>
+        <button class="btn btn-danger btn-sm" onclick="removeItem('${job.id}','subtractions',${i})">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+
   const addOnsHtml = (job.addOns||[]).map((a,i) => {
     const st = a.status||'pending';
     return `<div class="line-item">
-      <div class="line-item-label">${esc(a.label||'Add-on')}${a.date?`<span style="font-size:14px;color:var(--text3);margin-left:6px">${fmtDate(a.date)}</span>`:''}</div>
+      <div class="line-item-label">${esc(a.label||'Addition')}${a.date?`<span style="font-size:14px;color:var(--text3);margin-left:6px">${fmtDate(a.date)}</span>`:''}</div>
       <div style="display:flex;align-items:center;gap:8px">
         <div class="line-item-value ${st==='collected'?'green':'dim'}">${fmt(a.amount)}</div>
         ${badgeHtml(st,job.id,'addOns',i)}
@@ -1109,9 +1134,19 @@ function jobDetail(job, c) {
         <div class="line-item"><div class="line-item-label">Base Quote</div><div class="line-item-value">${fmt(job.quote)}</div></div>
         ${milestonesHtml}
         <div class="divider"></div>
-        <div style="font-size:15px;color:var(--text3);margin-bottom:6px;font-family:var(--mono);text-transform:uppercase;letter-spacing:0.08em">Add-ons</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div style="font-size:15px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.08em">Subtractions</div>
+          <button class="btn btn-ghost btn-sm" style="padding:2px 8px" onclick="openAddItem('${job.id}','subtraction')">+</button>
+        </div>
+        ${subtractionsHtml||'<div style="color:var(--text3);font-size:16px;padding:4px 0">None</div>'}
+        ${c.subtractionTotal>0?`<div style="display:flex;justify-content:space-between;padding:5px 0 2px;font-family:var(--mono);font-size:15px"><span style="color:var(--text3)">Subtotal</span><span style="color:var(--red)">-${fmt(c.subtractionTotal)}</span></div>`:''}
+        <div class="divider"></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div style="font-size:15px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.08em">Additions</div>
+          <button class="btn btn-ghost btn-sm" style="padding:2px 8px" onclick="openAddItem('${job.id}','addon')">+</button>
+        </div>
         ${addOnsHtml||'<div style="color:var(--text3);font-size:16px;padding:4px 0">None</div>'}
-        <div class="add-item-row"><button class="btn btn-ghost btn-sm" onclick="openAddItem('${job.id}','addon')">+ Add-on</button></div>
+        ${c.addOnTotal>0?`<div style="display:flex;justify-content:space-between;padding:5px 0 2px;font-family:var(--mono);font-size:15px"><span style="color:var(--text3)">Subtotal</span><span style="color:var(--purple)">+${fmt(c.addOnTotal)}</span></div>`:''}
         <div class="total-line"><span style="color:var(--text2)">Collected (gross)</span><span class="line-item-value green">${fmt(c.collectedGross)}</span></div>
         <div class="line-item" style="padding-top:6px">
           <div class="line-item-label" style="font-size:16px">Est. Square fees (~${(state.settings.feeRate*100).toFixed(1)}%)</div>
@@ -1121,18 +1156,22 @@ function jobDetail(job, c) {
       </div>
 
       <div class="detail-section">
-        <div class="detail-section-title">Materials</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+          <div style="font-family:var(--mono);font-size:14px;text-transform:uppercase;letter-spacing:0.1em;color:var(--text3)">Materials</div>
+          <button class="btn btn-ghost btn-sm" style="padding:2px 8px" onclick="openAddItem('${job.id}','material')">+</button>
+        </div>
         ${matsHtml||'<div style="color:var(--text3);font-size:16px;padding:4px 0">None logged</div>'}
-        <div class="add-item-row"><button class="btn btn-ghost btn-sm" onclick="openAddItem('${job.id}','material')">+ Material</button></div>
         <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
           <div class="line-item"><div class="line-item-label" style="font-size:16px">My materials</div><div class="line-item-value dim" style="font-size:16px">-${fmt(c.ownerMats)}</div></div>
           <div class="line-item"><div class="line-item-label" style="font-size:16px">${en}'s materials</div><div class="line-item-value dim" style="font-size:16px">-${fmt(c.empMats)}</div></div>
         </div>
         <div class="total-line"><span style="color:var(--text2)">Total Materials</span><span class="line-item-value red">-${fmt(c.totalMats)}</span></div>
         <div class="divider"></div>
-        <div class="detail-section-title" style="margin-top:4px">Employee Pay</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+          <div style="font-family:var(--mono);font-size:14px;text-transform:uppercase;letter-spacing:0.1em;color:var(--text3)">Employee Pay</div>
+          <button class="btn btn-ghost btn-sm" style="padding:2px 8px" onclick="openAddItem('${job.id}','advance')">+</button>
+        </div>
         ${advHtml||'<div style="color:var(--text3);font-size:16px;padding:4px 0">None logged</div>'}
-        <div class="add-item-row"><button class="btn btn-ghost btn-sm" onclick="openAddItem('${job.id}','advance')">+ Employee Pay</button></div>
         <div class="total-line"><span style="color:var(--text2)">Total Paid</span><span class="line-item-value red">-${fmt(c.advancesPaid)}</span></div>
       </div>
     </div>
@@ -1486,7 +1525,7 @@ function saveJob() {
     }
   } else {
     state.jobs.push({ id:uid(), name, quote, date, status:'active',
-      milestones, addOns:[], materials:[], advances:[], fees:[], jobNotes:[], hours:[], repaymentMode:false, _expanded:true });
+      milestones, addOns:[], subtractions:[], materials:[], advances:[], fees:[], jobNotes:[], hours:[], repaymentMode:false, _expanded:true });
   }
   save(); renderJobs(); closeModal('jobModal');
 }
@@ -1496,13 +1535,19 @@ function openAddItem(jobId, type, itemId = null) {
   addItemContext = { jobId, type, itemId };
   const en = esc(state.settings.empName||'Employee');
   const isEdit = !!itemId;
-  const titles = { addon: isEdit?'Edit Add-on':'Add Add-on', material: isEdit?'Edit Material':'Add Material', advance: isEdit?'Edit Employee Pay':'Add Employee Pay' };
+  const titles = { addon: isEdit?'Edit Addition':'Add Addition', subtraction: isEdit?'Edit Subtraction':'Add Subtraction', material: isEdit?'Edit Material':'Add Material', advance: isEdit?'Edit Employee Pay':'Add Employee Pay' };
   document.getElementById('addItemTitle').textContent = titles[type];
   let html='';
   if (type==='addon') {
-    html=`<div class="form-group"><label class="form-label">Description</label><input class="form-input" id="ai_label" placeholder="e.g. Electrical add-on" /></div>
+    html=`<div class="form-group"><label class="form-label">Description</label><input class="form-input" id="ai_label" placeholder="e.g. Extra electrical work" /></div>
       <div class="form-row">
         <div class="form-group"><label class="form-label">Amount ($)</label><input class="form-input" id="ai_amount" type="number" step="0.01" placeholder="0.00" /></div>
+        <div class="form-group"><label class="form-label">Date</label><input class="form-input" id="ai_date" type="date" value="${today()}" /></div>
+      </div>`;
+  } else if (type==='subtraction') {
+    html=`<div class="form-group"><label class="form-label">Description</label><input class="form-input" id="ai_label" placeholder="e.g. Discount, returned materials..." /></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Amount to subtract ($)</label><input class="form-input" id="ai_amount" type="number" step="0.01" placeholder="0.00" /></div>
         <div class="form-group"><label class="form-label">Date</label><input class="form-input" id="ai_date" type="date" value="${today()}" /></div>
       </div>`;
   } else if (type==='material') {
@@ -1528,12 +1573,12 @@ function openAddItem(jobId, type, itemId = null) {
   document.getElementById('addItemForm').innerHTML = html;
   if (isEdit) {
     const job = state.jobs.find(j => j.id === jobId);
-    const arr = type==='addon' ? job?.addOns : type==='material' ? job?.materials : job?.advances;
+    const arr = type==='addon' ? job?.addOns : type==='subtraction' ? job?.subtractions : type==='material' ? job?.materials : job?.advances;
     const item = arr?.find(x => x.id === itemId);
     if (item) {
       document.getElementById('ai_label').value = item.label || '';
       document.getElementById('ai_amount').value = item.amount || '';
-      if (type==='addon'||type==='advance') document.getElementById('ai_date').value = item.date || '';
+      if (type==='addon'||type==='subtraction'||type==='advance') document.getElementById('ai_date').value = item.date || '';
       if (type==='material') document.getElementById('ai_who').value = item.who || 'owner';
       if (type==='advance') document.getElementById('ai_paytype').value = item.payType || '';
     }
@@ -1555,6 +1600,14 @@ function saveItem() {
       if (item) { item.label=label; item.amount=amount; item.date=date; }
     } else {
       job.addOns.push({ id:uid(), label, amount, date, status:'pending' });
+    }
+  } else if (type==='subtraction') {
+    const date = document.getElementById('ai_date')?.value||'';
+    if (itemId) {
+      const item = job.subtractions.find(x=>x.id===itemId);
+      if (item) { item.label=label; item.amount=amount; item.date=date; }
+    } else {
+      job.subtractions.push({ id:uid(), label, amount, date, status:'pending' });
     }
   } else if (type==='material') {
     const who = document.getElementById('ai_who').value;
