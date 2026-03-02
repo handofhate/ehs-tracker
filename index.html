@@ -1019,24 +1019,24 @@ function renderHomewatch() {
 }
 
 function hwCard(hw) {
-  const c   = calcHW(hw);
-  const isExp = expandedHW.has(hw.id);
-  const nc  = (hw.hwNotes||[]).length;
+  const c      = calcHW(hw);
+  const nc     = (hw.hwNotes||[]).length;
   const paused = hw.status === 'paused';
   return `
     <div class="job-card${paused?' job-complete':''}">
-      <div class="job-header" onclick="toggleHW('${hw.id}')">
+      <div class="job-header">
         <div class="job-header-main">
           <div class="job-name">${esc(hw.name)}${paused?' <span style="font-size:13px;color:var(--text3)">(paused)</span>':''}</div>
           <div class="job-meta">Since ${fmtDate(hw.startDate)||hw.startDate||'—'} · ${fmt(hw.monthlyRate)}/mo</div>
         </div>
-        <div class="job-header-btns" onclick="event.stopPropagation()">
+        <div class="job-header-btns">
           <button class="btn btn-ghost btn-sm" onclick="openNotes('hw','${hw.id}')" title="Notes">📝${nc>0?` ${nc}`:''}</button>
+          <button class="btn btn-ghost btn-sm admin-only" onclick="toggleHWPause('${hw.id}')" title="${paused?'Resume':'Pause'}">${paused?'▶ Resume':'⏸ Pause'}</button>
           <button class="btn btn-ghost btn-sm admin-only" onclick="openEditHW('${hw.id}')" title="Edit">✏</button>
           <button class="btn btn-danger btn-sm admin-only" onclick="deleteHW('${hw.id}')" title="Delete">🗑</button>
         </div>
       </div>
-      ${isExp ? hwDetail(hw, c) : ''}
+      ${hwDetail(hw, c)}
     </div>`;
 }
 
@@ -1062,9 +1062,6 @@ function hwDetail(hw, c) {
             <button class="btn btn-danger btn-sm admin-only" onclick="removeHWPayment('${hw.id}','${p.id}')">✕</button>
           </div>`).join('')
         : '<div style="color:var(--text3);font-size:15px;padding:4px 0">No payments logged yet.</div>'}
-      <div class="admin-only" style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
-        <button class="btn btn-ghost btn-sm" onclick="toggleHWPause('${hw.id}')">${hw.status==='paused'?'▶ Resume':'⏸ Pause'}</button>
-      </div>
     </div>`;
 }
 
