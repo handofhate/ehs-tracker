@@ -162,7 +162,7 @@
   .debt-progress-label { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 14px; color: var(--text3); margin-top: 5px; }
 
   /* REPAYMENT TOGGLE */
-  .repay-toggle { font-family: var(--mono); font-size: 15px; padding: 4px 10px; border-radius: 2px; border: 1px solid var(--border2); background: transparent; color: var(--text3); cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+  .repay-toggle { font-family: var(--mono); font-size: 15px; font-weight: 500; padding: 5px 10px; border-radius: 2px; border: 1px solid var(--border2); background: transparent; color: var(--text3); cursor: pointer; transition: all 0.15s; white-space: nowrap; }
   .repay-toggle.active { border-color: var(--red); color: var(--red); background: rgba(224,92,92,0.1); }
   .repay-toggle.paid { border-color: var(--text3); color: var(--text3); opacity: 0.4; cursor: default; }
 
@@ -221,10 +221,13 @@
     .job-quick-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; width: 100%; margin-top: 6px; }
     .job-stat { text-align: left; }
     .job-header-btns { width: 100%; justify-content: flex-end; border-top: 1px solid var(--border); padding-top: 8px; margin-top: 2px; }
-    .repay-toggle { font-size: 15px; padding: 5px 10px; font-weight: 500; }
+    .repay-toggle { font-size: 15px; }
 
-    /* Line items — stack value below label */
-    .line-item { flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 3px; padding: 6px 0; }
+    /* Line items — stack value/actions below label (except simple inline ones) */
+    .line-item:not(.line-item-simple) { flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 3px; padding: 6px 0; }
+    .line-item-simple { justify-content: space-between; }
+    .line-item-actions { width: 100%; }
+    .line-item-actions .line-item-value { margin-right: auto; }
 
     /* HW card meta — force to its own line and truncate */
     .job-meta { flex-basis: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -358,7 +361,7 @@
     <button class="btn btn-ghost btn-sm admin-only header-desktop-btn" onclick="openSettings()">⚙ Settings</button>
     <button class="btn btn-ghost btn-sm admin-only header-desktop-btn" onclick="openSplitPay()">÷ Split Pay</button>
     <div id="moreMenuWrap" class="header-mobile-more">
-      <button class="btn btn-ghost btn-sm" onclick="toggleMoreMenu()">⋯ More</button>
+      <button class="btn btn-ghost btn-sm" onclick="toggleMoreMenu(event)">⋯ More</button>
       <div id="moreDropdown" class="hidden" style="position:absolute;right:0;top:calc(100% + 6px);background:var(--bg2);border:1px solid var(--border2);border-radius:4px;min-width:150px;z-index:500;box-shadow:0 4px 20px rgba(0,0,0,0.4)">
         <button class="more-item" id="moreSignOutBtn" onclick="signOut()" style="display:none">⎋ Sign Out</button>
         <button class="more-item employee-only" onclick="openMySettings();closeMoreMenu()">⚙ Settings</button>
@@ -1143,7 +1146,7 @@ function hwCard(hw) {
       <div class="job-header">
         <div class="job-header-main" onclick="toggleHW('${hw.id}')">
           <div class="job-name">${esc(hw.name)}${paused?' <span style="font-size:13px;color:var(--text3)">(paused)</span>':''}</div>
-          <div class="job-meta"><span style="font-size:12px;color:var(--text3)">Since ${hw.startDate ? fmtDate(hw.startDate) : '—'} · ${fmt(hw.monthlyRate)}/mo</span>${hwEmpName ? ` · <span style="color:var(--purple);font-size:12px">${esc(hwEmpName)}</span>` : ''}</div>
+          <div class="job-meta"><span style="font-size:13px;color:var(--text3)">Since ${hw.startDate ? fmtDate(hw.startDate) : '—'} · ${fmt(hw.monthlyRate)}/mo</span>${hwEmpName ? `<span style="font-size:13px;color:var(--text3)"> · </span><span style="color:var(--purple);font-size:13px">${esc(hwEmpName)}</span>` : ''}</div>
         </div>
         <div class="job-header-btns">
           <button class="btn btn-ghost btn-sm" onclick="openNotes('hw','${hw.id}')" title="Notes">📝${nc>0?` ${nc}`:''}</button>
@@ -1587,7 +1590,7 @@ function jobDetail(job, c) {
     const st  = m.status||'pending';
     return `<div class="line-item">
       <div class="line-item-label">${esc(m.label||`Milestone ${i+1}`)} (${m.pct}%)</div>
-      <div style="display:flex;align-items:center;gap:8px">
+      <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
         <div class="line-item-value ${st==='collected'?'green':'dim'}">${fmt(amt)}</div>
         ${badgeHtml(st,job.id,'milestones',i)}
       </div>
@@ -1598,7 +1601,7 @@ function jobDetail(job, c) {
     const st = a.status||'pending';
     return `<div class="line-item">
       <div class="line-item-label">${esc(a.label||'Subtraction')}${a.date?`<span style="font-size:14px;color:var(--text3);margin-left:6px">${fmtDate(a.date)}</span>`:''}</div>
-      <div style="display:flex;align-items:center;gap:8px">
+      <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
         <div class="line-item-value red">-${fmt(a.amount)}</div>
         ${badgeHtml(st,job.id,'subtractions',i)}
         <button class="btn btn-ghost btn-sm admin-only" onclick="openAddItem('${job.id}','subtraction','${a.id}')">✏</button>
@@ -1611,7 +1614,7 @@ function jobDetail(job, c) {
     const st = a.status||'pending';
     return `<div class="line-item">
       <div class="line-item-label">${esc(a.label||'Addition')}${a.date?`<span style="font-size:14px;color:var(--text3);margin-left:6px">${fmtDate(a.date)}</span>`:''}</div>
-      <div style="display:flex;align-items:center;gap:8px">
+      <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
         <div class="line-item-value ${st==='collected'?'green':'dim'}">${fmt(a.amount)}</div>
         ${badgeHtml(st,job.id,'addOns',i)}
         <button class="btn btn-ghost btn-sm admin-only" onclick="openAddItem('${job.id}','addon','${a.id}')">✏</button>
@@ -1623,7 +1626,7 @@ function jobDetail(job, c) {
   const matsHtml = (job.materials||[]).map((m,i) => `
     <div class="line-item">
       <div class="line-item-label">${esc(m.label||'Materials')}<span class="tag ${m.who==='owner'?'tag-mine':'tag-his'}">${m.who==='owner'?'mine':en}</span></div>
-      <div style="display:flex;align-items:center;gap:8px">
+      <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
         <div class="line-item-value red">${fmt(m.amount)}</div>
         <button class="btn btn-ghost btn-sm admin-only" onclick="openAddItem('${job.id}','material','${m.id}')">✏</button>
         <button class="btn btn-danger btn-sm admin-only" onclick="removeItem('${job.id}','materials',${i})">✕</button>
@@ -1633,7 +1636,7 @@ function jobDetail(job, c) {
   const advHtml = (job.advances||[]).map((a,i) => `
     <div class="line-item">
       <div class="line-item-label">${esc(a.label||'Pay')} <span style="font-size:15px;color:var(--text3)">${fmtDate(a.date)||''}</span></div>
-      <div style="display:flex;align-items:center;gap:8px">
+      <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
         <div class="line-item-value red">${fmt(a.amount)}</div>
         ${payTypeBadgeHtml(a.payType||'', job.id, i)}
         <button class="btn btn-ghost btn-sm admin-only" onclick="openAddItem('${job.id}','advance','${a.id}')">✏</button>
@@ -1646,7 +1649,7 @@ function jobDetail(job, c) {
     <div class="detail-grid">
       <div class="detail-section">
         <div class="detail-section-title">Revenue & Collections</div>
-        <div class="line-item"><div class="line-item-label">Base Quote</div><div class="line-item-value">${fmt(job.quote)}</div></div>
+        <div class="line-item line-item-simple"><div class="line-item-label">Base Quote</div><div class="line-item-value">${fmt(job.quote)}</div></div>
         ${milestonesHtml}
         <div class="divider"></div>
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
@@ -2427,12 +2430,25 @@ function switchTab(name, el) {
 }
 function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
 function openChangelog() { document.getElementById('changelogModal').classList.remove('hidden'); }
-function toggleMoreMenu() { document.getElementById('moreDropdown').classList.toggle('hidden'); }
-function closeMoreMenu() { document.getElementById('moreDropdown').classList.add('hidden'); }
-document.addEventListener('click', e => {
-  const wrap = document.getElementById('moreMenuWrap');
-  if (wrap && !wrap.contains(e.target)) closeMoreMenu();
-});
+function toggleMoreMenu(e) {
+  e.stopPropagation();
+  const dropdown = document.getElementById('moreDropdown');
+  if (dropdown.classList.contains('hidden')) {
+    dropdown.classList.remove('hidden');
+    const backdrop = document.createElement('div');
+    backdrop.id = 'moreBackdrop';
+    backdrop.style.cssText = 'position:fixed;inset:0;z-index:499';
+    backdrop.addEventListener('click', () => closeMoreMenu());
+    document.body.appendChild(backdrop);
+  } else {
+    closeMoreMenu();
+  }
+}
+function closeMoreMenu() {
+  document.getElementById('moreDropdown').classList.add('hidden');
+  const bd = document.getElementById('moreBackdrop');
+  if (bd) bd.remove();
+}
 document.querySelectorAll('.modal-overlay').forEach(el=>{
   el.addEventListener('click', e=>{ if(e.target===el) el.classList.add('hidden'); });
 });
