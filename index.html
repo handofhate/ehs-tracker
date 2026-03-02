@@ -343,7 +343,7 @@
   <div id="summaryCards" class="summary-grid"></div>
   <div id="empSummaryCards" class="summary-grid" style="display:none"></div>
   <div class="tabs">
-    <div class="tab job-tab active" onclick="switchTab('active', this)">Active Jobs</div>
+    <div class="tab job-tab active" onclick="switchTab('active', this)">Active</div>
     <div class="tab job-tab" onclick="switchTab('complete', this)">Completed</div>
     <div class="tab job-tab" onclick="switchTab('all', this)">All Jobs</div>
     <div class="tab" onclick="switchTab('homewatch', this)">HomeWatch</div>
@@ -1130,10 +1130,8 @@ function saveHW() {
     const hw = state.homewatch.find(h=>h.id===editingHWId);
     if (hw) { hw.name=name; hw.startDate=startDate; hw.monthlyRate=monthlyRate; }
   } else {
-    const hw = { id:uid(), name, startDate, monthlyRate, status:'active', payments:[], hwNotes:[] };
+    const hw = { id:uid(), name, startDate, monthlyRate, status:'active', payments:[], hwNotes:[], advances:[] };
     state.homewatch.push(hw);
-    expandedHW.add(hw.id);
-    saveExpandedState();
   }
   save(); closeModal('hwModal'); renderHomewatch(); renderSummary();
 }
@@ -1289,7 +1287,7 @@ function renderSummary() {
     tOwner    += c.ownerTotal;
   });
   const activeHW  = (state.homewatch||[]).filter(hw=>hw.status!=='paused');
-  const tHWEmpBal = activeHW.reduce((s,hw)=>s+calcHW(hw).empBalance, 0);
+  const tHWEmpBal = (state.homewatch||[]).reduce((s,hw)=>s+calcHW(hw).empBalance, 0);
   const tEmpBal   = tJobEmpBal + tHWEmpBal;
   const en = esc(state.settings.empName || 'Employee');
   document.getElementById('summaryCards').innerHTML = `
@@ -1307,13 +1305,14 @@ function renderEmpSummary() {
   const { empShare, feeRate } = state.settings;
   const active   = state.jobs.filter(j => j.status !== 'complete');
   const activeHW = (state.homewatch||[]).filter(hw => hw.status !== 'paused');
+  const allHW    = state.homewatch || [];
 
-  // Currently owed (collected but not yet paid out)
+  // Currently owed (collected but not yet paid out — includes paused clients with collected invoices)
   let tOwed = 0;
   active.forEach(j => { tOwed += calcJob(j).empBalance; });
-  activeHW.forEach(hw => { tOwed += calcHW(hw).empBalance; });
+  allHW.forEach(hw => { tOwed += calcHW(hw).empBalance; });
 
-  // Potential pay (owed now + employee share of all still-pending work)
+  // Potential pay (owed now + employee share of all still-pending work on active items)
   let tPotential = tOwed;
   active.forEach(j => {
     const c = calcJob(j);
@@ -1341,8 +1340,8 @@ function renderEmpSummary() {
   });
 
   const tfOpts = [
-    ['30','Last 30 days'],['60','Last 60 days'],['90','Last 90 days'],
-    ['365','This year'],['all','All time']
+    ['7','Last 7 days'],['14','Last 14 days'],['30','Last 30 days'],
+    ['60','Last 60 days'],['90','Last 90 days'],['365','This year'],['all','All time']
   ].map(([v,l]) => `<option value="${v}"${empSummaryTimeframe===v?' selected':''}>${l}</option>`).join('');
 
   el.innerHTML = `
