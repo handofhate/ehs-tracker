@@ -1023,7 +1023,7 @@ function hwCard(hw) {
   const nc     = (hw.hwNotes||[]).length;
   const paused = hw.status === 'paused';
   return `
-    <div class="job-card${paused?' job-complete':''}">
+    <div class="job-card expanded${paused?' job-complete':''}">
       <div class="job-header">
         <div class="job-header-main">
           <div class="job-name">${esc(hw.name)}${paused?' <span style="font-size:13px;color:var(--text3)">(paused)</span>':''}</div>
