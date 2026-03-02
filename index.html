@@ -1020,12 +1020,13 @@ function renderHomewatch() {
 
 function hwCard(hw) {
   const c      = calcHW(hw);
+  const isExp  = expandedHW.has(hw.id);
   const nc     = (hw.hwNotes||[]).length;
   const paused = hw.status === 'paused';
   return `
-    <div class="job-card expanded${paused?' job-complete':''}">
+    <div class="job-card${isExp?' expanded':''}${paused?' job-complete':''}">
       <div class="job-header">
-        <div class="job-header-main">
+        <div class="job-header-main" onclick="toggleHW('${hw.id}')">
           <div class="job-name">${esc(hw.name)}${paused?' <span style="font-size:13px;color:var(--text3)">(paused)</span>':''}</div>
           <div class="job-meta">Since ${fmtDate(hw.startDate)||hw.startDate||'—'} · ${fmt(hw.monthlyRate)}/mo</div>
         </div>
@@ -1034,9 +1035,10 @@ function hwCard(hw) {
           <button class="btn btn-ghost btn-sm admin-only" onclick="toggleHWPause('${hw.id}')" title="${paused?'Resume':'Pause'}">${paused?'▶ Resume':'⏸ Pause'}</button>
           <button class="btn btn-ghost btn-sm admin-only" onclick="openEditHW('${hw.id}')" title="Edit">✏</button>
           <button class="btn btn-danger btn-sm admin-only" onclick="deleteHW('${hw.id}')" title="Delete">🗑</button>
+          <div class="job-chevron" onclick="toggleHW('${hw.id}')">▾</div>
         </div>
       </div>
-      ${hwDetail(hw, c)}
+      ${isExp ? hwDetail(hw, c) : ''}
     </div>`;
 }
 
