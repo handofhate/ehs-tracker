@@ -1074,12 +1074,13 @@ function hwCard(hw) {
   const isExp  = expandedHW.has(hw.id);
   const nc     = (hw.hwNotes||[]).length;
   const paused = hw.status === 'paused';
+  const hwEmpName = currentUser?.isAdmin ? (getEmp(hw.employeeId)?.name || '') : '';
   return `
     <div class="job-card${isExp?' expanded':''}${paused?' job-complete':''}">
       <div class="job-header">
         <div class="job-header-main" onclick="toggleHW('${hw.id}')">
           <div class="job-name">${esc(hw.name)}${paused?' <span style="font-size:13px;color:var(--text3)">(paused)</span>':''}</div>
-          <div class="job-meta">Since ${hw.startDate ? fmtDate(hw.startDate) : '—'} · ${fmt(hw.monthlyRate)}/mo</div>
+          <div class="job-meta">Since ${hw.startDate ? fmtDate(hw.startDate) : '—'} · ${fmt(hw.monthlyRate)}/mo${hwEmpName ? ` · <span style="color:var(--purple)">${esc(hwEmpName)}</span>` : ''}</div>
         </div>
         <div class="job-header-btns">
           <button class="btn btn-ghost btn-sm" onclick="openNotes('hw','${hw.id}')" title="Notes">📝${nc>0?` ${nc}`:''}</button>
@@ -1449,13 +1450,14 @@ function jobCard(job) {
   const sb    = job.status === 'complete' ? 'status-complete' : 'status-active';
   const nc    = (job.jobNotes||[]).length;
   const th    = c.totalHours;
+  const jobEmpName = currentUser?.isAdmin ? (getEmp(job.employeeId)?.name || '') : '';
   return `
   <div class="job-card ${sc} ${isExp?'expanded':''}" id="job_${job.id}">
     <div class="job-header">
       <div class="job-header-main" onclick="toggleJob('${job.id}')">
         <div>
           <div class="job-name">${esc(job.name)}</div>
-          <div style="font-size:15px;color:var(--text3);margin-top:2px;font-family:var(--mono)">${job.date||''}</div>
+          <div style="font-size:15px;color:var(--text3);margin-top:2px;font-family:var(--mono)">${job.date||''}${jobEmpName ? ` · <span style="color:var(--purple)">${esc(jobEmpName)}</span>` : ''}</div>
         </div>
         <span class="job-status ${sb}">${sl}</span>
         <div class="job-quick-stats">
