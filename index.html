@@ -346,6 +346,7 @@
     <div class="tab job-tab" onclick="switchTab('complete', this)">Completed</div>
     <div class="tab job-tab" onclick="switchTab('all', this)">All Jobs</div>
     <div class="tab" id="schedTab" onclick="switchTab('schedule', this)">Schedule</div>
+    <div class="tab" onclick="switchTab('homewatch', this)">HomeWatch</div>
   </div>
   <div id="tab-active" class="tab-content active">
     <div class="section-header"><span class="section-title" id="activeCount"></span></div>
@@ -354,6 +355,13 @@
   <div id="tab-complete" class="tab-content"><div id="completeJobsList"></div></div>
   <div id="tab-all" class="tab-content"><div id="allJobsList"></div></div>
   <div id="tab-schedule" class="tab-content"><div id="scheduleContent"></div></div>
+  <div id="tab-homewatch" class="tab-content">
+    <div class="section-header">
+      <span class="section-title" id="hwCount"></span>
+      <button class="btn btn-primary btn-sm admin-only" onclick="openNewHWModal()">+ New Client</button>
+    </div>
+    <div id="hwList"></div>
+  </div>
 </div>
 
 <!-- NEW/EDIT JOB MODAL -->
@@ -737,6 +745,38 @@
   </div>
 </div>
 
+<!-- HOMEWATCH CLIENT MODAL -->
+<div id="hwModal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-title" id="hwModalTitle">New HomeWatch Client</div>
+    <div class="form-group"><label class="form-label">Client Name</label>
+      <input class="form-input" id="hw_name" placeholder="e.g. Smith Residence"></div>
+    <div class="form-group"><label class="form-label">Start Date</label>
+      <input class="form-input" type="date" id="hw_startDate"></div>
+    <div class="form-group"><label class="form-label">Monthly Rate ($)</label>
+      <input class="form-input" type="number" id="hw_rate" placeholder="0.00" step="0.01"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('hwModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveHW()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- HOMEWATCH PAYMENT MODAL -->
+<div id="hwPayModal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-title" id="hwPayModalTitle">Log Payment</div>
+    <div class="form-group"><label class="form-label">Amount ($)</label>
+      <input class="form-input" type="number" id="hwp_amount" placeholder="0.00" step="0.01"></div>
+    <div class="form-group"><label class="form-label">Date</label>
+      <input class="form-input" type="date" id="hwp_date"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('hwPayModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveHWPayment()">Save</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ─── FIREBASE ─────────────────────────────────────────────────────────────────
 const firebaseConfig = {
@@ -757,12 +797,14 @@ let state = {
   debtPayments: [],
   jobs: [],
   users: [],
-  appointments: []
+  appointments: [],
+  homewatch: []
 };
 let editingJobId = null;
 let addItemContext = null;
 let expandedJobs = new Set(); // local only — never saved to Firestore
-let notesJobId = null;
+let expandedHW   = new Set(); // local only — never saved to Firestore
+let notesCtx = null; // { type: 'job'|'hw', id }
 let hoursJobId = null;
 let editNoteCtx = null;
 let isSaving = false;
@@ -792,6 +834,13 @@ function migrateState(s) {
   if (s.users.length === 0) {
     s.users.push({ id: 'admin_default', name: 'Ty', pin: '1234', isAdmin: true });
   }
+  if (!s.homewatch) s.homewatch = [];
+  (s.homewatch || []).forEach(hw => {
+    if (!hw.payments) hw.payments = [];
+    if (!hw.hwNotes) hw.hwNotes = [];
+    if (!hw.status) hw.status = 'active';
+    hw.payments.forEach(p => { if (!p.status) p.status = 'pending'; });
+  });
   (s.jobs || []).forEach(job => {
     delete job._expanded; // moved to local localStorage — not stored in Firestore
     if (job.repaymentMode === undefined) job.repaymentMode = false;
@@ -945,6 +994,178 @@ function calcJob(job) {
     empTotalOwed, advancesPaid, linkedDebtPaid, empBalance, ownerTotal, totalHours };
 }
 
+function calcHW(hw) {
+  const { empShare, feeRate } = state.settings;
+  const collectedGross = (hw.payments||[]).filter(p=>p.status==='collected').reduce((s,p)=>s+(p.amount||0),0);
+  const pendingGross   = (hw.payments||[]).filter(p=>p.status!=='collected').reduce((s,p)=>s+(p.amount||0),0);
+  const totalFees      = collectedGross * feeRate;
+  const netRevenue     = collectedGross - totalFees;
+  const empOwed        = netRevenue * empShare;
+  const ownerOwed      = netRevenue * (1 - empShare);
+  return { collectedGross, pendingGross, totalFees, netRevenue, empOwed, ownerOwed };
+}
+
+// ─── HOMEWATCH ────────────────────────────────────────────────────────────────
+let editingHWId  = null;
+let hwPayContext = null;
+
+function renderHomewatch() {
+  const list = state.homewatch || [];
+  document.getElementById('hwCount').textContent = `${list.length} HomeWatch client${list.length!==1?'s':''}`;
+  document.getElementById('hwList').innerHTML = list.length
+    ? list.map(hwCard).join('')
+    : emptyState('No HomeWatch clients yet. Click + New Client to add one.');
+  applyAdminClasses();
+}
+
+function hwCard(hw) {
+  const c   = calcHW(hw);
+  const isExp = expandedHW.has(hw.id);
+  const nc  = (hw.hwNotes||[]).length;
+  const paused = hw.status === 'paused';
+  return `
+    <div class="job-card${paused?' job-complete':''}">
+      <div class="job-header" onclick="toggleHW('${hw.id}')">
+        <div class="job-header-main">
+          <div class="job-name">${esc(hw.name)}${paused?' <span style="font-size:13px;color:var(--text3)">(paused)</span>':''}</div>
+          <div class="job-meta">Since ${fmtDate(hw.startDate)||hw.startDate||'—'} · ${fmt(hw.monthlyRate)}/mo</div>
+        </div>
+        <div class="job-header-btns" onclick="event.stopPropagation()">
+          <button class="btn btn-ghost btn-sm" onclick="openNotes('hw','${hw.id}')" title="Notes">📝${nc>0?` ${nc}`:''}</button>
+          <button class="btn btn-ghost btn-sm admin-only" onclick="openEditHW('${hw.id}')" title="Edit">✏</button>
+          <button class="btn btn-danger btn-sm admin-only" onclick="deleteHW('${hw.id}')" title="Delete">🗑</button>
+        </div>
+      </div>
+      ${isExp ? hwDetail(hw, c) : ''}
+    </div>`;
+}
+
+function hwDetail(hw, c) {
+  const payments = hw.payments || [];
+  const feeLabel = `Est. Square fees (~${(state.settings.feeRate*100).toFixed(1)}%)`;
+  const empPct   = Math.round(state.settings.empShare * 100);
+  return `
+    <div class="job-detail">
+      <div class="line-item"><span>Collected (gross)</span><span class="green">${fmt(c.collectedGross)}</span></div>
+      <div class="line-item admin-only"><span>${feeLabel}</span><span class="red">-${fmt(c.totalFees)}</span></div>
+      <div class="line-item admin-only"><span>Net Revenue</span><span class="orange">${fmt(c.netRevenue)}</span></div>
+      <div class="line-item"><b>Employee share (${empPct}%)</b><b class="${c.empOwed>0?'green':''}"> ${fmt(c.empOwed)}</b></div>
+      <div class="section-header" style="margin-top:12px">
+        <span class="section-title">Payments</span>
+        <button class="btn btn-ghost btn-sm admin-only" onclick="openAddHWPayment('${hw.id}')">+ Log Payment</button>
+      </div>
+      ${payments.length
+        ? payments.slice().reverse().map((p,i)=>`
+          <div class="line-item" style="gap:8px">
+            ${hwPayBadgeHtml(p.status, hw.id, p.id)}
+            <span style="flex:1">${fmtDate(p.date)||p.date||'—'} · ${fmt(p.amount)}</span>
+            <button class="btn btn-danger btn-sm admin-only" onclick="removeHWPayment('${hw.id}','${p.id}')">✕</button>
+          </div>`).join('')
+        : '<div style="color:var(--text3);font-size:15px;padding:4px 0">No payments logged yet.</div>'}
+      <div class="admin-only" style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" onclick="toggleHWPause('${hw.id}')">${hw.status==='paused'?'▶ Resume':'⏸ Pause'}</button>
+      </div>
+    </div>`;
+}
+
+function hwPayBadgeHtml(status, hwId, payId) {
+  const cfg = {
+    pending:   { cls:'badge-pending',   label:'Pending'   },
+    invoiced:  { cls:'badge-invoiced',  label:'Invoiced'  },
+    collected: { cls:'badge-collected', label:'Collected' }
+  };
+  const { cls, label } = cfg[status] || cfg.pending;
+  const admin = currentUser?.isAdmin;
+  return `<span class="status-badge ${cls}"${admin?` onclick="cycleHWPayStatus('${hwId}','${payId}')" title="Click to cycle"`:''} style="cursor:${admin?'pointer':'default'}">${label}</span>`;
+}
+
+function openNewHWModal() {
+  editingHWId = null;
+  document.getElementById('hwModalTitle').textContent = 'New HomeWatch Client';
+  document.getElementById('hw_name').value = '';
+  document.getElementById('hw_startDate').value = today();
+  document.getElementById('hw_rate').value = '';
+  document.getElementById('hwModal').classList.remove('hidden');
+}
+function openEditHW(hwId) {
+  const hw = (state.homewatch||[]).find(h=>h.id===hwId);
+  if (!hw) return;
+  editingHWId = hwId;
+  document.getElementById('hwModalTitle').textContent = 'Edit HomeWatch Client';
+  document.getElementById('hw_name').value      = hw.name||'';
+  document.getElementById('hw_startDate').value = hw.startDate||'';
+  document.getElementById('hw_rate').value      = hw.monthlyRate||'';
+  document.getElementById('hwModal').classList.remove('hidden');
+}
+function saveHW() {
+  const name        = document.getElementById('hw_name').value.trim();
+  const startDate   = document.getElementById('hw_startDate').value;
+  const monthlyRate = parseFloat(document.getElementById('hw_rate').value)||0;
+  if (!name) { alert('Please enter a client name.'); return; }
+  if (!state.homewatch) state.homewatch = [];
+  if (editingHWId) {
+    const hw = state.homewatch.find(h=>h.id===editingHWId);
+    if (hw) { hw.name=name; hw.startDate=startDate; hw.monthlyRate=monthlyRate; }
+  } else {
+    const hw = { id:uid(), name, startDate, monthlyRate, status:'active', payments:[], hwNotes:[] };
+    state.homewatch.push(hw);
+    expandedHW.add(hw.id);
+    saveExpandedState();
+  }
+  save(); closeModal('hwModal'); renderHomewatch(); renderSummary();
+}
+function deleteHW(hwId) {
+  if (!confirm('Delete this HomeWatch client? This cannot be undone.')) return;
+  state.homewatch = (state.homewatch||[]).filter(h=>h.id!==hwId);
+  expandedHW.delete(hwId);
+  saveExpandedState();
+  save(); renderHomewatch(); renderSummary();
+}
+function toggleHW(hwId) {
+  if (expandedHW.has(hwId)) expandedHW.delete(hwId); else expandedHW.add(hwId);
+  saveExpandedState();
+  renderHomewatch();
+}
+function toggleHWPause(hwId) {
+  const hw = (state.homewatch||[]).find(h=>h.id===hwId);
+  if (!hw) return;
+  hw.status = hw.status === 'paused' ? 'active' : 'paused';
+  save(); renderHomewatch(); renderSummary();
+}
+function openAddHWPayment(hwId) {
+  hwPayContext = hwId;
+  const hw = (state.homewatch||[]).find(h=>h.id===hwId);
+  document.getElementById('hwPayModalTitle').textContent = `Log Payment — ${hw?.name||''}`;
+  document.getElementById('hwp_amount').value = hw?.monthlyRate||'';
+  document.getElementById('hwp_date').value   = today();
+  document.getElementById('hwPayModal').classList.remove('hidden');
+}
+function saveHWPayment() {
+  const amount = parseFloat(document.getElementById('hwp_amount').value)||0;
+  const date   = document.getElementById('hwp_date').value;
+  if (!amount) { alert('Please enter an amount.'); return; }
+  const hw = (state.homewatch||[]).find(h=>h.id===hwPayContext);
+  if (!hw) return;
+  hw.payments.push({ id:uid(), amount, date, status:'pending' });
+  save(); closeModal('hwPayModal'); renderHomewatch(); renderSummary();
+}
+function removeHWPayment(hwId, payId) {
+  if (!confirm('Remove this payment?')) return;
+  const hw = (state.homewatch||[]).find(h=>h.id===hwId);
+  if (!hw) return;
+  hw.payments = hw.payments.filter(p=>p.id!==payId);
+  save(); renderHomewatch(); renderSummary();
+}
+function cycleHWPayStatus(hwId, payId) {
+  const hw = (state.homewatch||[]).find(h=>h.id===hwId);
+  if (!hw) return;
+  const p = hw.payments.find(p=>p.id===payId);
+  if (!p) return;
+  const cycle = { pending:'invoiced', invoiced:'collected', collected:'pending' };
+  p.status = cycle[p.status]||'pending';
+  save(); renderHomewatch(); renderSummary();
+}
+
 // ─── DEBT PANEL ───────────────────────────────────────────────────────────────
 function renderDebtPanel() {
   const s = state.settings;
@@ -1016,20 +1237,24 @@ function renderDebtPanel() {
 function renderSummary() {
   renderDebtPanel();
   const active = state.jobs.filter(j => j.status !== 'complete');
-  let tContract=0, tCollected=0, tPending=0, tEmpBal=0, tOwner=0;
+  let tContract=0, tCollected=0, tPending=0, tJobEmpBal=0, tOwner=0;
   active.forEach(j => {
     const c = calcJob(j);
     tContract += c.contractTotal; tCollected += c.collectedGross;
-    tPending  += c.pendingGross;  tEmpBal    += c.empBalance;
+    tPending  += c.pendingGross;  tJobEmpBal += c.empBalance;
     tOwner    += c.ownerTotal;
   });
+  const activeHW  = (state.homewatch||[]).filter(hw=>hw.status!=='paused');
+  const tHWEmpBal = activeHW.reduce((s,hw)=>s+calcHW(hw).empOwed, 0);
+  const tEmpBal   = tJobEmpBal + tHWEmpBal;
   const en = esc(state.settings.empName || 'Employee');
   document.getElementById('summaryCards').innerHTML = `
     <div class="summary-card"><div class="summary-label">Active Jobs</div><div class="summary-value">${active.length}</div></div>
+    <div class="summary-card"><div class="summary-label">Active HomeWatch</div><div class="summary-value">${activeHW.length}</div></div>
     <div class="summary-card"><div class="summary-label">Total Contract Value</div><div class="summary-value orange">${fmt(tContract)}</div></div>
     <div class="summary-card"><div class="summary-label">Collected</div><div class="summary-value green">${fmt(tCollected)}</div><div class="summary-sub">${fmt(tPending)} pending</div></div>
     <div class="summary-card"><div class="summary-label">Your Profit (active)</div><div class="summary-value green">${fmt(tOwner)}</div><div class="summary-sub">from collected revenue</div></div>
-    <div class="summary-card"><div class="summary-label">Owed to ${en}</div><div class="summary-value ${tEmpBal < 0 ? 'red' : 'orange'}">${fmt(Math.max(0, tEmpBal))}</div><div class="summary-sub">across active jobs</div></div>`;
+    <div class="summary-card"><div class="summary-label">Owed to ${en}</div><div class="summary-value ${tEmpBal < 0 ? 'red' : 'orange'}">${fmt(Math.max(0, tEmpBal))}</div><div class="summary-sub">jobs ${fmt(tJobEmpBal)} + HW ${fmt(tHWEmpBal)}</div></div>`;
 }
 
 // ─── RENDER JOBS ─────────────────────────────────────────────────────────────
@@ -1077,7 +1302,7 @@ function jobCard(job) {
       </div>
       <div class="job-header-btns">
         ${job.isItemized ? `<button class="btn btn-ghost btn-sm" onclick="openQuoteSnapshot('${job.id}')" title="View Quote Snapshot" style="color:var(--accent);border-color:var(--accent)">📋</button>` : ''}
-        <button class="btn btn-ghost btn-sm" onclick="openNotes('${job.id}')" title="Notes">📝${nc>0?` ${nc}`:''}</button>
+        <button class="btn btn-ghost btn-sm" onclick="openNotes('job','${job.id}')" title="Notes">📝${nc>0?` ${nc}`:''}</button>
         <button class="btn btn-ghost btn-sm" onclick="openHours('${job.id}')" title="Hours">⏱${th>0?` ${th}h`:''}</button>
         <button class="repay-toggle${job.repaymentMode?' active':''} admin-only" onclick="toggleRepayment('${job.id}')" title="Toggle debt repayment split for this job">${job.repaymentMode?'⚖ Repaying':'⚖ Normal'}</button>
         <div class="job-chevron" onclick="toggleJob('${job.id}')">▾</div>
@@ -1407,28 +1632,38 @@ function removeItem(jobId, key, idx) {
 }
 
 // ─── NOTES ────────────────────────────────────────────────────────────────────
-function openNotes(jobId) {
-  notesJobId = jobId;
-  const job = state.jobs.find(j=>j.id===jobId);
-  if (!job) return;
-  document.getElementById('notesModalTitle').textContent = `Notes — ${job.name}`;
+function _notesEntity() {
+  if (!notesCtx) return null;
+  return notesCtx.type === 'hw'
+    ? (state.homewatch||[]).find(h=>h.id===notesCtx.id)
+    : state.jobs.find(j=>j.id===notesCtx.id);
+}
+function _notesKey() { return notesCtx?.type === 'hw' ? 'hwNotes' : 'jobNotes'; }
+function _notesRender() { if (notesCtx?.type === 'hw') renderHomewatch(); else renderJobs(); }
+
+function openNotes(type, id) {
+  notesCtx = { type, id };
+  const entity = _notesEntity();
+  if (!entity) return;
+  document.getElementById('notesModalTitle').textContent = `Notes — ${entity.name}`;
   document.getElementById('n_date').value = today();
   document.getElementById('n_text').value = '';
   renderNotesList();
   document.getElementById('notesModal').classList.remove('hidden');
 }
 function renderNotesList() {
-  const job = state.jobs.find(j=>j.id===notesJobId);
-  if (!job) return;
-  const notes = (job.jobNotes||[]).slice().reverse();
+  const entity = _notesEntity();
+  if (!entity) return;
+  const key = _notesKey();
+  const notes = (entity[key]||[]).slice().reverse();
   document.getElementById('notesList').innerHTML = notes.length
     ? notes.map(n=>`
       <div class="note-item">
         <div class="note-meta">
           <span class="note-date-label">${fmtDate(n.date)||n.date||'—'}</span>
           <div class="note-actions">
-            <button class="btn btn-ghost btn-sm" onclick="openEditNote('${job.id}','${n.id}')">✏</button>
-            <button class="btn btn-danger btn-sm" onclick="deleteNote('${job.id}','${n.id}')">✕</button>
+            <button class="btn btn-ghost btn-sm" onclick="openEditNote('${n.id}')">✏</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteNote('${n.id}')">✕</button>
           </div>
         </div>
         <div class="note-text">${esc(n.text)}</div>
@@ -1439,40 +1674,44 @@ function saveNote() {
   const text = document.getElementById('n_text').value.trim();
   const date = document.getElementById('n_date').value;
   if (!text) { alert('Please enter a note.'); return; }
-  const job = state.jobs.find(j=>j.id===notesJobId);
-  if (!job) return;
-  if (!job.jobNotes) job.jobNotes=[];
-  job.jobNotes.push({ id:uid(), text, date });
+  const entity = _notesEntity();
+  if (!entity) return;
+  const key = _notesKey();
+  if (!entity[key]) entity[key]=[];
+  entity[key].push({ id:uid(), text, date });
   save(); document.getElementById('n_text').value=''; document.getElementById('n_date').value=today();
-  renderNotesList(); renderJobs();
+  renderNotesList(); _notesRender();
 }
-function deleteNote(jobId, noteId) {
+function deleteNote(noteId) {
   if (!confirm('Delete this note?')) return;
-  const job = state.jobs.find(j=>j.id===jobId);
-  if (!job) return;
-  job.jobNotes = (job.jobNotes||[]).filter(n=>n.id!==noteId);
-  save(); renderNotesList(); renderJobs();
+  const entity = _notesEntity();
+  if (!entity) return;
+  const key = _notesKey();
+  entity[key] = (entity[key]||[]).filter(n=>n.id!==noteId);
+  save(); renderNotesList(); _notesRender();
 }
-function openEditNote(jobId, noteId) {
-  const job  = state.jobs.find(j=>j.id===jobId);
-  if (!job) return;
-  const note = (job.jobNotes||[]).find(n=>n.id===noteId);
+function openEditNote(noteId) {
+  const entity = _notesEntity();
+  if (!entity) return;
+  const key = _notesKey();
+  const note = (entity[key]||[]).find(n=>n.id===noteId);
   if (!note) return;
-  editNoteCtx = { jobId, noteId };
+  editNoteCtx = { noteId };
   document.getElementById('en_date').value = note.date||'';
   document.getElementById('en_text').value = note.text||'';
   document.getElementById('editNoteModal').classList.remove('hidden');
 }
 function saveEditNote() {
   if (!editNoteCtx) return;
-  const { jobId, noteId } = editNoteCtx;
-  const job  = state.jobs.find(j=>j.id===jobId);
-  if (!job) return;
-  const note = (job.jobNotes||[]).find(n=>n.id===noteId);
+  const { noteId } = editNoteCtx;
+  const entity = _notesEntity();
+  if (!entity) return;
+  const key = _notesKey();
+  const note = (entity[key]||[]).find(n=>n.id===noteId);
   if (!note) return;
   note.text = document.getElementById('en_text').value.trim();
   note.date = document.getElementById('en_date').value;
-  save(); closeModal('editNoteModal'); renderNotesList(); renderJobs();
+  save(); closeModal('editNoteModal'); renderNotesList(); _notesRender();
 }
 
 // ─── HOURS ────────────────────────────────────────────────────────────────────
@@ -1930,6 +2169,7 @@ function switchTab(name, el) {
   el.classList.add('active');
   document.getElementById(`tab-${name}`).classList.add('active');
   if (name === 'schedule') renderSchedule();
+  if (name === 'homewatch') renderHomewatch();
 }
 function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
 document.querySelectorAll('.modal-overlay').forEach(el=>{
@@ -2007,15 +2247,16 @@ function signOut() {
 
 function loadExpandedState() {
   try {
-    const key = `exp_${currentUser?.id || 'default'}`;
-    const saved = JSON.parse(localStorage.getItem(key) || '[]');
-    expandedJobs = new Set(saved);
-  } catch(e) { expandedJobs = new Set(); }
+    const uid = currentUser?.id || 'default';
+    expandedJobs = new Set(JSON.parse(localStorage.getItem(`exp_${uid}`)   || '[]'));
+    expandedHW   = new Set(JSON.parse(localStorage.getItem(`expHW_${uid}`) || '[]'));
+  } catch(e) { expandedJobs = new Set(); expandedHW = new Set(); }
 }
 function saveExpandedState() {
   try {
-    const key = `exp_${currentUser?.id || 'default'}`;
-    localStorage.setItem(key, JSON.stringify([...expandedJobs]));
+    const uid = currentUser?.id || 'default';
+    localStorage.setItem(`exp_${uid}`,   JSON.stringify([...expandedJobs]));
+    localStorage.setItem(`expHW_${uid}`, JSON.stringify([...expandedHW]));
   } catch(e) {}
 }
 function applyUserView() {
@@ -2041,9 +2282,8 @@ function applyUserView() {
 
 function renderAll() {
   renderJobs();
-  if (document.getElementById('tab-schedule').classList.contains('active')) {
-    renderSchedule();
-  }
+  if (document.getElementById('tab-schedule').classList.contains('active')) renderSchedule();
+  if (document.getElementById('tab-homewatch').classList.contains('active')) renderHomewatch();
 }
 
 // ─── USER MANAGEMENT ──────────────────────────────────────────────────────────
