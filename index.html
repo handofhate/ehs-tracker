@@ -1457,9 +1457,12 @@ function jobCard(job) {
       <div class="job-header-main" onclick="toggleJob('${job.id}')">
         <div>
           <div class="job-name">${esc(job.name)}</div>
-          <div style="font-size:15px;color:var(--text3);margin-top:2px;font-family:var(--mono)">${job.date||''}${jobEmpName ? ` · <span style="color:var(--purple)">${esc(jobEmpName)}</span>` : ''}</div>
+          <div style="font-size:15px;color:var(--text3);margin-top:2px;font-family:var(--mono)">${job.date||''}</div>
         </div>
-        <span class="job-status ${sb}">${sl}</span>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:5px">
+          <span class="job-status ${sb}">${sl}</span>
+          ${jobEmpName ? `<span style="font-family:var(--mono);font-size:13px;color:var(--purple);white-space:nowrap">${esc(jobEmpName)}</span>` : ''}
+        </div>
         <div class="job-quick-stats">
           <div class="job-stat"><div class="job-stat-label">Quote</div><div class="job-stat-value">${fmt(job.quote)}</div></div>
           <div class="job-stat"><div class="job-stat-label">Adjustments</div><div class="job-stat-value" style="color:${c.addOnTotal-c.subtractionTotal>=0?'var(--purple)':'var(--red)'}">${fmt(c.addOnTotal-c.subtractionTotal)}</div></div>
