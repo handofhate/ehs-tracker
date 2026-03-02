@@ -274,6 +274,10 @@
   .cal-cell.today .cal-day-num { color:var(--accent);font-weight:600; }
   .cal-appt-pill { font-family:var(--mono);font-size:10px;background:rgba(91,141,239,0.2);color:var(--blue);border-radius:2px;padding:2px 5px;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer; }
   .cal-appt-pill:hover { background:rgba(91,141,239,0.35); }
+  .cal-hw-pill { font-family:var(--mono);font-size:10px;background:rgba(155,127,232,0.2);color:var(--purple);border-radius:2px;padding:2px 5px;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer; }
+  .cal-hw-pill:hover { background:rgba(155,127,232,0.35); }
+  .cal-hw-pill.hw-paused { opacity:0.45; }
+  .appt-card.hw-appt { border-left-color:var(--purple); }
   .cal-more { font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:2px; }
 
   /* Day detail drawer */
@@ -291,6 +295,7 @@
     .user-pick-grid { grid-template-columns:1fr; }
     .cal-cell { min-height:52px;padding:4px; }
     .cal-appt-pill { display:none; }
+    .cal-hw-pill { display:none; }
     .cal-cell.has-appts::after { content:'•';color:var(--blue);font-size:16px;display:block;text-align:center; }
     .cal-dow { font-size:10px;padding:4px 0; }
     .sched-toolbar { flex-direction:column;align-items:flex-start; }
@@ -1293,12 +1298,14 @@ function renderSummary() {
     tOwner    += c.ownerTotal;
   });
   const activeHW  = (state.homewatch||[]).filter(hw=>hw.status!=='paused');
+  const pausedHW  = (state.homewatch||[]).filter(hw=>hw.status==='paused');
   const tHWEmpBal = (state.homewatch||[]).reduce((s,hw)=>s+calcHW(hw).empBalance, 0);
   const tEmpBal   = tJobEmpBal + tHWEmpBal;
   const en = esc(state.settings.empName || 'Employee');
   document.getElementById('summaryCards').innerHTML = `
     <div class="summary-card"><div class="summary-label">Active Jobs</div><div class="summary-value">${active.length}</div></div>
     <div class="summary-card"><div class="summary-label">Active HomeWatch</div><div class="summary-value">${activeHW.length}</div></div>
+    <div class="summary-card"><div class="summary-label">Paused HomeWatch</div><div class="summary-value" style="color:var(--text3)">${pausedHW.length}</div></div>
     <div class="summary-card"><div class="summary-label">Total Contract Value</div><div class="summary-value orange">${fmt(tContract)}</div></div>
     <div class="summary-card"><div class="summary-label">Collected</div><div class="summary-value green">${fmt(tCollected)}</div><div class="summary-sub">${fmt(tPending)} pending</div></div>
     <div class="summary-card"><div class="summary-label">Your Profit (active)</div><div class="summary-value green">${fmt(tOwner)}</div><div class="summary-sub">from collected revenue</div></div>
@@ -1311,6 +1318,7 @@ function renderEmpSummary() {
   const { empShare, feeRate } = state.settings;
   const active   = state.jobs.filter(j => j.status !== 'complete');
   const activeHW = (state.homewatch||[]).filter(hw => hw.status !== 'paused');
+  const pausedHW = (state.homewatch||[]).filter(hw => hw.status === 'paused');
   const allHW    = state.homewatch || [];
 
   // Currently owed (collected but not yet paid out — includes paused clients with collected invoices)
@@ -1353,6 +1361,7 @@ function renderEmpSummary() {
   el.innerHTML = `
     <div class="summary-card"><div class="summary-label">Active Jobs</div><div class="summary-value">${active.length}</div></div>
     <div class="summary-card"><div class="summary-label">Active HomeWatch</div><div class="summary-value">${activeHW.length}</div></div>
+    <div class="summary-card"><div class="summary-label">Paused HomeWatch</div><div class="summary-value" style="color:var(--text3)">${pausedHW.length}</div></div>
     <div class="summary-card">
       <div class="summary-label" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">Recent Pay
         <select onchange="empSummaryTimeframe=this.value;localStorage.setItem('empSummaryTF',this.value);renderEmpSummary()" style="font-size:12px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:1px 4px">${tfOpts}</select>
@@ -2492,6 +2501,28 @@ async function doChangePin() {
 }
 
 // ─── SCHEDULE ─────────────────────────────────────────────────────────────────
+// Generate synthetic HW payment calendar entries for a given year/month.
+// Each active (or paused) client gets an entry on the same day-of-month as their startDate.
+function hwCalEntries(year, month) {
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const result = [];
+  (state.homewatch || []).forEach(hw => {
+    if (!hw.startDate) return;
+    const payDay = Math.min(new Date(hw.startDate + 'T00:00:00').getDate(), daysInMonth);
+    const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(payDay).padStart(2,'0')}`;
+    result.push({ id: `hw_${hw.id}_${dateStr}`, type: 'hw', hwId: hw.id,
+      clientName: hw.name, monthlyRate: hw.monthlyRate, date: dateStr, paused: hw.status === 'paused' });
+  });
+  return result;
+}
+
+function goToHW(hwId) {
+  expandedHW.add(hwId);
+  saveExpandedState();
+  const hwTab = document.querySelector('.tab[onclick*="homewatch"]');
+  if (hwTab) switchTab('homewatch', hwTab);
+}
+
 function renderSchedule() {
   const el = document.getElementById('scheduleContent');
   if (!el) return;
@@ -2529,35 +2560,29 @@ function renderSchedView(appts) {
 
 function renderListView(appts) {
   const todayStr = today();
-  // Mobile day filter: show only that day with a back button
-  if (selectedDayFilter) {
-    const dayAppts = appts.filter(a => a.date === selectedDayFilter);
-    const backBtn = `<button class="btn btn-ghost btn-sm" style="margin-bottom:14px" onclick="selectedDayFilter=null;setSchedView('month')">‹ Back to calendar</button>`;
-    const header = `<div style="font-family:var(--mono);font-size:13px;color:var(--text3);margin-bottom:12px;text-transform:uppercase;letter-spacing:0.08em">${fmtDate(selectedDayFilter)}</div>`;
-    const cards = dayAppts.length
-      ? dayAppts.map(a => {
-          return '<div class="appt-card">'
-            + '<div style="flex:1;min-width:0">'
-            + '<div class="appt-name">' + esc(a.clientName||'') + '</div>'
-            + '<div class="appt-meta">'
-            + (a.time ? '<span>🕐 ' + fmtTime(a.time) + '</span>' : '')
-            + (a.address ? '<span>📍 ' + esc(a.address) + '</span>' : '')
-            + '</div>'
-            + (a.notes ? '<div class="appt-notes">' + esc(a.notes) + '</div>' : '')
-            + '</div>'
-            + '<div class="appt-actions">'
-            + '<button class="btn btn-ghost btn-sm" onclick="openAppt(\'' + a.id + '\')">✏</button>'
-            + '<button class="btn btn-danger btn-sm" onclick="deleteAppt(\'' + a.id + '\')">✕</button>'
-            + '</div></div>';
-        }).join('')
-      : '<div class="no-appts">No appointments on this day.</div>';
-    return backBtn + header + cards + '<button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="openApptOnDate(\'' + selectedDayFilter + '\')">+ Add on this day</button>';
-  }
-  const upcoming = appts.filter(a => a.date >= todayStr);
-  const past = appts.filter(a => a.date < todayStr).reverse();
-  const isAdmin = currentUser && currentUser.isAdmin;
+  const todayDate = new Date(todayStr + 'T00:00:00');
 
-  const apptHtml = (list, isPast) => list.length ? list.map(a => `
+  // Merge HW recurring entries for a 5-month window (1 past + current + 3 ahead)
+  const allAppts = [...appts];
+  for (let offset = -1; offset <= 3; offset++) {
+    const d = new Date(todayDate.getFullYear(), todayDate.getMonth() + offset, 1);
+    hwCalEntries(d.getFullYear(), d.getMonth()).forEach(e => allAppts.push(e));
+  }
+  allAppts.sort((a, b) => a.date.localeCompare(b.date));
+
+  // Card renderer handles both regular appointments and HW entries
+  const apptCard = (a, isPast) => a.type === 'hw' ? `
+    <div class="appt-card hw-appt${isPast?' past':''}">
+      <div style="flex:1;min-width:0">
+        <div class="appt-name">${esc(a.clientName)}</div>
+        <div class="appt-meta">
+          <span>📅 ${fmtDate(a.date)}</span>
+          <span style="color:var(--purple)">HomeWatch${a.paused?' · Paused':''}</span>
+          <span>${fmt(a.monthlyRate)}/mo</span>
+        </div>
+      </div>
+      <button class="btn btn-ghost btn-sm" style="color:var(--purple);border-color:var(--purple)" onclick="goToHW('${a.hwId}')">View</button>
+    </div>` : `
     <div class="appt-card${isPast?' past':''}">
       <div style="flex:1;min-width:0">
         <div class="appt-name">${esc(a.clientName||'')}</div>
@@ -2572,10 +2597,24 @@ function renderListView(appts) {
         <button class="btn btn-ghost btn-sm" onclick="openAppt('${a.id}')">✏</button>
         <button class="btn btn-danger btn-sm" onclick="deleteAppt('${a.id}')">✕</button>
       </div>
-    </div>`).join('') : '';
+    </div>`;
 
-  const upcomingHtml = apptHtml(upcoming, false);
-  const pastHtml = apptHtml(past, true);
+  // Mobile day filter: show only that day with a back button
+  if (selectedDayFilter) {
+    const dayAppts = allAppts.filter(a => a.date === selectedDayFilter);
+    const backBtn = `<button class="btn btn-ghost btn-sm" style="margin-bottom:14px" onclick="selectedDayFilter=null;setSchedView('month')">‹ Back to calendar</button>`;
+    const header = `<div style="font-family:var(--mono);font-size:13px;color:var(--text3);margin-bottom:12px;text-transform:uppercase;letter-spacing:0.08em">${fmtDate(selectedDayFilter)}</div>`;
+    const cards = dayAppts.length
+      ? dayAppts.map(a => apptCard(a, false)).join('')
+      : '<div class="no-appts">No appointments on this day.</div>';
+    return backBtn + header + cards + '<button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="openApptOnDate(\'' + selectedDayFilter + '\')">+ Add on this day</button>';
+  }
+
+  const upcoming = allAppts.filter(a => a.date >= todayStr);
+  const past     = allAppts.filter(a => a.date < todayStr).reverse();
+
+  const upcomingHtml = upcoming.length ? upcoming.map(a => apptCard(a, false)).join('') : '';
+  const pastHtml     = past.length     ? past.map(a => apptCard(a, true)).join('')     : '';
 
   return `
     ${upcomingHtml || '<div class="no-appts">📅 No upcoming appointments.<br>Tap + Appointment to add one.</div>'}
@@ -2596,6 +2635,8 @@ function renderMonthView(appts) {
   // Build appt lookup by date
   const byDate = {};
   appts.forEach(a => { if (!byDate[a.date]) byDate[a.date] = []; byDate[a.date].push(a); });
+  // Inject recurring HW payment entries
+  hwCalEntries(year, month).forEach(e => { if (!byDate[e.date]) byDate[e.date] = []; byDate[e.date].push(e); });
 
   const dowLabels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   let cells = '';
@@ -2612,8 +2653,9 @@ function renderMonthView(appts) {
     const dayAppts = byDate[dateStr] || [];
     const isToday = dateStr === todayStr;
     const isSelected = dateStr === selectedCalDay;
-    const pills = dayAppts.slice(0,3).map(a =>
-      `<div class="cal-appt-pill" onclick="event.stopPropagation();openAppt('${a.id}')">${esc(a.clientName||'Appt')}</div>`
+    const pills = dayAppts.slice(0,3).map(a => a.type === 'hw'
+      ? `<div class="cal-hw-pill${a.paused?' hw-paused':''}" onclick="event.stopPropagation();goToHW('${a.hwId}')" title="${esc(a.clientName)} — ${fmt(a.monthlyRate)}/mo${a.paused?' (Paused)':''}">${esc(a.clientName)}</div>`
+      : `<div class="cal-appt-pill" onclick="event.stopPropagation();openAppt('${a.id}')">${esc(a.clientName||'Appt')}</div>`
     ).join('');
     const more = dayAppts.length > 3 ? `<div class="cal-more">+${dayAppts.length-3} more</div>` : '';
     cells += `<div class="cal-cell${isToday?' today':''}${dayAppts.length?' has-appts':''}${isSelected?' selected':''}"
@@ -2637,7 +2679,17 @@ function renderMonthView(appts) {
     drawer = `
       <div class="day-drawer">
         <div class="day-drawer-title">${fmtDate(selectedCalDay)}${dayAppts.length===0?' — No appointments':''}</div>
-        ${dayAppts.map(a => `
+        ${dayAppts.map(a => a.type === 'hw' ? `
+          <div class="appt-card hw-appt${a.paused?' past':''}" style="margin-bottom:8px">
+            <div style="flex:1;min-width:0">
+              <div class="appt-name">${esc(a.clientName)}</div>
+              <div class="appt-meta">
+                <span style="color:var(--purple)">HomeWatch${a.paused?' · Paused':''}</span>
+                <span>${fmt(a.monthlyRate)}/mo</span>
+              </div>
+            </div>
+            <button class="btn btn-ghost btn-sm" style="color:var(--purple);border-color:var(--purple)" onclick="goToHW('${a.hwId}')">View</button>
+          </div>` : `
           <div class="appt-card" style="margin-bottom:8px">
             <div style="flex:1">
               <div class="appt-name">${esc(a.clientName||'')}</div>
