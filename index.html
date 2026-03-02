@@ -341,6 +341,7 @@
 <div class="main">
   <div id="debtPanel"></div>
   <div id="summaryCards" class="summary-grid"></div>
+  <div id="empSummaryCards" class="summary-grid" style="display:none"></div>
   <div class="tabs">
     <div class="tab job-tab active" onclick="switchTab('active', this)">Active Jobs</div>
     <div class="tab job-tab" onclick="switchTab('complete', this)">Completed</div>
@@ -805,6 +806,7 @@ let addItemContext = null;
 let expandedJobs = new Set(); // local only — never saved to Firestore
 let expandedHW   = new Set(); // local only — never saved to Firestore
 let notesCtx = null; // { type: 'job'|'hw', id }
+let empSummaryTimeframe = '30'; // days, or 'all'
 let hoursJobId = null;
 let editNoteCtx = null;
 let isSaving = false;
@@ -1277,6 +1279,7 @@ function renderDebtPanel() {
 // ─── SUMMARY ─────────────────────────────────────────────────────────────────
 function renderSummary() {
   renderDebtPanel();
+  renderEmpSummary();
   const active = state.jobs.filter(j => j.status !== 'complete');
   let tContract=0, tCollected=0, tPending=0, tJobEmpBal=0, tOwner=0;
   active.forEach(j => {
@@ -1296,6 +1299,64 @@ function renderSummary() {
     <div class="summary-card"><div class="summary-label">Collected</div><div class="summary-value green">${fmt(tCollected)}</div><div class="summary-sub">${fmt(tPending)} pending</div></div>
     <div class="summary-card"><div class="summary-label">Your Profit (active)</div><div class="summary-value green">${fmt(tOwner)}</div><div class="summary-sub">from collected revenue</div></div>
     <div class="summary-card"><div class="summary-label">Owed to ${en}</div><div class="summary-value ${tEmpBal < 0 ? 'red' : 'orange'}">${fmt(Math.max(0, tEmpBal))}</div><div class="summary-sub">jobs ${fmt(tJobEmpBal)} + HW ${fmt(tHWEmpBal)}</div></div>`;
+}
+
+function renderEmpSummary() {
+  const el = document.getElementById('empSummaryCards');
+  if (!el || el.style.display === 'none') return;
+  const { empShare, feeRate } = state.settings;
+  const active   = state.jobs.filter(j => j.status !== 'complete');
+  const activeHW = (state.homewatch||[]).filter(hw => hw.status !== 'paused');
+
+  // Currently owed (collected but not yet paid out)
+  let tOwed = 0;
+  active.forEach(j => { tOwed += calcJob(j).empBalance; });
+  activeHW.forEach(hw => { tOwed += calcHW(hw).empBalance; });
+
+  // Potential pay (owed now + employee share of all still-pending work)
+  let tPotential = tOwed;
+  active.forEach(j => {
+    const c = calcJob(j);
+    tPotential += c.pendingGross * (1 - feeRate) * empShare;
+  });
+  activeHW.forEach(hw => {
+    const c = calcHW(hw);
+    tPotential += c.pendingGross * (1 - feeRate) * empShare;
+  });
+
+  // Recent pay (advances paid to employee within selected timeframe)
+  let cutoffStr = null;
+  if (empSummaryTimeframe !== 'all') {
+    const d = new Date();
+    d.setDate(d.getDate() - parseInt(empSummaryTimeframe));
+    cutoffStr = d.toISOString().slice(0, 10);
+  }
+  const inWindow = date => !cutoffStr || (date && date >= cutoffStr);
+  let tRecentPay = 0;
+  state.jobs.forEach(j => {
+    (j.advances||[]).forEach(a => { if (inWindow(a.date)) tRecentPay += a.amount||0; });
+  });
+  (state.homewatch||[]).forEach(hw => {
+    (hw.advances||[]).forEach(a => { if (inWindow(a.date)) tRecentPay += a.amount||0; });
+  });
+
+  const tfOpts = [
+    ['30','Last 30 days'],['60','Last 60 days'],['90','Last 90 days'],
+    ['365','This year'],['all','All time']
+  ].map(([v,l]) => `<option value="${v}"${empSummaryTimeframe===v?' selected':''}>${l}</option>`).join('');
+
+  el.innerHTML = `
+    <div class="summary-card"><div class="summary-label">Active Jobs</div><div class="summary-value">${active.length}</div></div>
+    <div class="summary-card"><div class="summary-label">Active HomeWatch</div><div class="summary-value">${activeHW.length}</div></div>
+    <div class="summary-card">
+      <div class="summary-label" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">Recent Pay
+        <select onchange="empSummaryTimeframe=this.value;renderEmpSummary()" style="font-size:12px;background:var(--surface2);color:var(--text1);border:1px solid var(--border);border-radius:4px;padding:1px 4px">${tfOpts}</select>
+      </div>
+      <div class="summary-value green">${fmt(tRecentPay)}</div>
+      <div class="summary-sub">advances received</div>
+    </div>
+    <div class="summary-card"><div class="summary-label">Currently Owed</div><div class="summary-value ${tOwed>0?'orange':'green'}">${fmt(Math.max(0,tOwed))}</div><div class="summary-sub">from collected work</div></div>
+    <div class="summary-card"><div class="summary-label">Potential Pay</div><div class="summary-value orange">${fmt(Math.max(0,tPotential))}</div><div class="summary-sub">if all active work completes</div></div>`;
 }
 
 // ─── RENDER JOBS ─────────────────────────────────────────────────────────────
@@ -2313,8 +2374,9 @@ function applyUserView() {
   applyAdminClasses();
 
   // All tabs visible for everyone; debt/summary panels are admin-only
-  document.getElementById('summaryCards').style.display = isAdmin ? '' : 'none';
-  document.getElementById('debtPanel').style.display = isAdmin ? '' : 'none';
+  document.getElementById('summaryCards').style.display    = isAdmin ? '' : 'none';
+  document.getElementById('empSummaryCards').style.display = isAdmin ? 'none' : '';
+  document.getElementById('debtPanel').style.display       = isAdmin ? '' : 'none';
 
   if (!isAdmin) {
     switchTab('active', document.querySelector('.job-tab'));
