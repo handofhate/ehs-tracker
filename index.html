@@ -1304,8 +1304,7 @@ function renderSummary() {
   const en = esc(state.settings.empName || 'Employee');
   document.getElementById('summaryCards').innerHTML = `
     <div class="summary-card"><div class="summary-label">Active Jobs</div><div class="summary-value">${active.length}</div></div>
-    <div class="summary-card"><div class="summary-label">Active HomeWatch</div><div class="summary-value">${activeHW.length}</div></div>
-    <div class="summary-card"><div class="summary-label">Paused HomeWatch</div><div class="summary-value" style="color:var(--text3)">${pausedHW.length}</div></div>
+    <div class="summary-card"><div class="summary-label">HomeWatch</div><div class="summary-value">${activeHW.length}</div><div class="summary-sub">${pausedHW.length > 0 ? `${pausedHW.length} paused` : 'none paused'}</div></div>
     <div class="summary-card"><div class="summary-label">Total Contract Value</div><div class="summary-value orange">${fmt(tContract)}</div></div>
     <div class="summary-card"><div class="summary-label">Collected</div><div class="summary-value green">${fmt(tCollected)}</div><div class="summary-sub">${fmt(tPending)} pending</div></div>
     <div class="summary-card"><div class="summary-label">Your Profit (active)</div><div class="summary-value green">${fmt(tOwner)}</div><div class="summary-sub">from collected revenue</div></div>
@@ -1360,8 +1359,7 @@ function renderEmpSummary() {
 
   el.innerHTML = `
     <div class="summary-card"><div class="summary-label">Active Jobs</div><div class="summary-value">${active.length}</div></div>
-    <div class="summary-card"><div class="summary-label">Active HomeWatch</div><div class="summary-value">${activeHW.length}</div></div>
-    <div class="summary-card"><div class="summary-label">Paused HomeWatch</div><div class="summary-value" style="color:var(--text3)">${pausedHW.length}</div></div>
+    <div class="summary-card"><div class="summary-label">HomeWatch</div><div class="summary-value">${activeHW.length}</div><div class="summary-sub">${pausedHW.length > 0 ? `${pausedHW.length} paused` : 'none paused'}</div></div>
     <div class="summary-card">
       <div class="summary-label" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">Recent Pay
         <select onchange="empSummaryTimeframe=this.value;localStorage.setItem('empSummaryTF',this.value);renderEmpSummary()" style="font-size:12px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:1px 4px">${tfOpts}</select>
