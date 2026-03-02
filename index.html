@@ -806,7 +806,7 @@ let addItemContext = null;
 let expandedJobs = new Set(); // local only — never saved to Firestore
 let expandedHW   = new Set(); // local only — never saved to Firestore
 let notesCtx = null; // { type: 'job'|'hw', id }
-let empSummaryTimeframe = '30'; // days, or 'all'
+let empSummaryTimeframe = localStorage.getItem('empSummaryTF') || '30'; // days, or 'all'
 let hoursJobId = null;
 let editNoteCtx = null;
 let isSaving = false;
@@ -908,7 +908,7 @@ function load() {
     console.error('Load failed:', e);
     document.getElementById('loadingOverlay').innerHTML = `
       <div style="font-family:var(--mono);font-size:16px;color:var(--red)">Connection failed</div>
-      <div style="font-family:var(--mono);font-size:13px;color:var(--text3);margin-top:8px">${e.message}</div>`;
+      <div style="font-family:var(--mono);font-size:13px;color:var(--text3);margin-top:8px">${esc(e.message)}</div>`;
   });
 
   // Real-time listener — keeps all open tabs/devices in sync
@@ -924,7 +924,7 @@ function load() {
     }
   });
 }
-function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+function uid() { return crypto.randomUUID(); }
 function today() { return new Date().toISOString().slice(0,10); }
 function fmt(n) {
   if (n === null || n === undefined || isNaN(n)) return '$0.00';
@@ -939,6 +939,14 @@ function fmtDate(d) {
 function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 // ─── CALCULATIONS ─────────────────────────────────────────────────────────────
+function calcSplit(gross, { empShare, feeRate }) {
+  const totalFees  = gross * feeRate;
+  const netRevenue = gross - totalFees;
+  const empOwed    = netRevenue * empShare;
+  const ownerOwed  = netRevenue * (1 - empShare);
+  return { totalFees, netRevenue, empOwed, ownerOwed };
+}
+
 function calcJob(job) {
   const { empShare, feeRate, debtOwnerShare } = state.settings;
   const normalOwnerShare = 1 - empShare;
@@ -1001,10 +1009,7 @@ function calcHW(hw) {
   const { empShare, feeRate } = state.settings;
   const collectedGross = (hw.payments||[]).filter(p=>p.status==='collected').reduce((s,p)=>s+(p.amount||0),0);
   const pendingGross   = (hw.payments||[]).filter(p=>p.status!=='collected').reduce((s,p)=>s+(p.amount||0),0);
-  const totalFees      = collectedGross * feeRate;
-  const netRevenue     = collectedGross - totalFees;
-  const empOwed        = netRevenue * empShare;
-  const ownerOwed      = netRevenue * (1 - empShare);
+  const { totalFees, netRevenue, empOwed, ownerOwed } = calcSplit(collectedGross, { empShare, feeRate });
   const advancesPaid   = (hw.advances||[]).reduce((s,a)=>s+(a.amount||0),0);
   const empBalance     = empOwed - advancesPaid;
   return { collectedGross, pendingGross, totalFees, netRevenue, empOwed, ownerOwed, advancesPaid, empBalance };
@@ -1034,13 +1039,13 @@ function hwCard(hw) {
       <div class="job-header">
         <div class="job-header-main" onclick="toggleHW('${hw.id}')">
           <div class="job-name">${esc(hw.name)}${paused?' <span style="font-size:13px;color:var(--text3)">(paused)</span>':''}</div>
-          <div class="job-meta">Since ${fmtDate(hw.startDate)||hw.startDate||'—'} · ${fmt(hw.monthlyRate)}/mo</div>
+          <div class="job-meta">Since ${hw.startDate ? fmtDate(hw.startDate) : '—'} · ${fmt(hw.monthlyRate)}/mo</div>
         </div>
         <div class="job-header-btns">
           <button class="btn btn-ghost btn-sm" onclick="openNotes('hw','${hw.id}')" title="Notes">📝${nc>0?` ${nc}`:''}</button>
           <button class="btn btn-ghost btn-sm admin-only" onclick="toggleHWPause('${hw.id}')" title="${paused?'Resume':'Pause'}">${paused?'▶ Resume':'⏸ Pause'}</button>
-          <button class="btn btn-ghost btn-sm admin-only" onclick="openEditHW('${hw.id}')" title="Edit">✏</button>
-          <button class="btn btn-danger btn-sm admin-only" onclick="deleteHW('${hw.id}')" title="Delete">🗑</button>
+          <button class="btn btn-ghost btn-sm admin-only" onclick="openEditHW('${hw.id}')" title="Edit">Edit</button>
+          <button class="btn btn-danger btn-sm admin-only" onclick="deleteHW('${hw.id}')" title="Delete">Del</button>
           <div class="job-chevron" onclick="toggleHW('${hw.id}')">▾</div>
         </div>
       </div>
@@ -1202,6 +1207,7 @@ function cycleHWPayStatus(hwId, payId) {
   if (!hw) return;
   const p = hw.payments.find(p=>p.id===payId);
   if (!p) return;
+  if (p.status === 'collected' && !confirm('Mark this payment as Pending? This will remove it from collected revenue.')) return;
   const cycle = { pending:'invoiced', invoiced:'collected', collected:'pending' };
   p.status = cycle[p.status]||'pending';
   save(); renderHomewatch(); renderSummary();
@@ -1301,7 +1307,7 @@ function renderSummary() {
 
 function renderEmpSummary() {
   const el = document.getElementById('empSummaryCards');
-  if (!el || el.style.display === 'none') return;
+  if (!el || !currentUser || currentUser.isAdmin) return;
   const { empShare, feeRate } = state.settings;
   const active   = state.jobs.filter(j => j.status !== 'complete');
   const activeHW = (state.homewatch||[]).filter(hw => hw.status !== 'paused');
@@ -1349,7 +1355,7 @@ function renderEmpSummary() {
     <div class="summary-card"><div class="summary-label">Active HomeWatch</div><div class="summary-value">${activeHW.length}</div></div>
     <div class="summary-card">
       <div class="summary-label" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">Recent Pay
-        <select onchange="empSummaryTimeframe=this.value;renderEmpSummary()" style="font-size:12px;background:var(--surface2);color:var(--text1);border:1px solid var(--border);border-radius:4px;padding:1px 4px">${tfOpts}</select>
+        <select onchange="empSummaryTimeframe=this.value;localStorage.setItem('empSummaryTF',this.value);renderEmpSummary()" style="font-size:12px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:1px 4px">${tfOpts}</select>
       </div>
       <div class="summary-value green">${fmt(tRecentPay)}</div>
       <div class="summary-sub">advances received</div>
@@ -1715,6 +1721,7 @@ function cycleStatus(jobId, itemType, idx) {
   const job = state.jobs.find(j=>j.id===jobId);
   if (!job||!job[itemType]||!job[itemType][idx]) return;
   const item = job[itemType][idx];
+  if (item.status === 'collected' && !confirm('Mark this as Pending? This will remove it from collected revenue.')) return;
   const cycle = { pending:'invoiced', invoiced:'collected', collected:'pending' };
   item.status = cycle[item.status||'pending'];
   save(); renderJobs();
@@ -2609,7 +2616,7 @@ function renderMonthView(appts) {
       `<div class="cal-appt-pill" onclick="event.stopPropagation();openAppt('${a.id}')">${esc(a.clientName||'Appt')}</div>`
     ).join('');
     const more = dayAppts.length > 3 ? `<div class="cal-more">+${dayAppts.length-3} more</div>` : '';
-    cells += `<div class="cal-cell${isToday?' today':''}${dayAppts.length?' has-appts':''}${isSelected?' today':''}"
+    cells += `<div class="cal-cell${isToday?' today':''}${dayAppts.length?' has-appts':''}${isSelected?' selected':''}"
       onclick="selectCalDay('${dateStr}')" style="${isSelected?'border-color:var(--accent)':''}">
       <div class="cal-day-num">${d}</div>
       ${pills}${more}
@@ -2766,10 +2773,10 @@ function importData(event) {
   reader.onload = async e => {
     try {
       const imported = JSON.parse(e.target.result);
-      if (!imported.jobs || !imported.settings) throw new Error('Invalid backup file.');
+      if (!Array.isArray(imported.jobs) || !imported.settings || typeof imported.settings !== 'object') throw new Error('Invalid backup file.');
       state = migrateState(imported);
       await save();
-      renderJobs();
+      renderAll();
       alert('Import successful!');
     } catch(err) {
       alert('Import failed: ' + err.message);
