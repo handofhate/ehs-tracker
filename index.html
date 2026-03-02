@@ -2435,19 +2435,23 @@ function toggleMoreMenu(e) {
   const dropdown = document.getElementById('moreDropdown');
   if (dropdown.classList.contains('hidden')) {
     dropdown.classList.remove('hidden');
-    const backdrop = document.createElement('div');
-    backdrop.id = 'moreBackdrop';
-    backdrop.style.cssText = 'position:fixed;inset:0;z-index:499';
-    backdrop.addEventListener('click', () => closeMoreMenu());
-    document.body.appendChild(backdrop);
+    // setTimeout so this open-click doesn't immediately trigger the outside listener
+    setTimeout(() => {
+      document.addEventListener('click',      _moreOutside, true);
+      document.addEventListener('touchstart', _moreOutside, true);
+    }, 0);
   } else {
     closeMoreMenu();
   }
 }
+function _moreOutside(e) {
+  const wrap = document.getElementById('moreMenuWrap');
+  if (!wrap || !wrap.contains(e.target)) closeMoreMenu();
+}
 function closeMoreMenu() {
   document.getElementById('moreDropdown').classList.add('hidden');
-  const bd = document.getElementById('moreBackdrop');
-  if (bd) bd.remove();
+  document.removeEventListener('click',      _moreOutside, true);
+  document.removeEventListener('touchstart', _moreOutside, true);
 }
 document.querySelectorAll('.modal-overlay').forEach(el=>{
   el.addEventListener('click', e=>{ if(e.target===el) el.classList.add('hidden'); });
