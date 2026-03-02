@@ -401,6 +401,10 @@
       <label class="form-label">Start Date</label>
       <input class="form-input" id="f_date" type="date" />
     </div>
+    <div class="form-group" id="f_emp_wrap">
+      <label class="form-label">Assign to Employee</label>
+      <select class="form-input" id="f_emp"></select>
+    </div>
     <div class="form-group">
       <label class="form-label">Payment Structure — Milestones</label>
       <div class="form-hint" style="margin-bottom:8px;">Define % collected at each stage. Must add up to 100%.</div>
@@ -432,14 +436,6 @@
   <div class="modal">
     <div class="modal-title">Settings</div>
     <div class="form-group">
-      <label class="form-label">Employee Name</label>
-      <input class="form-input" id="s_empName" placeholder="e.g. Dad, Tyler..." />
-    </div>
-    <div class="form-group">
-      <label class="form-label">Employee profit share (e.g. 0.66 for 66%)</label>
-      <input class="form-input" id="s_empShare" type="number" step="0.01" min="0" max="1" />
-    </div>
-    <div class="form-group">
       <label class="form-label">Square processing fee rate (e.g. 0.026 for 2.6%)</label>
       <input class="form-input" id="s_feeRate" type="number" step="0.001" min="0" max="1" />
       <div class="form-hint">Applied to collected amounts. Fees deducted before split.</div>
@@ -461,7 +457,7 @@
     </div>
     <div class="modal-actions" style="position:relative">
       <span style="position:absolute;left:0;bottom:0;font-family:var(--mono);font-size:12px;color:var(--text3)">v1.14</span>
-      <button class="btn btn-ghost btn-sm" onclick="closeModal('settingsModal');openUserMgmt()" style="margin-right:auto;margin-left:40px">👥 Users</button>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('settingsModal');openUserMgmt()" style="margin-right:auto;margin-left:40px">👥 Manage Employees</button>
       <button class="btn btn-ghost" onclick="closeModal('settingsModal')">Cancel</button>
       <button class="btn btn-primary" onclick="saveSettings()">Save</button>
     </div>
@@ -649,6 +645,23 @@
   </div>
 </div>
 
+<!-- EDIT EMPLOYEE MODAL -->
+<div id="empEditModal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-title" id="empEditTitle">Edit Employee</div>
+    <div class="form-group"><label class="form-label">Name</label>
+      <input class="form-input" id="ee_name" /></div>
+    <div class="form-group"><label class="form-label">Profit Share (e.g. 0.66 for 66%)</label>
+      <input class="form-input" id="ee_share" type="number" step="0.01" min="0.01" max="0.99" /></div>
+    <div class="form-group"><label class="form-label">Startup Debt</label>
+      <div id="ee_debtInfo"></div></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('empEditModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEmpEdit()">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- RESET PIN MODAL -->
 <div id="resetPinModal" class="modal-overlay hidden">
   <div class="modal">
@@ -761,6 +774,10 @@
       <input class="form-input" type="date" id="hw_startDate"></div>
     <div class="form-group"><label class="form-label">Monthly Rate ($)</label>
       <input class="form-input" type="number" id="hw_rate" placeholder="0.00" step="0.01"></div>
+    <div class="form-group" id="hw_emp_wrap">
+      <label class="form-label">Assign to Employee</label>
+      <select class="form-input" id="hw_emp"></select>
+    </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('hwModal')">Cancel</button>
       <button class="btn btn-primary" onclick="saveHW()">Save</button>
@@ -841,6 +858,11 @@ function migrateState(s) {
   if (s.users.length === 0) {
     s.users.push({ id: 'admin_default', name: 'Ty', pin: '1234', isAdmin: true });
   }
+  // Seed empShare on existing non-admin users from legacy global setting
+  const legacyEmpShare = s.settings.empShare ?? 0.66;
+  (s.users).forEach(u => { if (!u.isAdmin && u.empShare === undefined) u.empShare = legacyEmpShare; });
+  const defaultEmp = (s.users).find(u => !u.isAdmin);
+  if (!s.settings.debtEmployeeId && defaultEmp) s.settings.debtEmployeeId = defaultEmp.id;
   if (!s.homewatch) s.homewatch = [];
   (s.homewatch || []).forEach(hw => {
     if (!hw.payments) hw.payments = [];
@@ -848,9 +870,11 @@ function migrateState(s) {
     if (!hw.advances) hw.advances = [];
     if (!hw.status) hw.status = 'active';
     hw.payments.forEach(p => { if (!p.status) p.status = 'pending'; });
+    if (!hw.employeeId && defaultEmp) hw.employeeId = defaultEmp.id;
   });
   (s.jobs || []).forEach(job => {
     delete job._expanded; // moved to local localStorage — not stored in Firestore
+    if (!job.employeeId && defaultEmp) job.employeeId = defaultEmp.id;
     if (job.repaymentMode === undefined) job.repaymentMode = false;
     if (!job.jobNotes) {
       job.jobNotes = [];
@@ -952,8 +976,14 @@ function calcSplit(gross, { empShare, feeRate }) {
   return { totalFees, netRevenue, empOwed, ownerOwed };
 }
 
+function getEmp(userId) {
+  return state.users.find(u => u.id === userId);
+}
+
 function calcJob(job) {
-  const { empShare, feeRate, debtOwnerShare } = state.settings;
+  const emp = getEmp(job.employeeId);
+  const empShare = emp?.empShare ?? 0.66;
+  const { feeRate, debtOwnerShare } = state.settings;
   const normalOwnerShare = 1 - empShare;
   const effectiveOwnerShare = job.repaymentMode ? (debtOwnerShare || 0.50) : normalOwnerShare;
   const effectiveEmpShare   = 1 - effectiveOwnerShare;
@@ -1011,7 +1041,9 @@ function calcJob(job) {
 }
 
 function calcHW(hw) {
-  const { empShare, feeRate } = state.settings;
+  const emp = getEmp(hw.employeeId);
+  const empShare = emp?.empShare ?? 0.66;
+  const { feeRate } = state.settings;
   const collectedGross = (hw.payments||[]).filter(p=>p.status==='collected').reduce((s,p)=>s+(p.amount||0),0);
   const pendingGross   = (hw.payments||[]).filter(p=>p.status!=='collected').reduce((s,p)=>s+(p.amount||0),0);
   const { totalFees, netRevenue, empOwed, ownerOwed } = calcSplit(collectedGross, { empShare, feeRate });
@@ -1026,7 +1058,10 @@ let hwPayContext = null;
 let hwPayMode    = 'payment'; // 'payment' | 'advance'
 
 function renderHomewatch() {
-  const list = state.homewatch || [];
+  const isAdmin = currentUser?.isAdmin;
+  const list = isAdmin
+    ? (state.homewatch || [])
+    : (state.homewatch || []).filter(hw => hw.employeeId === currentUser?.id);
   document.getElementById('hwCount').textContent = `${list.length} HomeWatch client${list.length!==1?'s':''}`;
   document.getElementById('hwList').innerHTML = list.length
     ? list.map(hwCard).join('')
@@ -1061,9 +1096,10 @@ function hwCard(hw) {
 function hwDetail(hw, c) {
   const payments  = hw.payments  || [];
   const advances  = hw.advances  || [];
-  const en        = esc(state.settings.empName || 'Employee');
+  const emp       = getEmp(hw.employeeId);
+  const en        = esc(emp?.name || 'Employee');
   const feeLabel  = `Est. Square fees (~${(state.settings.feeRate*100).toFixed(1)}%)`;
-  const empPct    = Math.round(state.settings.empShare * 100);
+  const empPct    = Math.round((emp?.empShare ?? 0.66) * 100);
   return `
     <div class="job-detail">
       <div class="line-item"><span>Collected (gross)</span><span class="green">${fmt(c.collectedGross)}</span></div>
@@ -1118,6 +1154,7 @@ function openNewHWModal() {
   document.getElementById('hw_name').value = '';
   document.getElementById('hw_startDate').value = today();
   document.getElementById('hw_rate').value = '';
+  populateEmpDropdown('hw_emp', 'hw_emp_wrap', null);
   document.getElementById('hwModal').classList.remove('hidden');
 }
 function openEditHW(hwId) {
@@ -1128,6 +1165,7 @@ function openEditHW(hwId) {
   document.getElementById('hw_name').value      = hw.name||'';
   document.getElementById('hw_startDate').value = hw.startDate||'';
   document.getElementById('hw_rate').value      = hw.monthlyRate||'';
+  populateEmpDropdown('hw_emp', 'hw_emp_wrap', hw.employeeId);
   document.getElementById('hwModal').classList.remove('hidden');
 }
 function saveHW() {
@@ -1136,11 +1174,15 @@ function saveHW() {
   const monthlyRate = parseFloat(document.getElementById('hw_rate').value)||0;
   if (!name) { alert('Please enter a client name.'); return; }
   if (!state.homewatch) state.homewatch = [];
+  const hwEmps = state.users.filter(u => !u.isAdmin);
+  const hwEmployeeId = hwEmps.length > 1
+    ? (document.getElementById('hw_emp')?.value || hwEmps[0]?.id)
+    : hwEmps[0]?.id;
   if (editingHWId) {
     const hw = state.homewatch.find(h=>h.id===editingHWId);
-    if (hw) { hw.name=name; hw.startDate=startDate; hw.monthlyRate=monthlyRate; }
+    if (hw) { hw.name=name; hw.startDate=startDate; hw.monthlyRate=monthlyRate; if (hwEmployeeId) hw.employeeId = hwEmployeeId; }
   } else {
-    const hw = { id:uid(), name, startDate, monthlyRate, status:'active', payments:[], hwNotes:[], advances:[] };
+    const hw = { id:uid(), name, startDate, monthlyRate, status:'active', payments:[], hwNotes:[], advances:[], employeeId: hwEmployeeId || '' };
     state.homewatch.push(hw);
   }
   save(); closeModal('hwModal'); renderHomewatch(); renderSummary();
@@ -1231,8 +1273,9 @@ function renderDebtPanel() {
   const remaining = Math.max(0, originalDebt - totalRepaid);
   const pct = Math.min(100, (totalRepaid / originalDebt) * 100);
   const paid = remaining <= 0;
-  const en = esc(s.empName || 'Employee');
-  const normalPct = Math.round((1 - s.empShare) * 100);
+  const debtEmp = getEmp(s.debtEmployeeId);
+  const en = esc(debtEmp?.name || 'Employee');
+  const normalPct = Math.round((1 - (debtEmp?.empShare ?? 0.66)) * 100);
   const repayPct  = Math.round((s.debtOwnerShare || 0.50) * 100);
 
   const paymentsHtml = (state.debtPayments || []).length
@@ -1290,35 +1333,42 @@ function renderSummary() {
   renderDebtPanel();
   renderEmpSummary();
   const active = state.jobs.filter(j => j.status !== 'complete');
-  let tContract=0, tCollected=0, tPending=0, tJobEmpBal=0, tOwner=0;
+  let tContract=0, tCollected=0, tPending=0, tOwner=0;
   active.forEach(j => {
     const c = calcJob(j);
     tContract += c.contractTotal; tCollected += c.collectedGross;
-    tPending  += c.pendingGross;  tJobEmpBal += c.empBalance;
-    tOwner    += c.ownerTotal;
+    tPending  += c.pendingGross;  tOwner    += c.ownerTotal;
   });
   const activeHW  = (state.homewatch||[]).filter(hw=>hw.status!=='paused');
   const pausedHW  = (state.homewatch||[]).filter(hw=>hw.status==='paused');
-  const tHWEmpBal = (state.homewatch||[]).reduce((s,hw)=>s+calcHW(hw).empBalance, 0);
-  const tEmpBal   = tJobEmpBal + tHWEmpBal;
-  const en = esc(state.settings.empName || 'Employee');
+  const employees = state.users.filter(u => !u.isAdmin);
+  const empCardsHtml = employees.map(emp => {
+    const empJobs = state.jobs.filter(j => j.employeeId === emp.id && j.status !== 'complete');
+    const empHW   = (state.homewatch||[]).filter(hw => hw.employeeId === emp.id);
+    const jobBal  = empJobs.reduce((s,j) => s + calcJob(j).empBalance, 0);
+    const hwBal   = empHW.reduce((s,hw) => s + calcHW(hw).empBalance, 0);
+    const total   = jobBal + hwBal;
+    return `<div class="summary-card"><div class="summary-label">Owed to ${esc(emp.name)}</div><div class="summary-value ${total < 0 ? 'red' : 'orange'}">${fmt(Math.max(0, total))}</div><div class="summary-sub">jobs ${fmt(jobBal)} + HW ${fmt(hwBal)}</div></div>`;
+  }).join('');
   document.getElementById('summaryCards').innerHTML = `
     <div class="summary-card"><div class="summary-label">Active Jobs</div><div class="summary-value">${active.length}</div></div>
     <div class="summary-card"><div class="summary-label">HomeWatch</div><div class="summary-value">${activeHW.length}</div><div class="summary-sub">${pausedHW.length > 0 ? `${pausedHW.length} paused` : 'none paused'}</div></div>
     <div class="summary-card"><div class="summary-label">Total Contract Value</div><div class="summary-value orange">${fmt(tContract)}</div></div>
     <div class="summary-card"><div class="summary-label">Collected</div><div class="summary-value green">${fmt(tCollected)}</div><div class="summary-sub">${fmt(tPending)} pending</div></div>
     <div class="summary-card"><div class="summary-label">Your Profit (active)</div><div class="summary-value green">${fmt(tOwner)}</div><div class="summary-sub">from collected revenue</div></div>
-    <div class="summary-card"><div class="summary-label">Owed to ${en}</div><div class="summary-value ${tEmpBal < 0 ? 'red' : 'orange'}">${fmt(Math.max(0, tEmpBal))}</div><div class="summary-sub">jobs ${fmt(tJobEmpBal)} + HW ${fmt(tHWEmpBal)}</div></div>`;
+    ${empCardsHtml}`;
 }
 
 function renderEmpSummary() {
   const el = document.getElementById('empSummaryCards');
   if (!el || !currentUser || currentUser.isAdmin) return;
-  const { empShare, feeRate } = state.settings;
-  const active   = state.jobs.filter(j => j.status !== 'complete');
-  const activeHW = (state.homewatch||[]).filter(hw => hw.status !== 'paused');
-  const pausedHW = (state.homewatch||[]).filter(hw => hw.status === 'paused');
-  const allHW    = state.homewatch || [];
+  const { feeRate } = state.settings;
+  const myId     = currentUser.id;
+  const empShare = getEmp(myId)?.empShare ?? 0.66;
+  const active   = state.jobs.filter(j => j.status !== 'complete' && j.employeeId === myId);
+  const activeHW = (state.homewatch||[]).filter(hw => hw.status !== 'paused' && hw.employeeId === myId);
+  const pausedHW = (state.homewatch||[]).filter(hw => hw.status === 'paused' && hw.employeeId === myId);
+  const allHW    = (state.homewatch||[]).filter(hw => hw.employeeId === myId);
 
   // Currently owed (collected but not yet paid out — includes paused clients with collected invoices)
   let tOwed = 0;
@@ -1345,10 +1395,10 @@ function renderEmpSummary() {
   }
   const inWindow = date => !cutoffStr || (date && date >= cutoffStr);
   let tRecentPay = 0;
-  state.jobs.forEach(j => {
+  state.jobs.filter(j => j.employeeId === myId).forEach(j => {
     (j.advances||[]).forEach(a => { if (inWindow(a.date)) tRecentPay += a.amount||0; });
   });
-  (state.homewatch||[]).forEach(hw => {
+  allHW.forEach(hw => {
     (hw.advances||[]).forEach(a => { if (inWindow(a.date)) tRecentPay += a.amount||0; });
   });
 
@@ -1374,12 +1424,14 @@ function renderEmpSummary() {
 // ─── RENDER JOBS ─────────────────────────────────────────────────────────────
 function renderJobs() {
   renderSummary();
-  const active   = state.jobs.filter(j => j.status !== 'complete');
-  const complete = state.jobs.filter(j => j.status === 'complete');
+  const isAdmin = currentUser?.isAdmin;
+  const allJobs = isAdmin ? state.jobs : state.jobs.filter(j => j.employeeId === currentUser?.id);
+  const active   = allJobs.filter(j => j.status !== 'complete');
+  const complete = allJobs.filter(j => j.status === 'complete');
   document.getElementById('activeCount').textContent = `${active.length} active job${active.length!==1?'s':''}`;
   document.getElementById('activeJobsList').innerHTML   = active.length   ? active.map(jobCard).join('')   : emptyState('No active jobs. Click + New Job to get started.');
   document.getElementById('completeJobsList').innerHTML = complete.length ? complete.map(jobCard).join('') : emptyState('No completed jobs yet.');
-  document.getElementById('allJobsList').innerHTML      = state.jobs.length ? state.jobs.map(jobCard).join('') : emptyState('No jobs yet.');
+  document.getElementById('allJobsList').innerHTML      = allJobs.length  ? allJobs.map(jobCard).join('')  : emptyState('No jobs yet.');
   applyAdminClasses();
 }
 function applyAdminClasses() {
@@ -1456,9 +1508,11 @@ function cyclePayType(jobId, idx) {
 }
 
 function jobDetail(job, c) {
-  const en    = esc(state.settings.empName || 'Employee');
-  const admin = currentUser?.isAdmin;
-  const empPct = Math.round((job.repaymentMode?(1-(state.settings.debtOwnerShare||0.5)):state.settings.empShare)*100);
+  const emp    = getEmp(job.employeeId);
+  const en     = esc(emp?.name || 'Employee');
+  const admin  = currentUser?.isAdmin;
+  const empShare = emp?.empShare ?? 0.66;
+  const empPct = Math.round((job.repaymentMode ? (1-(state.settings.debtOwnerShare||0.5)) : empShare)*100);
 
   const milestonesHtml = (job.milestones||[]).map((m,i) => {
     const amt = (m.pct/100)*(job.quote||0);
@@ -1575,7 +1629,7 @@ function jobDetail(job, c) {
       <div class="settlement-title">Settlement Breakdown${job.repaymentMode?` <span style="color:var(--red);font-size:14px;margin-left:8px">⚖ REPAYMENT SPLIT ${Math.round((state.settings.debtOwnerShare||0.5)*100)}/${Math.round((1-(state.settings.debtOwnerShare||0.5))*100)}</span>`:''}</div>
       <div class="settlement-grid" style="${admin?'':'grid-template-columns:1fr'}">
         <div class="admin-only">
-          <div class="settlement-col-title">Your ${Math.round((job.repaymentMode?(state.settings.debtOwnerShare||0.5):(1-state.settings.empShare))*100)}%</div>
+          <div class="settlement-col-title">Your ${Math.round((job.repaymentMode?(state.settings.debtOwnerShare||0.5):(1-empShare))*100)}%</div>
           <div class="settlement-big orange">${fmt(c.ownerProfit)}</div>
           <div style="font-size:16px;color:var(--text3);font-family:var(--mono)">profit share</div>
           ${job.repaymentMode&&c.debtContribution>0?`<div style="font-size:16px;color:var(--red);font-family:var(--mono);margin-top:4px">⚖ ${fmt(c.debtContribution)} → debt</div>`:''}
@@ -1888,6 +1942,16 @@ function deleteHoursEntry(hId) {
 // ─── JOB MODAL ────────────────────────────────────────────────────────────────
 let milestoneCount = 0;
 let quoteItemCount = 0;
+function populateEmpDropdown(selectId, wrapId, currentEmpId) {
+  const emps = state.users.filter(u => !u.isAdmin);
+  const wrap = document.getElementById(wrapId);
+  if (!wrap) return;
+  wrap.style.display = emps.length > 1 ? '' : 'none';
+  if (emps.length <= 1) return;
+  document.getElementById(selectId).innerHTML = emps.map(u =>
+    `<option value="${u.id}"${u.id === currentEmpId ? ' selected' : ''}>${esc(u.name)}</option>`
+  ).join('');
+}
 function openNewJobModal() {
   editingJobId = null;
   document.getElementById('jobModalTitle').textContent = 'New Job';
@@ -1903,6 +1967,7 @@ function openNewJobModal() {
   addMilestoneField('Deposit (50%)', 50);
   addMilestoneField('Rough-in (25%)', 25);
   addMilestoneField('Completion (25%)', 25);
+  populateEmpDropdown('f_emp', 'f_emp_wrap', null);
   document.getElementById('jobModal').classList.remove('hidden');
 }
 function editJob(id) {
@@ -1923,6 +1988,7 @@ function editJob(id) {
   document.getElementById('milestoneList').innerHTML = '';
   milestoneCount = 0;
   (job.milestones||[]).forEach(m=>addMilestoneField(m.label,m.pct));
+  populateEmpDropdown('f_emp', 'f_emp_wrap', job.employeeId);
   document.getElementById('jobModal').classList.remove('hidden');
 }
 function addMilestoneField(label='', pct='') {
@@ -1996,10 +2062,15 @@ function saveJob() {
     milestones.push({label:lbl,pct,status:'pending'}); total+=pct;
   });
   if (milestones.length&&Math.abs(total-100)>0.01) { alert(`Milestone percentages add up to ${total}%, not 100%.`); return; }
+  const emps = state.users.filter(u => !u.isAdmin);
+  const employeeId = emps.length > 1
+    ? (document.getElementById('f_emp')?.value || emps[0]?.id)
+    : emps[0]?.id;
   if (editingJobId) {
     const job = state.jobs.find(j=>j.id===editingJobId);
     if (job) {
       job.name=name; job.quote=quote; job.date=date; job.isItemized=isItemized; job.quoteItems=quoteItems;
+      if (employeeId) job.employeeId = employeeId;
       milestones.forEach((m,i)=>{ if(job.milestones[i]) m.status=job.milestones[i].status||'pending'; });
       job.milestones=milestones;
     }
@@ -2008,7 +2079,8 @@ function saveJob() {
     expandedJobs.add(newId);
     saveExpandedState();
     state.jobs.push({ id:newId, name, quote, date, isItemized, quoteItems, status:'active',
-      milestones, addOns:[], subtractions:[], materials:[], advances:[], fees:[], jobNotes:[], hours:[], repaymentMode:false });
+      milestones, addOns:[], subtractions:[], materials:[], advances:[], fees:[], jobNotes:[], hours:[], repaymentMode:false,
+      employeeId: employeeId || '' });
   }
   save(); renderJobs(); closeModal('jobModal');
 }
@@ -2016,7 +2088,8 @@ function saveJob() {
 // ─── ADD ITEM MODAL ───────────────────────────────────────────────────────────
 function openAddItem(jobId, type, itemId = null) {
   addItemContext = { jobId, type, itemId };
-  const en = esc(state.settings.empName||'Employee');
+  const job = state.jobs.find(j => j.id === jobId);
+  const en = esc(getEmp(job?.employeeId)?.name || 'Employee');
   const isEdit = !!itemId;
   const titles = { addon: isEdit?'Edit Addition':'Add Addition', subtraction: isEdit?'Edit Subtraction':'Add Subtraction', material: isEdit?'Edit Material':'Add Material', advance: isEdit?'Edit Employee Pay':'Add Employee Pay' };
   document.getElementById('addItemTitle').textContent = titles[type];
@@ -2072,7 +2145,6 @@ function openAddItem(jobId, type, itemId = null) {
   }
   document.getElementById('addItemForm').innerHTML = html;
   if (isEdit) {
-    const job = state.jobs.find(j => j.id === jobId);
     const arr = type==='addon' ? job?.addOns : type==='subtraction' ? job?.subtractions : type==='material' ? job?.materials : job?.advances;
     const item = arr?.find(x => x.id === itemId);
     if (item) {
@@ -2257,17 +2329,16 @@ function printQuoteSnapshot() {
 
 // ─── SETTINGS ─────────────────────────────────────────────────────────────────
 function openSettings() {
-  document.getElementById('s_empName').value        = state.settings.empName||'Employee';
-  document.getElementById('s_empShare').value       = state.settings.empShare;
   document.getElementById('s_feeRate').value        = state.settings.feeRate;
   document.getElementById('s_debtOriginal').value   = state.settings.debtOriginal||2256.58;
   document.getElementById('s_debtOwnerShare').value = state.settings.debtOwnerShare||0.50;
-  document.getElementById('s_debtHint').textContent = `Normal is ${(1 - state.settings.empShare).toFixed(2)}. Extra above normal counts toward debt.`;
+  const debtEmp = getEmp(state.settings.debtEmployeeId);
+  document.getElementById('s_debtHint').textContent = debtEmp
+    ? `Debt assigned to ${debtEmp.name}. Extra above their normal split (${Math.round((1-(debtEmp.empShare??0.66))*100)}%) counts toward debt.`
+    : 'Extra above normal split counts toward debt.';
   document.getElementById('settingsModal').classList.remove('hidden');
 }
 function saveSettings() {
-  state.settings.empName        = document.getElementById('s_empName').value.trim()||'Employee';
-  state.settings.empShare       = parseFloat(document.getElementById('s_empShare').value)||0.66;
   state.settings.feeRate        = parseFloat(document.getElementById('s_feeRate').value)||0.026;
   state.settings.debtOriginal   = parseFloat(document.getElementById('s_debtOriginal').value)||0;
   state.settings.debtOwnerShare = parseFloat(document.getElementById('s_debtOwnerShare').value)||0.50;
@@ -2420,7 +2491,8 @@ function renderUserList() {
           <div class="user-row-name">${esc(u.name)}</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <span class="user-row-badge${u.isAdmin?'':' emp'}">${u.isAdmin?'Admin':'Employee'}</span>
+          <span class="user-row-badge${u.isAdmin?'':' emp'}">${u.isAdmin ? 'Admin' : `Employee · ${Math.round((u.empShare??0.66)*100)}%`}</span>
+          ${!u.isAdmin ? `<button class="btn btn-ghost btn-sm" onclick="openEditEmp('${u.id}')">Edit</button>` : ''}
           <button class="btn btn-ghost btn-sm" onclick="openResetPin('${u.id}')">Reset PIN</button>
           ${!u.isAdmin || users.filter(x=>x.isAdmin).length > 1
             ? `<button class="btn btn-danger btn-sm" onclick="deleteUser('${u.id}')">Remove</button>`
@@ -2440,7 +2512,8 @@ async function addUser() {
     alert('A user with that name already exists.'); return;
   }
   if (!state.users) state.users = [];
-  state.users.push({ id: uid(), name, pin, isAdmin: role === 'admin' });
+  state.users.push({ id: uid(), name, pin, isAdmin: role === 'admin',
+    ...(role !== 'admin' ? { empShare: 0.66 } : {}) });
   await save();
   renderUserList();
   document.getElementById('nu_name').value = '';
@@ -2474,6 +2547,49 @@ async function doResetPin() {
   await save();
   closeModal('resetPinModal');
   renderUserList();
+}
+
+let editEmpId = null;
+function openEditEmp(userId) {
+  const u = state.users.find(x => x.id === userId);
+  if (!u) return;
+  editEmpId = userId;
+  document.getElementById('empEditTitle').textContent = `Edit — ${esc(u.name)}`;
+  document.getElementById('ee_name').value  = u.name;
+  document.getElementById('ee_share').value = u.empShare ?? 0.66;
+  const isDebtEmp = state.settings.debtEmployeeId === userId;
+  const otherEmps = state.users.filter(x => !x.isAdmin && x.id !== userId);
+  document.getElementById('ee_debtInfo').innerHTML = isDebtEmp
+    ? `<span style="color:var(--accent)">Startup debt assigned to this employee.</span>${otherEmps.length ? ` <button class="btn btn-ghost btn-sm" style="margin-left:8px" onclick="reassignDebt('${userId}',null)">Reassign</button>` : ''}`
+    : `<span style="color:var(--text3)">No startup debt assigned.</span>${state.settings.debtOriginal ? ` <button class="btn btn-ghost btn-sm" style="margin-left:8px" onclick="reassignDebt(null,'${userId}')">Assign here</button>` : ''}`;
+  document.getElementById('empEditModal').classList.remove('hidden');
+}
+async function saveEmpEdit() {
+  const u = state.users.find(x => x.id === editEmpId);
+  if (!u) return;
+  const name  = document.getElementById('ee_name').value.trim();
+  const share = parseFloat(document.getElementById('ee_share').value);
+  if (!name) { alert('Name required.'); return; }
+  if (isNaN(share) || share <= 0 || share >= 1) { alert('Share must be between 0.01 and 0.99.'); return; }
+  u.name = name; u.empShare = share;
+  await save(); closeModal('empEditModal'); renderUserList(); renderAll();
+}
+async function reassignDebt(fromId, toId) {
+  if (toId) {
+    const target = state.users.find(u => u.id === toId);
+    if (target && confirm(`Assign startup debt to ${target.name}?`)) {
+      state.settings.debtEmployeeId = target.id;
+      await save(); openEditEmp(editEmpId);
+    }
+  } else if (fromId) {
+    const others = state.users.filter(u => !u.isAdmin && u.id !== fromId);
+    if (others.length === 1 && confirm(`Reassign debt to ${others[0].name}?`)) {
+      state.settings.debtEmployeeId = others[0].id;
+      await save(); openEditEmp(fromId);
+    } else if (others.length > 1) {
+      alert('Multiple employees — use the Edit button on the target employee to assign debt there.');
+    }
+  }
 }
 
 function openChangePin() {
