@@ -185,12 +185,6 @@
   .hours-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); gap: 8px; }
   .hours-item:last-child { border-bottom: none; }
 
-  /* ── MORE MENU (mobile dropdown) ─────────────────────────────────────────── */
-  .header-mobile-more { display: none; position: relative; }
-  .more-item { display: block; width: 100%; text-align: left; background: transparent; border: none; border-bottom: 1px solid var(--border); padding: 10px 14px; font-family: var(--mono); font-size: 13px; color: var(--text2); cursor: pointer; white-space: nowrap; }
-  .more-item:last-child { border-bottom: none; }
-  .more-item:hover { background: var(--bg3); color: var(--text); }
-
   /* ── MOBILE ───────────────────────────────────────────────────────────────── */
   @media (max-width: 600px) {
     /* Header */
@@ -199,9 +193,9 @@
     .header-actions { gap: 6px; }
     .header-actions .btn-ghost.btn-sm { padding: 5px 8px; font-size: 11px; white-space: nowrap; }
     .header-actions .btn-primary { padding: 6px 10px; font-size: 11px; white-space: nowrap; }
-    /* Collapse individual header buttons into More dropdown */
-    .header-desktop-btn { display: none !important; }
-    .header-mobile-more { display: block; }
+    /* On mobile, Sign Out and Split Pay move into Settings modal */
+    #signOutBtn { display: none !important; }
+    #splitPayBtn { display: none !important; }
 
     /* Main padding */
     .main { padding: 14px; }
@@ -355,20 +349,11 @@
   <div class="header-title">JOB<span>/</span>TRACKER</div>
   <div class="header-actions">
     <span id="headerUserLabel" style="font-family:var(--mono);font-size:12px;color:var(--text3);display:none"></span>
-    <button class="btn btn-ghost btn-sm header-desktop-btn" id="signOutBtn" onclick="signOut()" style="display:none">⎋ Sign Out</button>
+    <button class="btn btn-ghost btn-sm" id="signOutBtn" onclick="signOut()" style="display:none">⎋ Sign Out</button>
     <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)" />
-    <button class="btn btn-ghost btn-sm employee-only header-desktop-btn" onclick="openMySettings()">⚙ Settings</button>
-    <button class="btn btn-ghost btn-sm admin-only header-desktop-btn" onclick="openSettings()">⚙ Settings</button>
-    <button class="btn btn-ghost btn-sm admin-only header-desktop-btn" onclick="openSplitPay()">÷ Split Pay</button>
-    <div id="moreMenuWrap" class="header-mobile-more">
-      <button class="btn btn-ghost btn-sm" onclick="toggleMoreMenu(event)">⋯ More</button>
-      <div id="moreDropdown" class="hidden" style="position:absolute;right:0;top:calc(100% + 6px);background:var(--bg2);border:1px solid var(--border2);border-radius:4px;min-width:150px;z-index:500;box-shadow:0 4px 20px rgba(0,0,0,0.4)">
-        <button class="more-item" id="moreSignOutBtn" onclick="signOut()" style="display:none">⎋ Sign Out</button>
-        <button class="more-item employee-only" onclick="openMySettings();closeMoreMenu()">⚙ Settings</button>
-        <button class="more-item admin-only" onclick="openSettings();closeMoreMenu()">⚙ Settings</button>
-        <button class="more-item admin-only" onclick="openSplitPay();closeMoreMenu()">÷ Split Pay</button>
-      </div>
-    </div>
+    <button class="btn btn-ghost btn-sm employee-only" onclick="openMySettings()">⚙ Settings</button>
+    <button class="btn btn-ghost btn-sm admin-only" onclick="openSettings()">⚙ Settings</button>
+    <button class="btn btn-ghost btn-sm admin-only" id="splitPayBtn" onclick="openSplitPay()">÷ Split Pay</button>
     <button class="btn btn-primary admin-only" onclick="openNewJobModal()">+ New Job</button>
   </div>
 </div>
@@ -488,6 +473,7 @@
     <div class="modal-actions" style="position:relative">
       <span style="position:absolute;left:0;bottom:0;font-family:var(--mono);font-size:12px;color:var(--text3);cursor:pointer;text-decoration:underline dotted" onclick="openChangelog()">v1.15</span>
       <button class="btn btn-ghost btn-sm" onclick="closeModal('settingsModal');openUserMgmt()" style="margin-right:auto;margin-left:40px">👥 Manage Employees</button>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('settingsModal');signOut()">⎋ Sign Out</button>
       <button class="btn btn-ghost" onclick="closeModal('settingsModal')">Cancel</button>
       <button class="btn btn-primary" onclick="saveSettings()">Save</button>
     </div>
@@ -825,6 +811,7 @@
       <button class="btn btn-ghost btn-sm" onclick="closeModal('mySettingsModal');openChangePin()">🔑 Change My PIN</button>
     </div>
     <div class="modal-actions">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('mySettingsModal');signOut()">⎋ Sign Out</button>
       <button class="btn btn-ghost" onclick="closeModal('mySettingsModal')">Close</button>
     </div>
   </div>
@@ -2430,29 +2417,6 @@ function switchTab(name, el) {
 }
 function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
 function openChangelog() { document.getElementById('changelogModal').classList.remove('hidden'); }
-function toggleMoreMenu(e) {
-  e.stopPropagation();
-  const dropdown = document.getElementById('moreDropdown');
-  if (dropdown.classList.contains('hidden')) {
-    dropdown.classList.remove('hidden');
-    // setTimeout so this open-click doesn't immediately trigger the outside listener
-    setTimeout(() => {
-      document.addEventListener('click',      _moreOutside, true);
-      document.addEventListener('touchstart', _moreOutside, true);
-    }, 0);
-  } else {
-    closeMoreMenu();
-  }
-}
-function _moreOutside(e) {
-  const wrap = document.getElementById('moreMenuWrap');
-  if (!wrap || !wrap.contains(e.target)) closeMoreMenu();
-}
-function closeMoreMenu() {
-  document.getElementById('moreDropdown').classList.add('hidden');
-  document.removeEventListener('click',      _moreOutside, true);
-  document.removeEventListener('touchstart', _moreOutside, true);
-}
 document.querySelectorAll('.modal-overlay').forEach(el=>{
   el.addEventListener('click', e=>{ if(e.target===el) el.classList.add('hidden'); });
 });
@@ -2548,8 +2512,6 @@ function applyUserView() {
   const sob = document.getElementById('signOutBtn');
   if (lbl) { lbl.textContent = currentUser ? currentUser.name : ''; lbl.style.display = 'inline'; }
   if (sob) sob.style.display = 'inline-block';
-  const msob = document.getElementById('moreSignOutBtn');
-  if (msob) msob.style.display = '';
 
   // Apply admin-only / employee-only visibility
   applyAdminClasses();
