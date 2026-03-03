@@ -98,6 +98,9 @@
 
   .total-line { display: flex; justify-content: space-between; padding: 10px 0 0; margin-top: 6px; border-top: 1px solid var(--border); font-weight: 600; }
   .total-line .line-item-value { font-size: 19px; }
+  /* Suppress double-border: when a line-item or section-title already has border-bottom, remove border-top from the adjacent total-line */
+  .detail-section-title + .total-line,
+  .line-item + .total-line { border-top: none; margin-top: 0; }
 
   /* THREE-STATE STATUS BADGES */
   .status-badge { display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono); font-size: 15px; padding: 3px 8px; border-radius: 2px; cursor: pointer; white-space: nowrap; user-select: none; transition: all 0.15s; }
@@ -1677,7 +1680,7 @@ function jobDetail(job, c) {
           <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','material')">+</button>
         </div>
         ${matsHtml||'<div style="color:var(--text3);font-size:16px;padding:4px 0">None logged</div>'}
-        <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
+        <div style="margin-top:4px;padding-top:4px">
           <div class="line-item admin-only"><div class="line-item-label" style="font-size:16px">EHS materials</div><div class="line-item-value dim" style="font-size:16px">-${fmt(c.ownerMats)}</div></div>
           <div class="line-item"><div class="line-item-label" style="font-size:16px">${en}'s materials</div><div class="line-item-value dim" style="font-size:16px">-${fmt(c.empMats)}</div></div>
         </div>
