@@ -1642,6 +1642,18 @@ function jobDetail(job, c) {
       </div>
 
       <div class="detail-section">
+        <div class="detail-section-title">Collected / Net Revenue</div>
+        <div class="total-line"><span style="color:var(--text2)">Collected (gross)</span><span class="line-item-value green">${fmt(c.collectedGross)}</span></div>
+        <div class="admin-only">
+          <div class="line-item" style="padding-top:6px">
+            <div class="line-item-label" style="font-size:16px">Est. Square fees (~${(state.settings.feeRate*100).toFixed(1)}%)</div>
+            <div class="line-item-value red" style="font-size:16px">-${fmt(c.totalFees)}</div>
+          </div>
+          <div class="total-line"><span style="color:var(--text2)">Net Revenue</span><span class="line-item-value orange">${fmt(c.netRevenue)}</span></div>
+        </div>
+      </div>
+
+      <div class="detail-section">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
           <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Subtractions</div>
           <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','subtraction')">+</button>
@@ -1657,18 +1669,6 @@ function jobDetail(job, c) {
         </div>
         ${addOnsHtml||'<div style="color:var(--text3);font-size:16px;padding:4px 0">None</div>'}
         ${c.addOnTotal>0?`<div class="total-line"><span style="color:var(--text2)">Total</span><span class="line-item-value" style="color:var(--purple)">+${fmt(c.addOnTotal)}</span></div>`:''}
-      </div>
-
-      <div class="detail-section">
-        <div class="detail-section-title">Collected / Net Revenue</div>
-        <div class="total-line"><span style="color:var(--text2)">Collected (gross)</span><span class="line-item-value green">${fmt(c.collectedGross)}</span></div>
-        <div class="admin-only">
-          <div class="line-item" style="padding-top:6px">
-            <div class="line-item-label" style="font-size:16px">Est. Square fees (~${(state.settings.feeRate*100).toFixed(1)}%)</div>
-            <div class="line-item-value red" style="font-size:16px">-${fmt(c.totalFees)}</div>
-          </div>
-          <div class="total-line"><span style="color:var(--text2)">Net Revenue</span><span class="line-item-value orange">${fmt(c.netRevenue)}</span></div>
-        </div>
       </div>
 
       <div class="detail-section">
