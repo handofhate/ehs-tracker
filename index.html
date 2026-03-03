@@ -1612,7 +1612,7 @@ function jobDetail(job, c) {
 
   const matsHtml = (job.materials||[]).map((m,i) => `
     <div class="line-item">
-      <div class="line-item-label">${esc(m.label||'Materials')}<span class="tag ${m.who==='owner'?'tag-mine':'tag-his'}">${m.who==='owner'?'mine':en}</span></div>
+      <div class="line-item-label">${esc(m.label||'Materials')}<span class="tag ${m.who==='owner'?'tag-mine':'tag-his'}">${m.who==='owner'?'EHS':en}</span></div>
       <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
         <div class="line-item-value red">${fmt(m.amount)}</div>
         <button class="btn btn-ghost btn-sm admin-only" onclick="openAddItem('${job.id}','material','${m.id}')">✏</button>
@@ -1634,24 +1634,33 @@ function jobDetail(job, c) {
   return `
   <div class="job-detail">
     <div class="detail-grid">
+
       <div class="detail-section">
-        <div class="detail-section-title">Revenue & Collections</div>
+        <div class="detail-section-title">Revenue</div>
         <div class="line-item line-item-simple"><div class="line-item-label">Base Quote</div><div class="line-item-value">${fmt(job.quote)}</div></div>
         ${milestonesHtml}
-        <div class="divider"></div>
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
-          <div style="font-size:15px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.08em">Subtractions</div>
+      </div>
+
+      <div class="detail-section">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+          <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Subtractions</div>
           <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','subtraction')">+</button>
         </div>
         ${subtractionsHtml||'<div style="color:var(--text3);font-size:16px;padding:4px 0">None</div>'}
-        ${c.subtractionTotal>0?`<div style="display:flex;justify-content:space-between;padding:5px 0 2px;font-family:var(--mono);font-size:15px"><span style="color:var(--text3)">Subtotal</span><span style="color:var(--red)">-${fmt(c.subtractionTotal)}</span></div>`:''}
-        <div class="divider"></div>
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
-          <div style="font-size:15px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.08em">Additions</div>
+        ${c.subtractionTotal>0?`<div class="total-line"><span style="color:var(--text2)">Total</span><span class="line-item-value red">-${fmt(c.subtractionTotal)}</span></div>`:''}
+      </div>
+
+      <div class="detail-section">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+          <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Additions</div>
           <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','addon')">+</button>
         </div>
         ${addOnsHtml||'<div style="color:var(--text3);font-size:16px;padding:4px 0">None</div>'}
-        ${c.addOnTotal>0?`<div style="display:flex;justify-content:space-between;padding:5px 0 2px;font-family:var(--mono);font-size:15px"><span style="color:var(--text3)">Subtotal</span><span style="color:var(--purple)">+${fmt(c.addOnTotal)}</span></div>`:''}
+        ${c.addOnTotal>0?`<div class="total-line"><span style="color:var(--text2)">Total</span><span class="line-item-value" style="color:var(--purple)">+${fmt(c.addOnTotal)}</span></div>`:''}
+      </div>
+
+      <div class="detail-section">
+        <div class="detail-section-title">Collected / Net Revenue</div>
         <div class="total-line"><span style="color:var(--text2)">Collected (gross)</span><span class="line-item-value green">${fmt(c.collectedGross)}</span></div>
         <div class="admin-only">
           <div class="line-item" style="padding-top:6px">
@@ -1664,23 +1673,26 @@ function jobDetail(job, c) {
 
       <div class="detail-section">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
-          <div style="font-family:var(--mono);font-size:14px;text-transform:uppercase;letter-spacing:0.1em;color:var(--text3)">Materials</div>
+          <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Materials</div>
           <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','material')">+</button>
         </div>
         ${matsHtml||'<div style="color:var(--text3);font-size:16px;padding:4px 0">None logged</div>'}
         <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
-          <div class="line-item admin-only"><div class="line-item-label" style="font-size:16px">My materials</div><div class="line-item-value dim" style="font-size:16px">-${fmt(c.ownerMats)}</div></div>
+          <div class="line-item admin-only"><div class="line-item-label" style="font-size:16px">EHS materials</div><div class="line-item-value dim" style="font-size:16px">-${fmt(c.ownerMats)}</div></div>
           <div class="line-item"><div class="line-item-label" style="font-size:16px">${en}'s materials</div><div class="line-item-value dim" style="font-size:16px">-${fmt(c.empMats)}</div></div>
         </div>
         <div class="total-line"><span style="color:var(--text2)">Total Materials</span><span class="line-item-value red">-${fmt(c.totalMats)}</span></div>
-        <div class="divider"></div>
+      </div>
+
+      <div class="detail-section">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
-          <div style="font-family:var(--mono);font-size:14px;text-transform:uppercase;letter-spacing:0.1em;color:var(--text3)">Employee Pay</div>
+          <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Employee Pay</div>
           <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','advance')">+</button>
         </div>
         ${advHtml||'<div style="color:var(--text3);font-size:16px;padding:4px 0">None logged</div>'}
         <div class="total-line"><span style="color:var(--text2)">Total Paid</span><span class="line-item-value red">-${fmt(c.advancesPaid)}</span></div>
       </div>
+
     </div>
 
     <div class="settlement-box">
@@ -2185,7 +2197,7 @@ function openAddItem(jobId, type, itemId = null) {
     html=`<div class="form-group"><label class="form-label">Description</label><input class="form-input" id="ai_label" placeholder="e.g. Home Depot - lumber" /></div>
       <div class="form-group"><label class="form-label">Amount ($)</label><input class="form-input" id="ai_amount" type="number" step="0.01" placeholder="0.00" /></div>
       <div class="form-group"><label class="form-label">Purchased by</label>
-        <select class="form-input" id="ai_who"><option value="owner">Me</option><option value="emp">${en}</option></select>
+        <select class="form-input" id="ai_who"><option value="owner">EHS</option><option value="emp">${en}</option></select>
       </div>`;
   } else if (type==='advance') {
     html=`<div class="form-group"><label class="form-label">Description / Note</label><input class="form-input" id="ai_label" placeholder="e.g. Weekly pay" /></div>
