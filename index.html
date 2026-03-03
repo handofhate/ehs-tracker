@@ -454,9 +454,13 @@
   <div class="modal">
     <div class="modal-title">Settings</div>
     <div class="form-group">
-      <label class="form-label">Square processing fee rate (e.g. 0.026 for 2.6%)</label>
+      <label class="form-label">Square processing fee rate (e.g. 0.029 for 2.9%)</label>
       <input class="form-input" id="s_feeRate" type="number" step="0.001" min="0" max="1" />
-      <div class="form-hint">Applied to collected amounts. Fees deducted before split.</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Square fixed fee per transaction (e.g. 0.30 for 30¢)</label>
+      <input class="form-input" id="s_txnFee" type="number" step="0.01" min="0" />
+      <div class="form-hint">Both fees are deducted before the profit split. Standard Square rate: 2.9% + $0.30/txn.</div>
     </div>
     <div class="form-group">
       <label class="form-label">Original debt owed by employee ($)</label>
@@ -872,7 +876,7 @@ const DOC = db.collection('jobtracker').doc('state');
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
 let state = {
-  settings: { empName: 'Employee', empShare: 0.66, feeRate: 0.026, debtOriginal: 2256.58, debtOwnerShare: 0.50 },
+  settings: { empName: 'Employee', empShare: 0.66, feeRate: 0.026, txnFee: 0.30, debtOriginal: 2256.58, debtOwnerShare: 0.50 },
   debtPayments: [],
   jobs: [],
   users: [],
@@ -906,6 +910,7 @@ function migrateState(s) {
   }
   if (s.settings.debtOriginal === undefined) s.settings.debtOriginal = 2256.58;
   if (s.settings.debtOwnerShare === undefined) s.settings.debtOwnerShare = 0.50;
+  if (s.settings.txnFee === undefined) s.settings.txnFee = 0.30;
   if (!s.debtPayments) s.debtPayments = [];
   (s.debtPayments).forEach(p => { if (p.linkedJobId === undefined) p.linkedJobId = null; });
   if (!s.users) s.users = [];
@@ -1024,8 +1029,8 @@ function fmtDate(d) {
 function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 // ─── CALCULATIONS ─────────────────────────────────────────────────────────────
-function calcSplit(gross, { empShare, feeRate }) {
-  const totalFees  = gross * feeRate;
+function calcSplit(gross, { empShare, feeRate, txnFee = 0, txnCount = 0 }) {
+  const totalFees  = gross * feeRate + txnFee * txnCount;
   const netRevenue = gross - totalFees;
   const empOwed    = netRevenue * empShare;
   const ownerOwed  = netRevenue * (1 - empShare);
@@ -1039,7 +1044,7 @@ function getEmp(userId) {
 function calcJob(job) {
   const emp = getEmp(job.employeeId);
   const empShare = emp?.empShare ?? 0.66;
-  const { feeRate, debtOwnerShare } = state.settings;
+  const { feeRate, txnFee = 0, debtOwnerShare } = state.settings;
   const normalOwnerShare = 1 - empShare;
   const effectiveOwnerShare = job.repaymentMode ? (debtOwnerShare || 0.50) : normalOwnerShare;
   const effectiveEmpShare   = 1 - effectiveOwnerShare;
@@ -1049,16 +1054,16 @@ function calcJob(job) {
   const subtractionTotal= (job.subtractions || []).reduce((s,a) => s + (a.amount||0), 0);
   const contractTotal   = (job.quote || 0) + addOnTotal - subtractionTotal;
 
-  let collectedGross = 0, estimatedFees = 0;
+  let collectedGross = 0, estimatedFees = 0, collectedTxns = 0;
   (job.milestones || []).forEach(m => {
     if (m.status === 'collected') {
       const g = (m.pct/100) * (job.quote||0);
-      collectedGross += g; estimatedFees += g * feeRate;
+      collectedGross += g; estimatedFees += g * feeRate; collectedTxns++;
     }
   });
   (job.addOns || []).forEach(a => {
     if (a.status === 'collected') {
-      collectedGross += a.amount||0; estimatedFees += (a.amount||0) * feeRate;
+      collectedGross += a.amount||0; estimatedFees += (a.amount||0) * feeRate; collectedTxns++;
     }
   });
   (job.subtractions || []).forEach(a => {
@@ -1066,6 +1071,7 @@ function calcJob(job) {
       collectedGross -= a.amount||0; estimatedFees -= (a.amount||0) * feeRate;
     }
   });
+  estimatedFees += txnFee * collectedTxns;
   const manualFees = (job.fees || []).reduce((s,f) => s + (f.amount||0), 0);
   const totalFees = estimatedFees + manualFees;
   const netRevenue = collectedGross - totalFees;
@@ -1099,10 +1105,12 @@ function calcJob(job) {
 function calcHW(hw) {
   const emp = getEmp(hw.employeeId);
   const empShare = emp?.empShare ?? 0.66;
-  const { feeRate } = state.settings;
-  const collectedGross = (hw.payments||[]).filter(p=>p.status==='collected').reduce((s,p)=>s+(p.amount||0),0);
-  const pendingGross   = (hw.payments||[]).filter(p=>p.status!=='collected').reduce((s,p)=>s+(p.amount||0),0);
-  const { totalFees, netRevenue, empOwed, ownerOwed } = calcSplit(collectedGross, { empShare, feeRate });
+  const { feeRate, txnFee = 0 } = state.settings;
+  const collectedPayments = (hw.payments||[]).filter(p=>p.status==='collected');
+  const collectedGross    = collectedPayments.reduce((s,p)=>s+(p.amount||0),0);
+  const txnCount          = collectedPayments.length;
+  const pendingGross      = (hw.payments||[]).filter(p=>p.status!=='collected').reduce((s,p)=>s+(p.amount||0),0);
+  const { totalFees, netRevenue, empOwed, ownerOwed } = calcSplit(collectedGross, { empShare, feeRate, txnFee, txnCount });
   const advancesPaid   = (hw.advances||[]).reduce((s,a)=>s+(a.amount||0),0);
   const empBalance     = empOwed - advancesPaid;
   return { collectedGross, pendingGross, totalFees, netRevenue, empOwed, ownerOwed, advancesPaid, empBalance };
@@ -1155,7 +1163,7 @@ function hwDetail(hw, c) {
   const advances  = hw.advances  || [];
   const emp       = getEmp(hw.employeeId);
   const en        = esc(emp?.name || 'Employee');
-  const feeLabel  = `Est. Square fees (~${(state.settings.feeRate*100).toFixed(1)}%)`;
+  const feeLabel  = `Est. Square fees (~${(state.settings.feeRate*100).toFixed(1)}%${state.settings.txnFee ? ` + $${state.settings.txnFee.toFixed(2)}/txn` : ''})`;
   const empPct    = Math.round((emp?.empShare ?? 0.66) * 100);
   return `
     <div class="job-detail">
@@ -1649,7 +1657,7 @@ function jobDetail(job, c) {
         <div class="total-line"><span style="color:var(--text2)">Collected (gross)</span><span class="line-item-value green">${fmt(c.collectedGross)}</span></div>
         <div class="admin-only">
           <div class="line-item" style="padding-top:6px">
-            <div class="line-item-label" style="font-size:16px">Est. Square fees (~${(state.settings.feeRate*100).toFixed(1)}%)</div>
+            <div class="line-item-label" style="font-size:16px">Est. Square fees (~${(state.settings.feeRate*100).toFixed(1)}%${state.settings.txnFee ? ` + $${state.settings.txnFee.toFixed(2)}/txn` : ''})</div>
             <div class="line-item-value red" style="font-size:16px">-${fmt(c.totalFees)}</div>
           </div>
           <div class="total-line"><span style="color:var(--text2)">Net Revenue</span><span class="line-item-value orange">${fmt(c.netRevenue)}</span></div>
@@ -2403,6 +2411,7 @@ function printQuoteSnapshot() {
 // ─── SETTINGS ─────────────────────────────────────────────────────────────────
 function openSettings() {
   document.getElementById('s_feeRate').value        = state.settings.feeRate;
+  document.getElementById('s_txnFee').value         = state.settings.txnFee ?? 0.30;
   document.getElementById('s_debtOriginal').value   = state.settings.debtOriginal||2256.58;
   document.getElementById('s_debtOwnerShare').value = state.settings.debtOwnerShare||0.50;
   const debtEmp = getEmp(state.settings.debtEmployeeId);
@@ -2413,6 +2422,7 @@ function openSettings() {
 }
 function saveSettings() {
   state.settings.feeRate        = parseFloat(document.getElementById('s_feeRate').value)||0.026;
+  state.settings.txnFee         = parseFloat(document.getElementById('s_txnFee').value)||0;
   state.settings.debtOriginal   = parseFloat(document.getElementById('s_debtOriginal').value)||0;
   state.settings.debtOwnerShare = parseFloat(document.getElementById('s_debtOwnerShare').value)||0.50;
   save(); renderJobs(); closeModal('settingsModal');
