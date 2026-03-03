@@ -132,6 +132,18 @@
   .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .form-hint { font-size: 15px; color: var(--text3); margin-top: 4px; }
   .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
+  /* Settings tabbed layout */
+  .settings-modal { display: flex; flex-direction: column; padding: 0; overflow: hidden; max-height: 85vh; max-width: 680px; }
+  .settings-modal-header { padding: 22px 24px 14px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .settings-modal-header .modal-title { margin: 0; }
+  .settings-body { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+  .settings-nav { display: flex; flex-direction: column; width: 136px; border-right: 1px solid var(--border); flex-shrink: 0; padding: 6px 0; overflow-y: auto; }
+  .settings-nav-btn { padding: 10px 14px; font-family: var(--mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text3); cursor: pointer; background: none; border: none; text-align: left; width: 100%; transition: color 0.15s; }
+  .settings-nav-btn:hover { color: var(--text2); }
+  .settings-nav-btn.active { color: var(--accent); box-shadow: inset 2px 0 0 var(--accent); }
+  .settings-panel { display: none; flex: 1; overflow-y: auto; padding: 20px 24px; }
+  .settings-panel.active { display: block; }
+  .settings-modal-footer { padding: 14px 24px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; align-items: center; flex-shrink: 0; }
 
   .milestone-list { margin-top: 8px; }
   .milestone-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
@@ -451,38 +463,102 @@
 
 <!-- SETTINGS MODAL -->
 <div id="settingsModal" class="modal-overlay hidden">
-  <div class="modal">
-    <div class="modal-title">Settings</div>
-    <div class="form-group">
-      <label class="form-label">Square processing fee rate (e.g. 0.029 for 2.9%)</label>
-      <input class="form-input" id="s_feeRate" type="number" step="0.001" min="0" max="1" />
+  <div class="modal settings-modal">
+    <div class="settings-modal-header">
+      <div class="modal-title">Settings</div>
+      <span style="font-family:var(--mono);font-size:12px;color:var(--text3);cursor:pointer;text-decoration:underline dotted" onclick="openChangelog()">v1.16</span>
     </div>
-    <div class="form-group">
-      <label class="form-label">Square fixed fee per transaction (e.g. 0.30 for 30¢)</label>
-      <input class="form-input" id="s_txnFee" type="number" step="0.01" min="0" />
-      <div class="form-hint">Both fees are deducted before the profit split. Standard Square rate: 2.9% + $0.30/txn.</div>
+    <div class="settings-body">
+      <nav class="settings-nav">
+        <button class="settings-nav-btn active" onclick="settingsTab('account',this)">Account</button>
+        <button class="settings-nav-btn" onclick="settingsTab('employees',this)">Employees</button>
+        <button class="settings-nav-btn" onclick="settingsTab('fees',this)">Square Fees</button>
+        <button class="settings-nav-btn" onclick="settingsTab('debt',this)">Debt</button>
+        <button class="settings-nav-btn" onclick="settingsTab('data',this)">Data</button>
+      </nav>
+      <div style="flex:1;overflow:hidden;display:flex;flex-direction:column">
+        <div id="stab-account" class="settings-panel active">
+          <div class="form-group">
+            <label class="form-label">Signed in as</label>
+            <div style="font-family:var(--mono);font-size:17px;color:var(--text);margin-bottom:12px" id="s_whoami"></div>
+            <button class="btn btn-ghost btn-sm" onclick="closeModal('settingsModal');openChangePin()">🔑 Change My PIN</button>
+          </div>
+        </div>
+        <div id="stab-employees" class="settings-panel">
+          <div id="userList" style="margin-bottom:16px"></div>
+          <div style="border-top:1px solid var(--border);padding-top:16px">
+            <div class="add-form-label">Add User</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Name</label>
+                <input class="form-input" id="nu_name" placeholder="e.g. Jake" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">PIN</label>
+                <input class="form-input" id="nu_pin" type="password" inputmode="numeric" maxlength="10" placeholder="Choose a PIN" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Role</label>
+              <select class="form-input" id="nu_role">
+                <option value="employee">Employee</option>
+                <option value="admin">Admin (full access)</option>
+              </select>
+            </div>
+            <div style="display:flex;justify-content:flex-end">
+              <button class="btn btn-primary btn-sm" onclick="addUser()">Add User</button>
+            </div>
+          </div>
+        </div>
+        <div id="stab-fees" class="settings-panel">
+          <div class="form-group">
+            <label class="form-label">Percentage rate</label>
+            <div style="display:flex;align-items:center;gap:8px">
+              <input class="form-input" id="s_feeRate" type="number" step="0.1" min="0" max="100" style="max-width:120px" />
+              <span style="font-family:var(--mono);color:var(--text3)">%</span>
+            </div>
+            <div class="form-hint">Standard Square rate is 2.9</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Fixed fee per transaction</label>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-family:var(--mono);color:var(--text3)">$</span>
+              <input class="form-input" id="s_txnFee" type="number" step="0.01" min="0" style="max-width:120px" />
+            </div>
+            <div class="form-hint">Standard Square rate is $0.30 per transaction. Both fees are deducted before the profit split.</div>
+          </div>
+        </div>
+        <div id="stab-debt" class="settings-panel">
+          <div class="form-group">
+            <label class="form-label">Original debt owed ($)</label>
+            <input class="form-input" id="s_debtOriginal" type="number" step="0.01" min="0" />
+            <div class="form-hint">Total startup debt agreed upon.</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Repayment split — your share</label>
+            <div style="display:flex;align-items:center;gap:8px">
+              <input class="form-input" id="s_debtOwnerShare" type="number" step="1" min="0" max="100" style="max-width:120px" />
+              <span style="font-family:var(--mono);color:var(--text3)">%</span>
+            </div>
+            <div class="form-hint" id="s_debtHint"></div>
+          </div>
+        </div>
+        <div id="stab-data" class="settings-panel">
+          <div class="form-group">
+            <label class="form-label">Backup &amp; Restore</label>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+              <button class="btn btn-ghost btn-sm" onclick="exportData()">⬇ Export Backup</button>
+              <button class="btn btn-ghost btn-sm" onclick="closeModal('settingsModal');document.getElementById('importFile').click()">⬆ Import Backup</button>
+            </div>
+            <div class="form-hint">Export saves all jobs, HW clients, users, and settings as a JSON file.</div>
+          </div>
+        </div>
+      </div>
     </div>
-    <div class="form-group">
-      <label class="form-label">Original debt owed by employee ($)</label>
-      <input class="form-input" id="s_debtOriginal" type="number" step="0.01" min="0" />
-      <div class="form-hint">Total processing fee overpayment agreed upon. Default: $2,256.58</div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Repayment split — your share (e.g. 0.50 for 50%)</label>
-      <input class="form-input" id="s_debtOwnerShare" type="number" step="0.01" min="0" max="1" />
-      <div class="form-hint" id="s_debtHint"></div>
-    </div>
-    <div style="border-top:1px solid var(--border);padding-top:16px;margin-top:4px;display:flex;flex-wrap:wrap;gap:8px">
-      <button class="btn btn-ghost btn-sm" onclick="exportData()">⬇ Export Backup</button>
-      <button class="btn btn-ghost btn-sm" onclick="closeModal('settingsModal');document.getElementById('importFile').click()">⬆ Import Backup</button>
-      <button class="btn btn-ghost btn-sm" onclick="closeModal('settingsModal');openChangePin()">🔑 Change My PIN</button>
-    </div>
-    <div class="modal-actions" style="position:relative">
-      <span style="position:absolute;left:0;bottom:0;font-family:var(--mono);font-size:12px;color:var(--text3);cursor:pointer;text-decoration:underline dotted" onclick="openChangelog()">v1.15</span>
-      <button class="btn btn-ghost btn-sm" onclick="closeModal('settingsModal');openUserMgmt()" style="margin-right:auto;margin-left:40px">👥 Manage Employees</button>
-      <button class="btn btn-ghost btn-sm" onclick="closeModal('settingsModal');signOut()">⎋ Sign Out</button>
-      <button class="btn btn-ghost" onclick="closeModal('settingsModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveSettings()">Save</button>
+    <div class="settings-modal-footer">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('settingsModal');signOut()" style="margin-right:auto">⎋ Sign Out</button>
+      <button class="btn btn-ghost" onclick="closeModal('settingsModal')">Close</button>
+      <button class="btn btn-primary" id="s_saveBtn" style="display:none" onclick="saveSettings()">Save</button>
     </div>
   </div>
 </div>
@@ -635,38 +711,6 @@
 </div>
 
 <!-- USER MANAGEMENT MODAL -->
-<div id="userMgmtModal" class="modal-overlay hidden">
-  <div class="modal modal-wide">
-    <div class="modal-title">User Management</div>
-    <div id="userList" style="margin-bottom:20px"></div>
-    <div style="border-top:1px solid var(--border2);padding-top:18px">
-      <div class="add-form-label">Add User</div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Name</label>
-          <input class="form-input" id="nu_name" placeholder="e.g. Jake" />
-        </div>
-        <div class="form-group">
-          <label class="form-label">PIN</label>
-          <input class="form-input" id="nu_pin" type="password" inputmode="numeric" maxlength="10" placeholder="Choose a PIN" />
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Role</label>
-        <select class="form-input" id="nu_role">
-          <option value="employee">Employee (schedule only)</option>
-          <option value="admin">Admin (full access)</option>
-        </select>
-      </div>
-      <div style="display:flex;justify-content:flex-end">
-        <button class="btn btn-primary btn-sm" onclick="addUser()">Add User</button>
-      </div>
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal('userMgmtModal')">Close</button>
-    </div>
-  </div>
-</div>
 
 <!-- EDIT EMPLOYEE MODAL -->
 <div id="empEditModal" class="modal-overlay hidden">
@@ -674,8 +718,13 @@
     <div class="modal-title" id="empEditTitle">Edit Employee</div>
     <div class="form-group"><label class="form-label">Name</label>
       <input class="form-input" id="ee_name" /></div>
-    <div class="form-group"><label class="form-label">Profit Share (e.g. 0.66 for 66%)</label>
-      <input class="form-input" id="ee_share" type="number" step="0.01" min="0.01" max="0.99" /></div>
+    <div class="form-group">
+      <label class="form-label">Profit Share</label>
+      <div style="display:flex;align-items:center;gap:8px">
+        <input class="form-input" id="ee_share" type="number" step="1" min="1" max="99" style="max-width:100px" />
+        <span style="font-family:var(--mono);color:var(--text3)">%</span>
+      </div>
+    </div>
     <div class="form-group"><label class="form-label">Startup Debt</label>
       <div id="ee_debtInfo"></div></div>
     <div class="modal-actions">
@@ -691,7 +740,15 @@
     <div class="modal-title">Version History</div>
     <div style="font-family:var(--mono);font-size:13px;line-height:1.7;color:var(--text2)">
       <div style="margin-bottom:14px">
-        <div style="color:var(--accent);font-size:14px;margin-bottom:4px">v1.15 — Mar 2026</div>
+        <div style="color:var(--accent);font-size:14px;margin-bottom:4px">v1.16 — Mar 2026</div>
+        <div>· Tabbed settings modal (Account · Employees · Square Fees · Debt · Data)</div>
+        <div>· Employee management moved inline — no more separate modal</div>
+        <div>· Square per-transaction fee ($0.30) support</div>
+        <div>· All % inputs normalized (type 2.9 not 0.029)</div>
+        <div>· Consistent dividers across job detail cards</div>
+      </div>
+      <div style="margin-bottom:14px">
+        <div style="color:var(--text3);font-size:14px;margin-bottom:4px">v1.15 — Mar 2026</div>
         <div>· Mobile layout fixes (header, buttons, detail overflow)</div>
         <div>· HW card meta wraps cleanly on narrow screens</div>
         <div>· Repay toggle height matched to other buttons</div>
@@ -811,14 +868,19 @@
 
 <!-- EMPLOYEE SETTINGS MODAL -->
 <div id="mySettingsModal" class="modal-overlay hidden">
-  <div class="modal">
-    <div class="modal-title">My Settings</div>
-    <div class="form-group">
-      <label class="form-label">Account</label>
-      <button class="btn btn-ghost btn-sm" onclick="closeModal('mySettingsModal');openChangePin()">🔑 Change My PIN</button>
+  <div class="modal settings-modal" style="max-width:400px">
+    <div class="settings-modal-header">
+      <div class="modal-title">Settings</div>
     </div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal('mySettingsModal');signOut()">⎋ Sign Out</button>
+    <div style="padding:20px 24px;flex:1;overflow-y:auto">
+      <div class="form-group">
+        <label class="form-label">Signed in as</label>
+        <div style="font-family:var(--mono);font-size:17px;color:var(--text);margin-bottom:12px" id="ms_whoami"></div>
+        <button class="btn btn-ghost btn-sm" onclick="closeModal('mySettingsModal');openChangePin()">🔑 Change My PIN</button>
+      </div>
+    </div>
+    <div class="settings-modal-footer">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('mySettingsModal');signOut()" style="margin-right:auto">⎋ Sign Out</button>
       <button class="btn btn-ghost" onclick="closeModal('mySettingsModal')">Close</button>
     </div>
   </div>
@@ -2409,25 +2471,41 @@ function printQuoteSnapshot() {
 }
 
 // ─── SETTINGS ─────────────────────────────────────────────────────────────────
+function settingsTab(name, btn) {
+  document.querySelectorAll('#settingsModal .settings-nav-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#settingsModal .settings-panel').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('stab-' + name).classList.add('active');
+  const needsSave = name === 'fees' || name === 'debt';
+  document.getElementById('s_saveBtn').style.display = needsSave ? '' : 'none';
+}
 function openSettings() {
-  document.getElementById('s_feeRate').value        = state.settings.feeRate;
-  document.getElementById('s_txnFee').value         = state.settings.txnFee ?? 0.30;
-  document.getElementById('s_debtOriginal').value   = state.settings.debtOriginal||2256.58;
-  document.getElementById('s_debtOwnerShare').value = state.settings.debtOwnerShare||0.50;
+  document.getElementById('s_whoami').textContent    = currentUser?.name || '';
+  document.getElementById('s_feeRate').value         = +((state.settings.feeRate || 0.026) * 100).toFixed(3);
+  document.getElementById('s_txnFee').value          = state.settings.txnFee ?? 0.30;
+  document.getElementById('s_debtOriginal').value    = state.settings.debtOriginal || 2256.58;
+  document.getElementById('s_debtOwnerShare').value  = Math.round((state.settings.debtOwnerShare || 0.50) * 100);
   const debtEmp = getEmp(state.settings.debtEmployeeId);
-  document.getElementById('s_debtHint').textContent = debtEmp
-    ? `Debt assigned to ${debtEmp.name}. Extra above their normal split (${Math.round((1-(debtEmp.empShare??0.66))*100)}%) counts toward debt.`
+  document.getElementById('s_debtHint').textContent  = debtEmp
+    ? `Debt assigned to ${debtEmp.name}. Extra above their normal split counts toward debt.`
     : 'Extra above normal split counts toward debt.';
+  // Reset to Account tab
+  settingsTab('account', document.querySelector('#settingsModal .settings-nav-btn'));
+  renderUserList();
+  document.getElementById('nu_name').value = '';
+  document.getElementById('nu_pin').value  = '';
+  document.getElementById('nu_role').value = 'employee';
   document.getElementById('settingsModal').classList.remove('hidden');
 }
 function saveSettings() {
-  state.settings.feeRate        = parseFloat(document.getElementById('s_feeRate').value)||0.026;
-  state.settings.txnFee         = parseFloat(document.getElementById('s_txnFee').value)||0;
-  state.settings.debtOriginal   = parseFloat(document.getElementById('s_debtOriginal').value)||0;
-  state.settings.debtOwnerShare = parseFloat(document.getElementById('s_debtOwnerShare').value)||0.50;
-  save(); renderJobs(); closeModal('settingsModal');
+  state.settings.feeRate        = (parseFloat(document.getElementById('s_feeRate').value) || 2.6) / 100;
+  state.settings.txnFee         = parseFloat(document.getElementById('s_txnFee').value) || 0;
+  state.settings.debtOriginal   = parseFloat(document.getElementById('s_debtOriginal').value) || 0;
+  state.settings.debtOwnerShare = (parseFloat(document.getElementById('s_debtOwnerShare').value) || 50) / 100;
+  save(); renderAll(); closeModal('settingsModal');
 }
 function openMySettings() {
+  document.getElementById('ms_whoami').textContent = currentUser?.name || '';
   document.getElementById('mySettingsModal').classList.remove('hidden');
 }
 
@@ -2559,11 +2637,8 @@ function renderAll() {
 
 // ─── USER MANAGEMENT ──────────────────────────────────────────────────────────
 function openUserMgmt() {
-  renderUserList();
-  document.getElementById('nu_name').value = '';
-  document.getElementById('nu_pin').value = '';
-  document.getElementById('nu_role').value = 'employee';
-  document.getElementById('userMgmtModal').classList.remove('hidden');
+  openSettings();
+  settingsTab('employees', document.querySelectorAll('#settingsModal .settings-nav-btn')[1]);
 }
 
 function renderUserList() {
@@ -2640,7 +2715,7 @@ function openEditEmp(userId) {
   editEmpId = userId;
   document.getElementById('empEditTitle').textContent = `Edit — ${esc(u.name)}`;
   document.getElementById('ee_name').value  = u.name;
-  document.getElementById('ee_share').value = u.empShare ?? 0.66;
+  document.getElementById('ee_share').value = Math.round((u.empShare ?? 0.66) * 100);
   const isDebtEmp = state.settings.debtEmployeeId === userId;
   const otherEmps = state.users.filter(x => !x.isAdmin && x.id !== userId);
   document.getElementById('ee_debtInfo').innerHTML = isDebtEmp
@@ -2652,10 +2727,10 @@ async function saveEmpEdit() {
   const u = state.users.find(x => x.id === editEmpId);
   if (!u) return;
   const name  = document.getElementById('ee_name').value.trim();
-  const share = parseFloat(document.getElementById('ee_share').value);
+  const sharePct = parseFloat(document.getElementById('ee_share').value);
   if (!name) { alert('Name required.'); return; }
-  if (isNaN(share) || share <= 0 || share >= 1) { alert('Share must be between 0.01 and 0.99.'); return; }
-  u.name = name; u.empShare = share;
+  if (isNaN(sharePct) || sharePct < 1 || sharePct > 99) { alert('Share must be between 1% and 99%.'); return; }
+  u.name = name; u.empShare = sharePct / 100;
   await save(); closeModal('empEditModal'); renderUserList(); renderAll();
 }
 async function reassignDebt(fromId, toId) {
