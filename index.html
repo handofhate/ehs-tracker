@@ -850,8 +850,8 @@
       </div>
     </div>
     <div style="border-top:1px solid var(--border);padding-top:14px;margin-top:4px">
-      <div class="form-label" style="margin-bottom:10px">Allocate to Jobs</div>
-      <div id="sp_jobList"></div>
+      <div class="form-label" style="margin-bottom:10px">Allocate to Jobs &amp; HomeWatch</div>
+      <div id="sp_allocList"></div>
     </div>
     <div id="sp_totals" style="background:var(--bg3);border:1px solid var(--border2);border-radius:3px;padding:12px 16px;font-family:var(--mono);font-size:15px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-top:14px"></div>
     <div class="modal-actions">
@@ -1867,37 +1867,43 @@ function deleteDebtPayment(id) {
 
 // ─── SPLIT PAY ────────────────────────────────────────────────────────────────
 function openSplitPay() {
-  document.getElementById('sp_total').value = '';
-  document.getElementById('sp_date').value  = today();
-  document.getElementById('sp_label').value = '';
+  document.getElementById('sp_total').value   = '';
+  document.getElementById('sp_date').value    = today();
+  document.getElementById('sp_label').value   = '';
   document.getElementById('sp_paytype').value = '';
   const activeJobs = state.jobs.filter(j => j.status !== 'complete');
-  const jobListEl  = document.getElementById('sp_jobList');
-  if (!activeJobs.length) {
-    jobListEl.innerHTML = '<div style="color:var(--text3);font-size:16px;padding:8px 0">No active jobs.</div>';
-  } else {
-    jobListEl.innerHTML = activeJobs.map(j => {
-      const c = calcJob(j);
-      const balColor = c.empBalance > 0 ? 'var(--accent)' : 'var(--text3)';
-      return `<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)">
-        <div style="flex:1;min-width:0">
-          <div style="font-size:17px;font-weight:500">${esc(j.name)}</div>
-          <div style="font-family:var(--mono);font-size:13px;color:${balColor}">owes: ${fmt(c.empBalance)}</div>
-        </div>
-        <input class="form-input" type="number" step="0.01" placeholder="0.00"
-          id="sp_job_${j.id}" style="max-width:130px" oninput="updateSplitTotals()" />
-      </div>`;
-    }).join('');
+  const activeHW   = (state.homewatch || []).filter(hw => hw.status !== 'paused');
+  const allocEl    = document.getElementById('sp_allocList');
+  const row = (id, name, bal) => {
+    const balColor = bal > 0 ? 'var(--accent)' : 'var(--text3)';
+    return `<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:17px;font-weight:500">${name}</div>
+        <div style="font-family:var(--mono);font-size:13px;color:${balColor}">owes: ${fmt(bal)}</div>
+      </div>
+      <input class="form-input sp-alloc-input" type="number" step="0.01" placeholder="0.00"
+        id="${id}" style="max-width:130px" oninput="updateSplitTotals()" />
+    </div>`;
+  };
+  let html = '';
+  if (activeJobs.length) {
+    if (activeHW.length) html += `<div style="font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);padding:4px 0 6px">Jobs</div>`;
+    html += activeJobs.map(j => row(`sp_job_${j.id}`, esc(j.name), calcJob(j).empBalance)).join('');
   }
+  if (activeHW.length) {
+    html += `<div style="font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);padding:${activeJobs.length?'12px':'4px'} 0 6px">HomeWatch</div>`;
+    html += activeHW.map(hw => row(`sp_hw_${hw.id}`, esc(hw.name), calcHW(hw).empBalance)).join('');
+  }
+  allocEl.innerHTML = html || '<div style="color:var(--text3);font-size:16px;padding:8px 0">No active jobs or HomeWatch clients.</div>';
   updateSplitTotals();
   document.getElementById('splitPayModal').classList.remove('hidden');
 }
 function updateSplitTotals() {
   const total = parseFloat(document.getElementById('sp_total').value) || 0;
   let allocated = 0;
-  document.querySelectorAll('[id^="sp_job_"]').forEach(el => { allocated += parseFloat(el.value) || 0; });
-  const remaining  = total - allocated;
-  const remColor   = Math.abs(remaining) < 0.01 ? 'var(--green)' : remaining < 0 ? 'var(--red)' : 'var(--accent)';
+  document.querySelectorAll('.sp-alloc-input').forEach(el => { allocated += parseFloat(el.value) || 0; });
+  const remaining = total - allocated;
+  const remColor  = Math.abs(remaining) < 0.01 ? 'var(--green)' : remaining < 0 ? 'var(--red)' : 'var(--accent)';
   const el = document.getElementById('sp_totals');
   if (el) el.innerHTML = `
     <span>Total: <strong>${fmt(total)}</strong></span>
@@ -1905,30 +1911,40 @@ function updateSplitTotals() {
     <span>Remaining: <strong style="color:${remColor}">${fmt(remaining)}</strong></span>`;
 }
 async function saveSplitPay() {
-  const total = parseFloat(document.getElementById('sp_total').value) || 0;
+  const total   = parseFloat(document.getElementById('sp_total').value) || 0;
   if (total <= 0) { alert('Please enter a total amount.'); return; }
   const date    = document.getElementById('sp_date').value;
   const label   = document.getElementById('sp_label').value.trim();
   const payType = document.getElementById('sp_paytype').value;
   let allocated = 0;
-  const entries = [];
-  document.querySelectorAll('[id^="sp_job_"]').forEach(el => {
+  const jobEntries = [], hwEntries = [];
+  document.querySelectorAll('.sp-alloc-input').forEach(el => {
     const amt = parseFloat(el.value) || 0;
-    if (amt > 0) { allocated += amt; entries.push({ jobId: el.id.slice('sp_job_'.length), amount: amt }); }
+    if (amt <= 0) return;
+    allocated += amt;
+    if (el.id.startsWith('sp_job_')) jobEntries.push({ jobId: el.id.slice('sp_job_'.length), amount: amt });
+    if (el.id.startsWith('sp_hw_'))  hwEntries.push({  hwId:  el.id.slice('sp_hw_'.length),  amount: amt });
   });
-  if (!entries.length) { alert('Please allocate at least one amount to a job.'); return; }
+  if (!jobEntries.length && !hwEntries.length) { alert('Please allocate at least one amount.'); return; }
   const remaining = total - allocated;
   if (Math.abs(remaining) > 0.01) {
     if (!confirm(`${fmt(Math.abs(remaining))} is ${remaining > 0 ? 'unallocated' : 'over-allocated'}. Save anyway?`)) return;
   }
-  entries.forEach(({ jobId, amount }) => {
+  jobEntries.forEach(({ jobId, amount }) => {
     const job = state.jobs.find(j => j.id === jobId);
     if (job) {
       if (!job.advances) job.advances = [];
       job.advances.push({ id: uid(), label: label || 'Split payment', amount, date, payType });
     }
   });
-  await save(); renderJobs(); closeModal('splitPayModal');
+  hwEntries.forEach(({ hwId, amount }) => {
+    const hw = (state.homewatch || []).find(h => h.id === hwId);
+    if (hw) {
+      if (!hw.advances) hw.advances = [];
+      hw.advances.push({ id: uid(), label: label || 'Split payment', amount, date, payType });
+    }
+  });
+  await save(); renderAll(); closeModal('splitPayModal');
 }
 
 function toggleRepayment(id) {
