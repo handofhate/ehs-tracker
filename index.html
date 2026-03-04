@@ -7,6 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <style>
   :root {
     --bg: #0f1117;
@@ -3183,7 +3184,13 @@ function importData(event) {
   reader.readAsText(file);
 }
 
-load();
+firebase.auth().onAuthStateChanged(user => { if (user) load(); });
+firebase.auth().signInAnonymously().catch(e => {
+  document.getElementById('loadingOverlay').innerHTML = `
+    <div style="font-family:var(--mono);font-size:16px;color:var(--red)">Authentication failed</div>
+    <div style="font-family:var(--mono);font-size:13px;color:var(--text3);margin-top:8px">${e.message}</div>
+    <div style="font-family:var(--mono);font-size:13px;color:var(--text3);margin-top:4px">Make sure Anonymous auth is enabled in Firebase console.</div>`;
+});
 </script>
 </body>
 </html>
