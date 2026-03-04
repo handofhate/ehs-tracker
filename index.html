@@ -1876,13 +1876,14 @@ function openSplitPay() {
   const allocEl    = document.getElementById('sp_allocList');
   const row = (id, name, bal) => {
     const balColor = bal > 0 ? 'var(--accent)' : 'var(--text3)';
-    return `<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)">
+    return `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
       <div style="flex:1;min-width:0">
         <div style="font-size:17px;font-weight:500">${name}</div>
         <div style="font-family:var(--mono);font-size:13px;color:${balColor}">owes: ${fmt(bal)}</div>
       </div>
+      <button class="btn btn-ghost btn-sm" onclick="maxAlloc('${id}',${bal})" style="flex-shrink:0">Max</button>
       <input class="form-input sp-alloc-input" type="number" step="0.01" placeholder="0.00"
-        id="${id}" style="max-width:130px" oninput="updateSplitTotals()" />
+        id="${id}" style="max-width:110px" oninput="updateSplitTotals()" />
     </div>`;
   };
   let html = '';
@@ -1897,6 +1898,17 @@ function openSplitPay() {
   allocEl.innerHTML = html || '<div style="color:var(--text3);font-size:16px;padding:8px 0">No active jobs or HomeWatch clients.</div>';
   updateSplitTotals();
   document.getElementById('splitPayModal').classList.remove('hidden');
+}
+function maxAlloc(inputId, bal) {
+  const total = parseFloat(document.getElementById('sp_total').value) || 0;
+  let otherAllocated = 0;
+  document.querySelectorAll('.sp-alloc-input').forEach(el => {
+    if (el.id !== inputId) otherAllocated += parseFloat(el.value) || 0;
+  });
+  const remaining = total - otherAllocated;
+  const value = Math.max(0, Math.min(bal, remaining));
+  document.getElementById(inputId).value = value > 0 ? value.toFixed(2) : '';
+  updateSplitTotals();
 }
 function updateSplitTotals() {
   const total = parseFloat(document.getElementById('sp_total').value) || 0;
