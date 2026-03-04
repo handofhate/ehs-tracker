@@ -665,13 +665,15 @@
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-      <input type="checkbox" id="dp_linkJob" onchange="toggleDpJobLink()" style="width:16px;height:16px;cursor:pointer;accent-color:var(--accent)" />
-      <label for="dp_linkJob" style="cursor:pointer;font-family:var(--mono);font-size:14px;color:var(--text2);user-select:none">Apply against a job's employee balance</label>
+      <input type="checkbox" id="dp_linkJob" onchange="toggleDpLink()" style="width:16px;height:16px;cursor:pointer;accent-color:var(--accent)" />
+      <label for="dp_linkJob" style="cursor:pointer;font-family:var(--mono);font-size:14px;color:var(--text2);user-select:none">Apply against an employee balance</label>
     </div>
     <div id="dp_jobWrap" style="display:none" class="form-group">
-      <label class="form-label">Active Job</label>
-      <select class="form-input" id="dp_jobSelect"></select>
-      <div class="form-hint" style="margin-top:6px">This payment will reduce the employee's outstanding balance on the selected job, the same way a pay advance does.</div>
+      <label class="form-label">Job or HomeWatch Client</label>
+      <select class="form-input" id="dp_linkSelect">
+        <option value="">— Select —</option>
+      </select>
+      <div class="form-hint" style="margin-top:6px">Reduces the employee's outstanding balance on the selected job or HomeWatch client.</div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('debtPaymentModal')">Cancel</button>
@@ -978,7 +980,10 @@ function migrateState(s) {
   if (s.settings.debtOwnerShare === undefined) s.settings.debtOwnerShare = 0.50;
   if (s.settings.txnFee === undefined) s.settings.txnFee = 0.30;
   if (!s.debtPayments) s.debtPayments = [];
-  (s.debtPayments).forEach(p => { if (p.linkedJobId === undefined) p.linkedJobId = null; });
+  (s.debtPayments).forEach(p => {
+    if (p.linkedJobId === undefined) p.linkedJobId = null;
+    if (p.linkedHWId  === undefined) p.linkedHWId  = null;
+  });
   if (!s.users) s.users = [];
   if (!s.appointments) s.appointments = [];
   // Ensure there's always at least one admin user seeded
@@ -1178,8 +1183,9 @@ function calcHW(hw) {
   const pendingGross      = (hw.payments||[]).filter(p=>p.status!=='collected').reduce((s,p)=>s+(p.amount||0),0);
   const { totalFees, netRevenue, empOwed, ownerOwed } = calcSplit(collectedGross, { empShare, feeRate, txnFee, txnCount });
   const advancesPaid   = (hw.advances||[]).reduce((s,a)=>s+(a.amount||0),0);
-  const empBalance     = empOwed - advancesPaid;
-  return { collectedGross, pendingGross, totalFees, netRevenue, empOwed, ownerOwed, advancesPaid, empBalance };
+  const linkedDebtPaid = (state.debtPayments||[]).filter(p=>p.linkedHWId===hw.id).reduce((s,p)=>s+(p.amount||0),0);
+  const empBalance     = empOwed - advancesPaid - linkedDebtPaid;
+  return { collectedGross, pendingGross, totalFees, netRevenue, empOwed, ownerOwed, advancesPaid, linkedDebtPaid, empBalance };
 }
 
 // ─── HOMEWATCH ────────────────────────────────────────────────────────────────
@@ -1412,9 +1418,11 @@ function renderDebtPanel() {
   const paymentsHtml = (state.debtPayments || []).length
     ? [...state.debtPayments].reverse().map(p => {
         const linkedJob = p.linkedJobId ? state.jobs.find(j => j.id === p.linkedJobId) : null;
+        const linkedHW  = p.linkedHWId  ? (state.homewatch||[]).find(h => h.id === p.linkedHWId) : null;
         const jobTag = linkedJob ? `<span style="font-size:11px;background:rgba(91,141,239,0.15);color:var(--blue);border-radius:2px;padding:1px 6px;font-family:var(--mono);margin-left:6px">⇒ ${esc(linkedJob.name)}</span>` : '';
+        const hwTag  = linkedHW  ? `<span style="font-size:11px;background:rgba(76,175,130,0.15);color:var(--green);border-radius:2px;padding:1px 6px;font-family:var(--mono);margin-left:6px">⇒ HW: ${esc(linkedHW.name)}</span>` : '';
         return `<div class="line-item" style="padding:6px 0">
-          <div class="line-item-label" style="font-size:15px">${esc(p.label||'Manual payment')}${jobTag}<span style="font-size:11px;color:var(--text3);margin-left:8px;font-family:var(--mono)">${fmtDate(p.date)||''}</span></div>
+          <div class="line-item-label" style="font-size:15px">${esc(p.label||'Manual payment')}${jobTag}${hwTag}<span style="font-size:11px;color:var(--text3);margin-left:8px;font-family:var(--mono)">${fmtDate(p.date)||''}</span></div>
           <div style="display:flex;align-items:center;gap:8px">
             <div class="line-item-value green">+${fmt(p.amount)}</div>
             <button class="btn btn-danger btn-sm" onclick="deleteDebtPayment('${p.id}')">✕</button>
@@ -1818,34 +1826,43 @@ function openAddDebtPayment() {
   document.getElementById('dp_linkJob').checked = false;
   document.getElementById('dp_jobWrap').style.display = 'none';
   const activeJobs = state.jobs.filter(j => j.status !== 'complete');
-  document.getElementById('dp_jobSelect').innerHTML =
-    '<option value="">— Select a job</option>' +
-    activeJobs.map(j => {
-      const bal = calcJob(j).empBalance;
-      return `<option value="${j.id}">${esc(j.name)} (employee owed: ${fmt(bal)})</option>`;
-    }).join('');
+  const activeHW   = (state.homewatch || []).filter(hw => hw.status !== 'paused');
+  const jobOpts    = activeJobs.map(j => {
+    const bal = calcJob(j).empBalance;
+    return `<option value="job:${j.id}">${esc(j.name)} (owed: ${fmt(bal)})</option>`;
+  }).join('');
+  const hwOpts = activeHW.map(hw => {
+    const bal = calcHW(hw).empBalance;
+    return `<option value="hw:${hw.id}">${esc(hw.name)} (owed: ${fmt(bal)})</option>`;
+  }).join('');
+  document.getElementById('dp_linkSelect').innerHTML =
+    '<option value="">— Select —</option>' +
+    (jobOpts ? `<optgroup label="Jobs">${jobOpts}</optgroup>` : '') +
+    (hwOpts  ? `<optgroup label="HomeWatch">${hwOpts}</optgroup>`  : '');
   document.getElementById('debtPaymentModal').classList.remove('hidden');
 }
-function toggleDpJobLink() {
+function toggleDpLink() {
   const on = document.getElementById('dp_linkJob').checked;
   document.getElementById('dp_jobWrap').style.display = on ? '' : 'none';
 }
 function saveDebtPayment() {
   const amount = parseFloat(document.getElementById('dp_amount').value);
   if (!amount || amount <= 0) { alert('Please enter a valid amount.'); return; }
-  const label = document.getElementById('dp_label').value.trim();
-  const date  = document.getElementById('dp_date').value;
+  const label  = document.getElementById('dp_label').value.trim();
+  const date   = document.getElementById('dp_date').value;
   const linked = document.getElementById('dp_linkJob').checked;
-  const linkedJobId = linked ? (document.getElementById('dp_jobSelect').value || null) : null;
-  if (linked && !linkedJobId) { alert('Please select a job to link this payment to.'); return; }
+  const sel    = linked ? document.getElementById('dp_linkSelect').value : '';
+  if (linked && !sel) { alert('Please select a job or HomeWatch client.'); return; }
+  const linkedJobId = (linked && sel.startsWith('job:')) ? sel.slice(4) : null;
+  const linkedHWId  = (linked && sel.startsWith('hw:'))  ? sel.slice(3) : null;
   if (!state.debtPayments) state.debtPayments = [];
-  state.debtPayments.push({ id: uid(), label, amount, date, linkedJobId });
-  save(); renderJobs(); closeModal('debtPaymentModal');
+  state.debtPayments.push({ id: uid(), label, amount, date, linkedJobId, linkedHWId });
+  save(); renderAll(); closeModal('debtPaymentModal');
 }
 function deleteDebtPayment(id) {
   if (!confirm('Remove this payment?')) return;
   state.debtPayments = (state.debtPayments || []).filter(p => p.id !== id);
-  save(); renderJobs();
+  save(); renderAll();
 }
 
 // ─── SPLIT PAY ────────────────────────────────────────────────────────────────
