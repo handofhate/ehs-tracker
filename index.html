@@ -441,11 +441,18 @@
       <select class="form-input" id="f_emp"></select>
     </div>
     <div class="form-group">
-      <label class="form-label">Payment Structure — Milestones</label>
-      <div class="form-hint" style="margin-bottom:8px;">Define % collected at each stage. Must add up to 100%.</div>
-      <div id="milestoneList" class="milestone-list"></div>
-      <button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="addMilestoneField()">+ Add Milestone</button>
-      <div id="milestoneError" style="color:var(--red);font-size:15px;margin-top:4px;"></div>
+      <label class="form-label">Payment Structure</label>
+      <div style="display:flex;gap:6px;margin-bottom:12px">
+        <button id="ms_btn_single"  class="btn btn-primary btn-sm" onclick="setMilestoneMode('single')">Single Invoice</button>
+        <button id="ms_btn_default" class="btn btn-ghost btn-sm"   onclick="setMilestoneMode('default')">Use Defaults</button>
+        <button id="ms_btn_custom"  class="btn btn-ghost btn-sm"   onclick="setMilestoneMode('custom')">Custom</button>
+      </div>
+      <div id="milestoneHint" style="font-family:var(--mono);font-size:14px;color:var(--text3)">Full invoice — one payment to track.</div>
+      <div id="milestoneEditor" style="display:none">
+        <div id="milestoneList" class="milestone-list"></div>
+        <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="addMilestoneField()">+ Add Milestone</button>
+        <div id="milestoneError" style="color:var(--red);font-size:15px;margin-top:4px"></div>
+      </div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('jobModal')">Cancel</button>
@@ -479,6 +486,7 @@
         <button class="settings-nav-btn" onclick="settingsTab('employees',this)">Employees</button>
         <button class="settings-nav-btn" onclick="settingsTab('fees',this)">Square Fees</button>
         <button class="settings-nav-btn" onclick="settingsTab('debt',this)">Debt</button>
+        <button class="settings-nav-btn" onclick="settingsTab('jobs',this)">Jobs</button>
         <button class="settings-nav-btn" onclick="settingsTab('data',this)">Data</button>
       </nav>
       <div style="flex:1;overflow:hidden;display:flex;flex-direction:column">
@@ -546,6 +554,17 @@
               <span style="font-family:var(--mono);color:var(--text3)">%</span>
             </div>
             <div class="form-hint" id="s_debtHint"></div>
+          </div>
+        </div>
+        <div id="stab-jobs" class="settings-panel">
+          <div class="form-group">
+            <label class="form-label">Default Milestone Template</label>
+            <div class="form-hint" style="margin-bottom:10px">Loaded when you click "Use Defaults" on a new job. Must total 100%.</div>
+            <div id="dmList"></div>
+            <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
+              <button class="btn btn-ghost btn-sm" onclick="addDmField()">+ Add Milestone</button>
+              <span id="dmError" style="color:var(--red);font-size:14px;font-family:var(--mono)"></span>
+            </div>
           </div>
         </div>
         <div id="stab-data" class="settings-panel">
@@ -945,7 +964,7 @@ const DOC = db.collection('jobtracker').doc('state');
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
 let state = {
-  settings: { empName: 'Employee', empShare: 0.66, feeRate: 0.026, txnFee: 0.30, debtOriginal: 2256.58, debtOwnerShare: 0.50 },
+  settings: { empName: 'Employee', empShare: 0.66, feeRate: 0.026, txnFee: 0.30, debtOriginal: 2256.58, debtOwnerShare: 0.50, defaultMilestones: [] },
   debtPayments: [],
   jobs: [],
   users: [],
@@ -980,6 +999,7 @@ function migrateState(s) {
   if (s.settings.debtOriginal === undefined) s.settings.debtOriginal = 2256.58;
   if (s.settings.debtOwnerShare === undefined) s.settings.debtOwnerShare = 0.50;
   if (s.settings.txnFee === undefined) s.settings.txnFee = 0.30;
+  if (!s.settings.defaultMilestones) s.settings.defaultMilestones = [];
   if (!s.debtPayments) s.debtPayments = [];
   (s.debtPayments).forEach(p => {
     if (p.linkedJobId === undefined) p.linkedJobId = null;
@@ -1157,7 +1177,7 @@ function calcJob(job) {
   const empMats   = (job.materials||[]).filter(m=>m.who==='emp').reduce((s,m)=>s+(m.amount||0),0);
   const totalMats = ownerMats + empMats;
 
-  const profitPool  = netRevenue - totalMats;
+  const profitPool  = Math.max(0, netRevenue - totalMats);
   const empProfit   = profitPool * effectiveEmpShare;
   const ownerProfit = profitPool * effectiveOwnerShare;
   const debtContribution = job.repaymentMode ? Math.max(0, profitPool * ((debtOwnerShare||0.50) - normalOwnerShare)) : 0;
@@ -2145,6 +2165,41 @@ function populateEmpDropdown(selectId, wrapId, currentEmpId) {
     `<option value="${u.id}"${u.id === currentEmpId ? ' selected' : ''}>${esc(u.name)}</option>`
   ).join('');
 }
+let milestoneMode = 'single';
+function setMilestoneMode(mode) {
+  const dms = state.settings.defaultMilestones || [];
+  if (mode === 'default' && !dms.length) {
+    document.getElementById('milestoneHint').textContent = 'No defaults set — configure them in Settings → Jobs.';
+    document.getElementById('milestoneHint').style.display = '';
+    document.getElementById('milestoneEditor').style.display = 'none';
+    // keep single selected
+    mode = 'single';
+  }
+  milestoneMode = mode;
+  ['single','default','custom'].forEach(m => {
+    const btn = document.getElementById(`ms_btn_${m}`);
+    if (btn) btn.className = `btn ${m === mode ? 'btn-primary' : 'btn-ghost'} btn-sm`;
+  });
+  const editor = document.getElementById('milestoneEditor');
+  const hint   = document.getElementById('milestoneHint');
+  if (mode === 'single') {
+    editor.style.display = 'none';
+    hint.textContent = 'Full invoice — one payment to track.';
+    hint.style.display = '';
+    document.getElementById('milestoneList').innerHTML = '';
+    milestoneCount = 0;
+  } else {
+    editor.style.display = '';
+    hint.style.display = 'none';
+    document.getElementById('milestoneList').innerHTML = '';
+    milestoneCount = 0;
+    if (mode === 'default') {
+      dms.forEach(m => addMilestoneField(m.label, m.pct));
+    } else {
+      addMilestoneField();
+    }
+  }
+}
 function openNewJobModal() {
   editingJobId = null;
   document.getElementById('jobModalTitle').textContent = 'New Job';
@@ -2155,11 +2210,7 @@ function openNewJobModal() {
   document.getElementById('quoteItemList').innerHTML = '';
   quoteItemCount = 0;
   toggleItemizedQuote();
-  document.getElementById('milestoneList').innerHTML = '';
-  milestoneCount = 0;
-  addMilestoneField('Deposit (50%)', 50);
-  addMilestoneField('Rough-in (25%)', 25);
-  addMilestoneField('Completion (25%)', 25);
+  setMilestoneMode('single');
   populateEmpDropdown('f_emp', 'f_emp_wrap', null);
   document.getElementById('jobModal').classList.remove('hidden');
 }
@@ -2178,11 +2229,42 @@ function editJob(id) {
     job.quoteItems.forEach(qi => addQuoteItemField(qi.label, qi.amount));
   }
   toggleItemizedQuote();
-  document.getElementById('milestoneList').innerHTML = '';
-  milestoneCount = 0;
-  (job.milestones||[]).forEach(m=>addMilestoneField(m.label,m.pct));
+  const isSingle = job.milestones?.length === 1 && job.milestones[0].pct === 100;
+  if (isSingle) {
+    setMilestoneMode('single');
+  } else {
+    milestoneMode = 'custom';
+    ['single','default','custom'].forEach(m => {
+      const btn = document.getElementById(`ms_btn_${m}`);
+      if (btn) btn.className = `btn ${m === 'custom' ? 'btn-primary' : 'btn-ghost'} btn-sm`;
+    });
+    document.getElementById('milestoneEditor').style.display = '';
+    document.getElementById('milestoneHint').style.display = 'none';
+    document.getElementById('milestoneList').innerHTML = '';
+    milestoneCount = 0;
+    (job.milestones||[]).forEach(m => addMilestoneField(m.label, m.pct));
+  }
   populateEmpDropdown('f_emp', 'f_emp_wrap', job.employeeId);
   document.getElementById('jobModal').classList.remove('hidden');
+}
+let dmCount = 0;
+function addDmField(label='', pct='') {
+  dmCount++;
+  const id = dmCount;
+  const div = document.createElement('div');
+  div.className = 'milestone-row'; div.id = `dmrow_${id}`;
+  div.innerHTML = `
+    <input class="form-input" placeholder="Label" value="${label}" id="dmlabel_${id}" style="flex:2" />
+    <input class="form-input" placeholder="%" type="number" value="${pct}" id="dmpct_${id}" style="flex:1;max-width:80px" oninput="updateDmPreview()" />
+    <button class="btn btn-danger btn-sm" onclick="document.getElementById('dmrow_${id}').remove();updateDmPreview()">✕</button>`;
+  document.getElementById('dmList').appendChild(div);
+  updateDmPreview();
+}
+function updateDmPreview() {
+  let total = 0;
+  document.querySelectorAll('[id^="dmpct_"]').forEach(el => { total += parseFloat(el.value) || 0; });
+  const err = document.getElementById('dmError');
+  if (err) err.textContent = (total > 0 && Math.abs(total - 100) > 0.01) ? `Total: ${total}%` : '';
 }
 function addMilestoneField(label='', pct='') {
   milestoneCount++;
@@ -2248,13 +2330,20 @@ function saveJob() {
     quote = parseFloat(document.getElementById('f_quote').value)||0;
   }
   const milestones=[]; let total=0;
-  document.querySelectorAll('[id^="mpct_"]').forEach((el,i)=>{
-    const pct = parseFloat(el.value)||0;
-    const mId = el.id.slice('mpct_'.length);
-    const lbl = document.getElementById(`mlabel_${mId}`)?.value||`Milestone ${i+1}`;
-    milestones.push({label:lbl,pct,status:'pending'}); total+=pct;
-  });
-  if (milestones.length&&Math.abs(total-100)>0.01) { alert(`Milestone percentages add up to ${total}%, not 100%.`); return; }
+  if (milestoneMode === 'single') {
+    const prevStatus = editingJobId
+      ? (state.jobs.find(j=>j.id===editingJobId)?.milestones?.[0]?.status || 'pending')
+      : 'pending';
+    milestones.push({ label:'Invoice', pct:100, status: prevStatus });
+  } else {
+    document.querySelectorAll('[id^="mpct_"]').forEach((el,i)=>{
+      const pct = parseFloat(el.value)||0;
+      const mId = el.id.slice('mpct_'.length);
+      const lbl = document.getElementById(`mlabel_${mId}`)?.value||`Milestone ${i+1}`;
+      milestones.push({label:lbl,pct,status:'pending'}); total+=pct;
+    });
+    if (milestones.length&&Math.abs(total-100)>0.01) { alert(`Milestone percentages add up to ${total}%, not 100%.`); return; }
+  }
   const emps = state.users.filter(u => !u.isAdmin);
   const employeeId = emps.length > 1
     ? (document.getElementById('f_emp')?.value || emps[0]?.id)
@@ -2526,7 +2615,7 @@ function settingsTab(name, btn) {
   document.querySelectorAll('#settingsModal .settings-panel').forEach(p => p.classList.remove('active'));
   btn.classList.add('active');
   document.getElementById('stab-' + name).classList.add('active');
-  const needsSave = name === 'fees' || name === 'debt';
+  const needsSave = name === 'fees' || name === 'debt' || name === 'jobs';
   document.getElementById('s_saveBtn').style.display = needsSave ? '' : 'none';
 }
 function openSettings() {
@@ -2539,6 +2628,10 @@ function openSettings() {
   document.getElementById('s_debtHint').textContent  = debtEmp
     ? `Debt assigned to ${debtEmp.name}. Extra above their normal split counts toward debt.`
     : 'Extra above normal split counts toward debt.';
+  // Populate default milestones
+  document.getElementById('dmList').innerHTML = '';
+  dmCount = 0;
+  (state.settings.defaultMilestones || []).forEach(m => addDmField(m.label, m.pct));
   // Reset to Account tab
   settingsTab('account', document.querySelector('#settingsModal .settings-nav-btn'));
   renderUserList();
@@ -2552,6 +2645,17 @@ function saveSettings() {
   state.settings.txnFee         = parseFloat(document.getElementById('s_txnFee').value) || 0;
   state.settings.debtOriginal   = parseFloat(document.getElementById('s_debtOriginal').value) || 0;
   state.settings.debtOwnerShare = (parseFloat(document.getElementById('s_debtOwnerShare').value) || 50) / 100;
+  const defaultMilestones = []; let dmTotal = 0;
+  document.querySelectorAll('[id^="dmpct_"]').forEach((el, i) => {
+    const pct = parseFloat(el.value) || 0;
+    const dmId = el.id.slice('dmpct_'.length);
+    const lbl = document.getElementById(`dmlabel_${dmId}`)?.value.trim() || `Milestone ${i+1}`;
+    defaultMilestones.push({ label: lbl, pct }); dmTotal += pct;
+  });
+  if (defaultMilestones.length && Math.abs(dmTotal - 100) > 0.01) {
+    alert(`Default milestones total ${dmTotal}% — must equal 100%.`); return;
+  }
+  state.settings.defaultMilestones = defaultMilestones;
   save(); renderAll(); closeModal('settingsModal');
 }
 function openMySettings() {
