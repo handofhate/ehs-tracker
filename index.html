@@ -717,8 +717,14 @@
         <input class="form-input" id="ap_date" type="date" />
       </div>
       <div class="form-group">
-        <label class="form-label">Time</label>
-        <input class="form-input" id="ap_time" type="time" />
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <label class="form-label" style="margin-bottom:0">Time</label>
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-family:var(--mono);font-size:12px;color:var(--text3);user-select:none">
+            <input type="checkbox" id="ap_allDay" onchange="toggleApptAllDay()" style="width:13px;height:13px;cursor:pointer;accent-color:var(--accent)" />
+            All day
+          </label>
+        </div>
+        <input class="form-input" id="ap_time" type="time" autocomplete="off" />
       </div>
     </div>
     <div class="form-group">
@@ -3215,9 +3221,18 @@ function openAppt(id) {
   document.getElementById('ap_time').value    = appt ? (appt.time||'') : '';
   document.getElementById('ap_address').value = appt ? (appt.address||'') : '';
   document.getElementById('ap_notes').value   = appt ? (appt.notes||'') : '';
+  document.getElementById('ap_allDay').checked = appt ? !!appt.allDay : false;
+  toggleApptAllDay();
   document.getElementById('apptModal').classList.remove('hidden');
 }
 
+function toggleApptAllDay() {
+  const allDay = document.getElementById('ap_allDay').checked;
+  const timeEl = document.getElementById('ap_time');
+  timeEl.disabled = allDay;
+  timeEl.style.opacity = allDay ? '0.35' : '';
+  if (allDay) timeEl.value = '';
+}
 function openApptOnDate(dateStr) {
   openAppt();
   document.getElementById('ap_date').value = dateStr;
@@ -3228,10 +3243,12 @@ async function saveAppt() {
   const date       = document.getElementById('ap_date').value;
   if (!clientName) { alert('Please enter a client name.'); return; }
   if (!date)       { alert('Please select a date.'); return; }
+  const allDay = document.getElementById('ap_allDay').checked;
   const appt = {
     clientName,
     date,
-    time:    document.getElementById('ap_time').value,
+    allDay,
+    time:    allDay ? '' : document.getElementById('ap_time').value,
     address: document.getElementById('ap_address').value.trim(),
     notes:   document.getElementById('ap_notes').value.trim(),
     createdBy: currentUser ? currentUser.id : ''
