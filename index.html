@@ -332,6 +332,29 @@
     .cal-dow { font-size:10px;padding:4px 0; }
     .sched-toolbar { flex-direction:column;align-items:flex-start; }
   }
+
+  /* ─── CLIENTS ─── */
+  .clients-table-wrap { overflow-x:auto; }
+  .clients-table { width:100%; border-collapse:collapse; }
+  .clients-table th { font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:0.1em; color:var(--text3); padding:8px 12px; border-bottom:1px solid var(--border); text-align:left; white-space:nowrap; }
+  .clients-table td { padding:9px 12px; border-bottom:1px solid var(--border); color:var(--text2); font-family:var(--mono); font-size:13px; white-space:nowrap; max-width:220px; overflow:hidden; text-overflow:ellipsis; }
+  .client-row:hover td { background:var(--bg2); cursor:pointer; }
+  .col-toggle-wrap { position:relative; }
+  .col-toggle-panel { position:absolute; top:calc(100% + 6px); right:0; background:var(--bg2); border:1px solid var(--border); border-radius:6px; padding:10px 14px; z-index:120; min-width:180px; box-shadow:0 4px 16px rgba(0,0,0,0.4); display:none; }
+  .col-toggle-panel label { display:flex; align-items:center; gap:8px; font-family:var(--mono); font-size:13px; color:var(--text2); padding:4px 0; cursor:pointer; user-select:none; }
+  .col-toggle-panel label:hover { color:var(--text); }
+  .client-detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px 24px; margin-bottom:16px; }
+  /* Autocomplete */
+  .ac-wrap { position:relative; }
+  .ac-list { position:absolute; top:100%; left:0; right:0; z-index:250; background:var(--bg2); border:1px solid var(--border2); border-radius:4px; box-shadow:0 4px 16px rgba(0,0,0,0.4); max-height:180px; overflow-y:auto; display:none; margin-top:2px; }
+  .ac-item { padding:8px 12px; font-family:var(--mono); font-size:13px; color:var(--text2); cursor:pointer; }
+  .ac-item:hover, .ac-item.ac-active { background:var(--bg3); color:var(--accent); }
+  /* Conflict modal */
+  .conflict-row { display:grid; grid-template-columns:110px 1fr 1fr 100px; gap:8px; align-items:start; padding:9px 0; border-bottom:1px solid var(--border); font-family:var(--mono); font-size:13px; }
+  .conflict-row:last-child { border-bottom:none; }
+  .conflict-field { color:var(--text3); font-size:11px; text-transform:uppercase; letter-spacing:0.05em; padding-top:2px; }
+  .conflict-old { color:var(--red); text-decoration:line-through; word-break:break-all; }
+  .conflict-new { color:var(--green); word-break:break-all; }
 </style>
 </head>
 <body>
@@ -389,6 +412,7 @@
     <div class="tab job-tab" onclick="switchTab('all', this)">All Jobs</div>
     <div class="tab" onclick="switchTab('homewatch', this)">HomeWatch</div>
     <div class="tab" id="schedTab" onclick="switchTab('schedule', this)">Schedule</div>
+    <div class="tab" id="clientsTab" onclick="switchTab('clients', this)">Clients</div>
   </div>
   <div id="tab-active" class="tab-content active">
     <div class="section-header"><span class="section-title" id="activeCount"></span></div>
@@ -404,6 +428,24 @@
     </div>
     <div id="hwList"></div>
   </div>
+  <div id="tab-clients" class="tab-content">
+    <div class="section-header" style="flex-wrap:wrap;gap:10px">
+      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+        <span class="section-title" id="clientCount">0 Clients</span>
+        <input class="form-input" id="clientSearchInput" placeholder="Search..." oninput="renderClients()" style="width:200px;padding:5px 10px;font-size:14px" />
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span style="font-family:var(--mono);font-size:12px;color:var(--text3)" id="clientsLastImport"></span>
+        <button class="btn btn-ghost btn-sm admin-only" onclick="triggerClientImport()">⬆ Import CSV</button>
+        <div class="col-toggle-wrap">
+          <button class="btn btn-ghost btn-sm" onclick="toggleColPanel()">Columns ▾</button>
+          <div class="col-toggle-panel" id="colTogglePanel"></div>
+        </div>
+      </div>
+    </div>
+    <input type="file" id="clientCsvInput" accept=".csv" style="display:none" onchange="handleClientCSV(event)" />
+    <div id="clientsList"></div>
+  </div>
 </div>
 
 <!-- NEW/EDIT JOB MODAL -->
@@ -412,7 +454,9 @@
     <div class="modal-title" id="jobModalTitle">New Job</div>
     <div class="form-group">
       <label class="form-label">Client Name</label>
-      <input class="form-input" id="f_name" placeholder="e.g. Griffin, Mendoza..." />
+      <div class="ac-wrap">
+        <input class="form-input" id="f_name" placeholder="e.g. Griffin, Mendoza..." autocomplete="off" oninput="showAC('f_name')" onkeydown="navigateAC(event,'f_name')" onblur="setTimeout(()=>hideAC('f_name'),150)" />
+      </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
       <input type="checkbox" id="f_itemized" onchange="toggleItemizedQuote()" style="width:16px;height:16px;cursor:pointer;accent-color:var(--accent)" />
@@ -710,7 +754,9 @@
     <div class="modal-title" id="apptModalTitle">New Appointment</div>
     <div class="form-group">
       <label class="form-label">Client / Job Name</label>
-      <input class="form-input" id="ap_name" placeholder="e.g. Smith residence" />
+      <div class="ac-wrap">
+        <input class="form-input" id="ap_name" placeholder="e.g. Smith residence" autocomplete="off" oninput="showAC('ap_name')" onkeydown="navigateAC(event,'ap_name')" onblur="setTimeout(()=>hideAC('ap_name'),150)" />
+      </div>
     </div>
     <div class="form-row">
       <div class="form-group">
@@ -808,6 +854,53 @@
     </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('changelogModal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- CLIENT CONFLICT MODAL -->
+<div id="clientConflictModal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:700px;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;padding:0">
+    <div style="padding:20px 24px 0">
+      <div class="modal-title" id="conflictModalTitle">Review Changes</div>
+      <div style="font-family:var(--mono);font-size:13px;color:var(--text3);margin-bottom:4px" id="conflictModalSub"></div>
+      <div style="font-family:var(--mono);font-size:12px;color:var(--text3);margin-bottom:16px">Highlighted in <span style="color:var(--red)">red = current value</span>, <span style="color:var(--green)">green = incoming value</span>. Default: accept incoming.</div>
+    </div>
+    <div style="overflow-y:auto;flex:1;padding:0 24px" id="conflictModalBody"></div>
+    <div style="display:flex;gap:8px;padding:16px 24px;border-top:1px solid var(--border);flex-wrap:wrap">
+      <button class="btn btn-ghost btn-sm" onclick="resolveAllConflicts('keep')">Keep All Existing</button>
+      <button class="btn btn-ghost btn-sm" onclick="resolveAllConflicts('new')">Accept All Incoming</button>
+      <div style="flex:1"></div>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('clientConflictModal')">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="applyConflictResolutions()">Apply & Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- CLIENT DETAIL MODAL -->
+<div id="clientDetailModal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:580px">
+    <div class="modal-title" id="clientDetailName"></div>
+    <div id="clientDetailBody"></div>
+    <div class="form-group" style="margin-top:14px">
+      <label class="form-label">Internal Notes</label>
+      <textarea class="form-input" id="clientDetailNotes" rows="3" placeholder="Notes about this client (not synced to Square)..."></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('clientDetailModal')">Close</button>
+      <button class="btn btn-primary" onclick="saveClientNotes()">Save Notes</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD AS CLIENT PROMPT -->
+<div id="addClientPromptModal" class="modal-overlay hidden">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-title">Add to Client List?</div>
+    <div style="font-family:var(--mono);font-size:14px;color:var(--text2);line-height:1.7;margin-bottom:20px" id="addClientPromptMsg"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('addClientPromptModal')">Not now</button>
+      <button class="btn btn-primary" onclick="confirmAddNewClient()">Add as Client</button>
     </div>
   </div>
 </div>
@@ -925,7 +1018,9 @@
   <div class="modal">
     <div class="modal-title" id="hwModalTitle">New HomeWatch Client</div>
     <div class="form-group"><label class="form-label">Client Name</label>
-      <input class="form-input" id="hw_name" placeholder="e.g. Smith Residence"></div>
+      <div class="ac-wrap">
+        <input class="form-input" id="hw_name" placeholder="e.g. Smith Residence" autocomplete="off" oninput="showAC('hw_name')" onkeydown="navigateAC(event,'hw_name')" onblur="setTimeout(()=>hideAC('hw_name'),150)" />
+      </div></div>
     <div class="form-group"><label class="form-label">Start Date</label>
       <input class="form-input" type="date" id="hw_startDate"></div>
     <div class="form-group"><label class="form-label">Monthly Rate ($)</label>
@@ -1015,6 +1110,8 @@ function migrateState(s) {
   });
   if (!s.users) s.users = [];
   if (!s.appointments) s.appointments = [];
+  if (!s.clients) s.clients = [];
+  if (!s.settings.clientColumns) s.settings.clientColumns = ['firstName','surname','email','phone','city','lastVisit','lifetimeSpend'];
   // Ensure there's always at least one admin user seeded
   if (s.users.length === 0) {
     s.users.push({ id: 'admin_default', name: 'Ty', pin: '1234', isAdmin: true });
@@ -1351,7 +1448,9 @@ function saveHW() {
     const hw = { id:uid(), name, startDate, monthlyRate, status:'active', payments:[], hwNotes:[], advances:[], employeeId: hwEmployeeId || '' };
     state.homewatch.push(hw);
   }
+  const isNewHW = !editingHWId;
   save(); closeModal('hwModal'); renderHomewatch(); renderSummary();
+  if (isNewHW) checkNewClientPrompt(name);
 }
 function deleteHW(hwId) {
   if (!confirm('Delete this HomeWatch client? This cannot be undone.')) return;
@@ -2352,6 +2451,7 @@ function saveJob() {
     });
     if (milestones.length&&Math.abs(total-100)>0.01) { alert(`Milestone percentages add up to ${total}%, not 100%.`); return; }
   }
+  const isNew = !editingJobId;
   const emps = state.users.filter(u => !u.isAdmin);
   const employeeId = emps.length > 1
     ? (document.getElementById('f_emp')?.value || emps[0]?.id)
@@ -2373,6 +2473,7 @@ function saveJob() {
       employeeId: employeeId || '' });
   }
   save(); renderJobs(); closeModal('jobModal');
+  if (isNew) checkNewClientPrompt(name);
 }
 
 // ─── ADD ITEM MODAL ───────────────────────────────────────────────────────────
@@ -2679,6 +2780,7 @@ function switchTab(name, el) {
   document.getElementById(`tab-${name}`).classList.add('active');
   if (name === 'schedule') renderSchedule();
   if (name === 'homewatch') renderHomewatch();
+  if (name === 'clients') renderClients();
 }
 function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
 function openChangelog() { document.getElementById('changelogModal').classList.remove('hidden'); }
@@ -2817,6 +2919,7 @@ function renderAll() {
   renderJobs();
   if (document.getElementById('tab-schedule').classList.contains('active')) renderSchedule();
   if (document.getElementById('tab-homewatch').classList.contains('active')) renderHomewatch();
+  if (document.getElementById('tab-clients').classList.contains('active')) renderClients();
 }
 
 // ─── USER MANAGEMENT ──────────────────────────────────────────────────────────
@@ -3334,6 +3437,415 @@ function importData(event) {
     event.target.value = '';
   };
   reader.readAsText(file);
+}
+
+// ─── CLIENTS ──────────────────────────────────────────────────────────────────
+const CLIENT_COLS = [
+  { key:'firstName',     label:'First Name' },
+  { key:'surname',       label:'Last Name' },
+  { key:'company',       label:'Company' },
+  { key:'email',         label:'Email' },
+  { key:'phone',         label:'Phone' },
+  { key:'address1',      label:'Address' },
+  { key:'city',          label:'City' },
+  { key:'state',         label:'State' },
+  { key:'postal',        label:'Zip' },
+  { key:'birthday',      label:'Birthday' },
+  { key:'txCount',       label:'# Visits' },
+  { key:'lifetimeSpend', label:'Lifetime $' },
+  { key:'firstVisit',    label:'First Visit' },
+  { key:'lastVisit',     label:'Last Visit' },
+  { key:'emailSubStatus',label:'Email Sub' },
+  { key:'memo',          label:'Square Memo' },
+];
+const CLIENT_DEFAULT_COLS = ['firstName','surname','email','phone','city','lastVisit','lifetimeSpend'];
+const CLIENT_DIFF_FIELDS  = ['firstName','surname','company','email','phone','address1','address2','city','state','postal','birthday','memo','emailSubStatus','firstVisit','lastVisit','txCount','lifetimeSpend'];
+const CLIENT_FIELD_LABELS = { firstName:'First Name', surname:'Last Name', company:'Company', email:'Email', phone:'Phone', address1:'Address 1', address2:'Address 2', city:'City', state:'State', postal:'Zip', birthday:'Birthday', memo:'Square Memo', emailSubStatus:'Email Sub', firstVisit:'First Visit', lastVisit:'Last Visit', txCount:'# Visits', lifetimeSpend:'Lifetime $' };
+
+let clientConflictQueue = [];
+let viewingClientId = null;
+let pendingNewClientName = null;
+
+function parseCSVRobust(text) {
+  text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const rows = [];
+  let row = [], col = '', inQuote = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuote) {
+      if (c === '"' && text[i+1] === '"') { col += '"'; i++; }
+      else if (c === '"') { inQuote = false; }
+      else { col += c; }
+    } else {
+      if (c === '"') { inQuote = true; }
+      else if (c === ',') { row.push(col.trim()); col = ''; }
+      else if (c === '\n') {
+        row.push(col.trim()); col = '';
+        if (row.some(v => v)) rows.push(row);
+        row = [];
+      } else { col += c; }
+    }
+  }
+  if (col || row.length) { row.push(col.trim()); if (row.some(v => v)) rows.push(row); }
+  return rows;
+}
+
+function squareRowToClient(headers, row) {
+  const h = k => { const i = headers.indexOf(k); return i >= 0 ? (row[i]||'').trim() : ''; };
+  return {
+    id: uid(),
+    squareId:      h('Square Customer ID'),
+    refId:         h('Reference ID'),
+    firstName:     h('First Name'),
+    surname:       h('Surname'),
+    company:       h('Company Name'),
+    email:         h('Email Address'),
+    phone:         h('Phone Number').replace(/^'/, ''),
+    address1:      h('Street Address 1'),
+    address2:      h('Street Address 2'),
+    city:          h('City'),
+    state:         h('State'),
+    postal:        h('Postal Code'),
+    birthday:      h('Birthday'),
+    memo:          h('Memo'),
+    emailSubStatus:h('Email Subscription Status'),
+    firstVisit:    h('First Visit'),
+    lastVisit:     h('Last Visit'),
+    txCount:       parseInt(h('Transaction Count'))||0,
+    lifetimeSpend: h('Lifetime spend').replace(/[$,]/g,''),
+    clientNotes:   '',
+  };
+}
+
+function triggerClientImport() { document.getElementById('clientCsvInput').click(); }
+
+function handleClientCSV(e) {
+  const file = e.target.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => processClientImport(ev.target.result);
+  reader.readAsText(file);
+  e.target.value = '';
+}
+
+function processClientImport(text) {
+  const rows = parseCSVRobust(text);
+  if (rows.length < 2) { alert('No client data found in CSV.'); return; }
+  const headers = rows[0];
+  if (!headers.includes('Square Customer ID') && !headers.includes('First Name')) {
+    alert("This doesn't look like a Square customer export. Please check the file."); return;
+  }
+  const incoming = rows.slice(1).filter(r => r.some(v=>v)).map(r => squareRowToClient(headers, r));
+  if (!state.clients) state.clients = [];
+  const conflicts = [], newClients = [];
+  incoming.forEach(inc => {
+    let existing = null;
+    if (inc.squareId) existing = state.clients.find(c => c.squareId === inc.squareId);
+    if (!existing && inc.email) existing = state.clients.find(c => c.email && c.email.toLowerCase() === inc.email.toLowerCase());
+    if (!existing) {
+      newClients.push(inc);
+    } else {
+      const changes = CLIENT_DIFF_FIELDS
+        .filter(f => String(existing[f]??'') !== String(inc[f]??''))
+        .map(f => ({ field:f, old:String(existing[f]??''), neo:String(inc[f]??''), chosen:'new' }));
+      if (changes.length) conflicts.push({ existingId:existing.id, name:`${inc.firstName} ${inc.surname}`.trim()||inc.email, changes });
+    }
+  });
+  newClients.forEach(c => state.clients.push(c));
+  state.settings.clientsLastImport = today();
+  if (conflicts.length > 0) {
+    clientConflictQueue = conflicts;
+    const added = newClients.length;
+    document.getElementById('conflictModalTitle').textContent = 'Review Changes';
+    document.getElementById('conflictModalSub').textContent =
+      `${added} new client${added!==1?'s':''} added automatically. ${conflicts.length} existing record${conflicts.length!==1?' have':' has'} changed fields — review below.`;
+    renderConflictBody();
+    document.getElementById('clientConflictModal').classList.remove('hidden');
+  } else {
+    save(); renderClients();
+    const parts = [];
+    if (newClients.length) parts.push(`${newClients.length} new client${newClients.length>1?'s':''} added`);
+    parts.push('No conflicts found');
+    alert(parts.join('. ') + '.');
+  }
+}
+
+function renderConflictBody() {
+  document.getElementById('conflictModalBody').innerHTML = clientConflictQueue.map((conflict, ci) => `
+    <div style="margin-bottom:22px">
+      <div style="font-family:var(--mono);font-size:13px;font-weight:600;color:var(--text);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">${esc(conflict.name)}</div>
+      ${conflict.changes.map((ch, fi) => `
+        <div class="conflict-row">
+          <div class="conflict-field">${CLIENT_FIELD_LABELS[ch.field]||ch.field}</div>
+          <div class="conflict-old">${ch.old ? esc(ch.old) : '<em style="opacity:0.5">empty</em>'}</div>
+          <div class="conflict-new">${ch.neo ? esc(ch.neo) : '<em style="opacity:0.5">empty</em>'}</div>
+          <div style="display:flex;gap:4px">
+            <button class="btn btn-sm ${ch.chosen==='keep'?'btn-primary':'btn-ghost'}" onclick="setConflictChoice(${ci},${fi},'keep')">Keep</button>
+            <button class="btn btn-sm ${ch.chosen==='new'?'btn-primary':'btn-ghost'}"  onclick="setConflictChoice(${ci},${fi},'new')">New</button>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `).join('');
+}
+
+function setConflictChoice(ci, fi, choice) {
+  clientConflictQueue[ci].changes[fi].chosen = choice;
+  renderConflictBody();
+}
+function resolveAllConflicts(choice) {
+  clientConflictQueue.forEach(c => c.changes.forEach(ch => ch.chosen = choice));
+  renderConflictBody();
+}
+function applyConflictResolutions() {
+  clientConflictQueue.forEach(conflict => {
+    const client = state.clients.find(c => c.id === conflict.existingId);
+    if (!client) return;
+    conflict.changes.forEach(ch => { if (ch.chosen === 'new') client[ch.field] = ch.neo; });
+  });
+  clientConflictQueue = [];
+  save(); closeModal('clientConflictModal'); renderClients();
+}
+
+function toggleColPanel() {
+  const panel = document.getElementById('colTogglePanel');
+  const open = panel.style.display !== 'none' && panel.style.display !== '';
+  if (open) { panel.style.display = 'none'; return; }
+  const visible = state.settings.clientColumns || CLIENT_DEFAULT_COLS;
+  panel.innerHTML = CLIENT_COLS.map(col => `
+    <label>
+      <input type="checkbox" ${visible.includes(col.key)?'checked':''} onchange="toggleClientCol('${col.key}',this.checked)" style="accent-color:var(--accent);cursor:pointer" />
+      ${col.label}
+    </label>
+  `).join('');
+  panel.style.display = 'block';
+}
+document.addEventListener('click', e => {
+  const wrap = document.querySelector('.col-toggle-wrap');
+  if (wrap && !wrap.contains(e.target)) {
+    const p = document.getElementById('colTogglePanel');
+    if (p) p.style.display = 'none';
+  }
+});
+
+function toggleClientCol(key, on) {
+  let cols = [...(state.settings.clientColumns || CLIENT_DEFAULT_COLS)];
+  if (on) { if (!cols.includes(key)) cols.push(key); }
+  else { cols = cols.filter(k => k !== key); }
+  state.settings.clientColumns = cols;
+  save(); renderClients();
+}
+
+function formatPhone(p) {
+  const d = (p||'').replace(/\D/g,'');
+  if (d.length === 11 && d[0] === '1') return `(${d.slice(1,4)}) ${d.slice(4,7)}-${d.slice(7)}`;
+  if (d.length === 10) return `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`;
+  return p;
+}
+
+function renderClients() {
+  if (!document.getElementById('tab-clients').classList.contains('active')) return;
+  const clients = state.clients || [];
+  const search = (document.getElementById('clientSearchInput')?.value || '').toLowerCase().trim();
+  const filtered = search
+    ? clients.filter(c => [c.firstName, c.surname, c.company, c.email, c.phone, c.city].some(v => v && v.toLowerCase().includes(search)))
+    : clients;
+  const cols = (() => {
+    const visible = state.settings.clientColumns && state.settings.clientColumns.length ? state.settings.clientColumns : CLIENT_DEFAULT_COLS;
+    return CLIENT_COLS.filter(c => visible.includes(c.key) && c.key !== 'firstName' && c.key !== 'surname');
+  })();
+  document.getElementById('clientCount').textContent = `${clients.length} Client${clients.length!==1?'s':''}`;
+  const lastImport = state.settings.clientsLastImport;
+  document.getElementById('clientsLastImport').textContent = lastImport ? `Last import: ${fmtDate(lastImport)}` : '';
+  if (clients.length === 0) {
+    document.getElementById('clientsList').innerHTML = `<div style="font-family:var(--mono);font-size:14px;color:var(--text3);padding:48px 0;text-align:center">No clients yet.<br><br><button class="btn btn-ghost btn-sm admin-only" onclick="triggerClientImport()">⬆ Import Square CSV</button></div>`;
+    applyAdminClasses(); return;
+  }
+  const fmtVal = (c, key) => {
+    const v = c[key];
+    if (v === undefined || v === null || v === '') return `<span style="color:var(--text3)">—</span>`;
+    if (key === 'lifetimeSpend') return `$${parseFloat(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+    if (key === 'firstVisit' || key === 'lastVisit') return fmtDate(v);
+    if (key === 'phone') return formatPhone(v);
+    if (key === 'txCount') return String(v);
+    return esc(String(v));
+  };
+  const sorted = [...filtered].sort((a,b) => {
+    const an = `${a.surname||''} ${a.firstName||''}`.trim().toLowerCase();
+    const bn = `${b.surname||''} ${b.firstName||''}`.trim().toLowerCase();
+    return an.localeCompare(bn);
+  });
+  document.getElementById('clientsList').innerHTML = `
+    <div class="clients-table-wrap">
+      <table class="clients-table">
+        <thead><tr>
+          <th>Name</th>
+          ${cols.map(c=>`<th>${c.label}</th>`).join('')}
+          <th class="admin-only"></th>
+        </tr></thead>
+        <tbody>
+          ${sorted.map(c => {
+            const name = [c.firstName, c.surname].filter(Boolean).join(' ') || c.company || c.email || '(unknown)';
+            const sub  = c.company && (c.firstName||c.surname) ? `<br><span style="font-size:11px;color:var(--text3)">${esc(c.company)}</span>` : '';
+            const note = c.clientNotes ? ` <span title="Has notes" style="color:var(--accent)">✎</span>` : '';
+            return `<tr class="client-row" onclick="openClientDetail('${c.id}')">
+              <td style="color:var(--text);font-weight:500">${esc(name)}${sub}${note}</td>
+              ${cols.map(col=>`<td title="${esc(String(c[col.key]||''))}">${fmtVal(c,col.key)}</td>`).join('')}
+              <td onclick="event.stopPropagation()" class="admin-only"><button class="btn btn-danger btn-sm" onclick="deleteClient('${c.id}')">✕</button></td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+  applyAdminClasses();
+}
+
+function openClientDetail(id) {
+  viewingClientId = id;
+  const c = (state.clients||[]).find(cl=>cl.id===id);
+  if (!c) return;
+  const name = [c.firstName, c.surname].filter(Boolean).join(' ') || c.company || c.email || 'Client';
+  document.getElementById('clientDetailName').textContent = name;
+  document.getElementById('clientDetailNotes').value = c.clientNotes || '';
+  const fields = [
+    ['Email',         c.email],
+    ['Phone',         c.phone ? formatPhone(c.phone) : ''],
+    ['Company',       c.company],
+    ['Address',       [c.address1, c.address2, c.city, c.state, c.postal].filter(Boolean).join(', ')],
+    ['Birthday',      c.birthday],
+    ['First Visit',   c.firstVisit ? fmtDate(c.firstVisit) : ''],
+    ['Last Visit',    c.lastVisit  ? fmtDate(c.lastVisit)  : ''],
+    ['# Visits',      c.txCount||0 ? String(c.txCount) : ''],
+    ['Lifetime Spend',c.lifetimeSpend ? `$${parseFloat(c.lifetimeSpend).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}` : ''],
+    ['Square Memo',   c.memo],
+  ];
+  document.getElementById('clientDetailBody').innerHTML = `
+    <div class="client-detail-grid">
+      ${fields.filter(([,v])=>v).map(([l,v])=>`
+        <div>
+          <div style="font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--text3);margin-bottom:3px">${l}</div>
+          <div style="font-family:var(--mono);font-size:14px;color:var(--text2);word-break:break-word">${esc(String(v))}</div>
+        </div>
+      `).join('')}
+    </div>
+    <div class="admin-only" style="margin-top:4px">
+      <button class="btn btn-ghost btn-sm" onclick="exportClientToSquare('${id}')">⬇ Export to Square CSV</button>
+    </div>
+  `;
+  document.getElementById('clientDetailModal').classList.remove('hidden');
+  applyAdminClasses();
+}
+
+function saveClientNotes() {
+  const c = (state.clients||[]).find(cl=>cl.id===viewingClientId);
+  if (!c) return;
+  c.clientNotes = document.getElementById('clientDetailNotes').value.trim();
+  save(); closeModal('clientDetailModal'); renderClients();
+}
+
+function deleteClient(id) {
+  if (!confirm('Remove this client from your list?')) return;
+  state.clients = (state.clients||[]).filter(c=>c.id!==id);
+  save(); renderClients();
+}
+
+function exportClientToSquare(id) {
+  const c = (state.clients||[]).find(cl=>cl.id===id);
+  if (!c) return;
+  const headers = ['First Name','Surname','Company Name','Email Address','Phone Number','Street Address 1','Street Address 2','City','State','Postal Code','Reference ID','Birthday','Email Subscription Status'];
+  const vals    = [c.firstName, c.surname, c.company, c.email, c.phone, c.address1, c.address2, c.city, c.state, c.postal, c.refId, c.birthday, c.emailSubStatus];
+  const line    = vals.map(v => `"${(v||'').replace(/"/g,'""')}"`).join(',');
+  downloadCSV(headers.join(',') + '\n' + line + '\n', `square-import-${(c.firstName||'client').toLowerCase().replace(/\s+/g,'-')}.csv`);
+}
+
+function downloadCSV(csv, filename) {
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([csv],{type:'text/csv'})), download: filename });
+  a.click(); URL.revokeObjectURL(a.href);
+}
+
+// ─── CLIENT AUTOCOMPLETE ──────────────────────────────────────────────────────
+let _acIdx = -1;
+
+function showAC(inputId) {
+  const input = document.getElementById(inputId);
+  const listId = inputId + '_acList';
+  let list = document.getElementById(listId);
+  if (!list) {
+    list = document.createElement('div');
+    list.id = listId; list.className = 'ac-list';
+    input.parentElement.appendChild(list);
+  }
+  const q = input.value.toLowerCase().trim();
+  if (!q || !state.clients) { list.style.display = 'none'; return; }
+  const matches = state.clients.filter(c => {
+    const name = `${c.firstName||''} ${c.surname||''}`.trim();
+    return name.toLowerCase().includes(q) || (c.company||'').toLowerCase().includes(q) || (c.email||'').toLowerCase().includes(q);
+  }).slice(0, 8);
+  if (!matches.length) { list.style.display = 'none'; return; }
+  _acIdx = -1;
+  list.innerHTML = matches.map((c, i) => {
+    const name = [c.firstName, c.surname].filter(Boolean).join(' ') || c.company || c.email;
+    const sub  = [c.city, c.email].filter(Boolean).join(' · ');
+    return `<div class="ac-item" data-idx="${i}" data-name="${esc(name)}" onmousedown="pickAC('${inputId}','${esc(name).replace(/'/g,"\\'")}')">
+      <div>${esc(name)}</div>
+      ${sub?`<div style="font-size:11px;color:var(--text3)">${esc(sub)}</div>`:''}
+    </div>`;
+  }).join('');
+  list.style.display = 'block';
+}
+
+function hideAC(inputId) {
+  const list = document.getElementById(inputId + '_acList');
+  if (list) list.style.display = 'none';
+}
+
+function pickAC(inputId, name) {
+  document.getElementById(inputId).value = name;
+  hideAC(inputId);
+}
+
+function navigateAC(e, inputId) {
+  const list = document.getElementById(inputId + '_acList');
+  if (!list || list.style.display === 'none') return;
+  const items = list.querySelectorAll('.ac-item');
+  if (e.key === 'ArrowDown')  { e.preventDefault(); _acIdx = Math.min(_acIdx+1, items.length-1); _acHighlight(list); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); _acIdx = Math.max(_acIdx-1, -1); _acHighlight(list); }
+  else if (e.key === 'Enter' && _acIdx >= 0) { e.preventDefault(); pickAC(inputId, items[_acIdx].dataset.name); }
+  else if (e.key === 'Escape') { hideAC(inputId); }
+}
+function _acHighlight(list) {
+  list.querySelectorAll('.ac-item').forEach((el,i) => el.classList.toggle('ac-active', i === _acIdx));
+}
+
+// ─── "ADD AS CLIENT" PROMPT ──────────────────────────────────────────────────
+function checkNewClientPrompt(name) {
+  if (!name || !currentUser?.isAdmin) return;
+  const already = (state.clients||[]).some(c => {
+    const full = `${c.firstName||''} ${c.surname||''}`.trim();
+    return full.toLowerCase() === name.toLowerCase() || (c.company||'').toLowerCase() === name.toLowerCase();
+  });
+  if (already) return;
+  pendingNewClientName = name;
+  document.getElementById('addClientPromptMsg').textContent =
+    `"${name}" isn't in your client list yet. Add them now?`;
+  document.getElementById('addClientPromptModal').classList.remove('hidden');
+}
+
+function confirmAddNewClient() {
+  if (!pendingNewClientName) return;
+  const parts = pendingNewClientName.trim().split(/\s+/);
+  const newClient = {
+    id: uid(), squareId:'', refId:'', firstName:parts[0]||'', surname:parts.slice(1).join(' ')||'',
+    company:'', email:'', phone:'', address1:'', address2:'', city:'', state:'', postal:'',
+    birthday:'', memo:'', emailSubStatus:'', firstVisit:today(), lastVisit:today(),
+    txCount:0, lifetimeSpend:'', clientNotes:'',
+  };
+  if (!state.clients) state.clients = [];
+  state.clients.push(newClient);
+  save();
+  closeModal('addClientPromptModal');
+  pendingNewClientName = null;
+  openClientDetail(newClient.id);
 }
 
 firebase.auth().onAuthStateChanged(user => { if (user) load(); });
