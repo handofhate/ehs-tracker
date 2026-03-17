@@ -305,6 +305,7 @@
   .cal-cell.today .cal-day-num { color:var(--accent);font-weight:600; }
   .cal-appt-pill { font-family:var(--mono);font-size:10px;background:rgba(91,141,239,0.2);color:var(--blue);border-radius:2px;padding:2px 5px;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer; }
   .cal-appt-pill:hover { background:rgba(91,141,239,0.35); }
+  .cal-appt-cont { opacity:0.65; }
   .cal-hw-pill { font-family:var(--mono);font-size:10px;background:rgba(155,127,232,0.2);color:var(--purple);border-radius:2px;padding:2px 5px;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer; }
   .cal-hw-pill:hover { background:rgba(155,127,232,0.35); }
   .cal-hw-pill.hw-paused { opacity:0.45; }
@@ -718,13 +719,14 @@
       </div>
       <div class="form-group">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-          <label class="form-label" style="margin-bottom:0">Time</label>
+          <label class="form-label" style="margin-bottom:0" id="ap_timeLabel">Time</label>
           <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-family:var(--mono);font-size:12px;color:var(--text3);user-select:none">
             <input type="checkbox" id="ap_allDay" onchange="toggleApptAllDay()" style="width:13px;height:13px;cursor:pointer;accent-color:var(--accent)" />
             All day
           </label>
         </div>
         <input class="form-input" id="ap_time" type="time" autocomplete="off" />
+        <input class="form-input" id="ap_endDate" type="date" autocomplete="off" style="display:none" />
       </div>
     </div>
     <div class="form-group">
@@ -3043,7 +3045,7 @@ function renderListView(appts) {
       <div style="flex:1;min-width:0">
         <div class="appt-name">${esc(a.clientName||'')}</div>
         <div class="appt-meta">
-          <span>📅 ${fmtDate(a.date)}</span>
+          <span>📅 ${a.endDate ? `${fmtDate(a.date)} – ${fmtDate(a.endDate)}` : fmtDate(a.date)}</span>
           ${a.time?`<span>🕐 ${fmtTime(a.time)}</span>`:''}
           ${a.address?`<span>📍 ${esc(a.address)}</span>`:''}
         </div>
@@ -3057,7 +3059,7 @@ function renderListView(appts) {
 
   // Mobile day filter: show only that day with a back button
   if (selectedDayFilter) {
-    const dayAppts = allAppts.filter(a => a.date === selectedDayFilter);
+    const dayAppts = allAppts.filter(a => a.endDate ? (a.date <= selectedDayFilter && a.endDate >= selectedDayFilter) : a.date === selectedDayFilter);
     const backBtn = `<button class="btn btn-ghost btn-sm" style="margin-bottom:14px" onclick="selectedDayFilter=null;setSchedView('month')">‹ Back to calendar</button>`;
     const header = `<div style="font-family:var(--mono);font-size:13px;color:var(--text3);margin-bottom:12px;text-transform:uppercase;letter-spacing:0.08em">${fmtDate(selectedDayFilter)}</div>`;
     const cards = dayAppts.length
@@ -3066,8 +3068,8 @@ function renderListView(appts) {
     return backBtn + header + cards + '<button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="openApptOnDate(\'' + selectedDayFilter + '\')">+ Add on this day</button>';
   }
 
-  const upcoming = allAppts.filter(a => a.date >= todayStr);
-  const past     = allAppts.filter(a => a.date < todayStr).reverse();
+  const upcoming = allAppts.filter(a => (a.endDate || a.date) >= todayStr);
+  const past     = allAppts.filter(a => (a.endDate || a.date) < todayStr).reverse();
 
   const upcomingHtml = upcoming.length ? upcoming.map(a => apptCard(a, false)).join('') : '';
   const pastHtml     = past.length     ? past.map(a => apptCard(a, true)).join('')     : '';
@@ -3088,9 +3090,11 @@ function renderMonthView(appts) {
   const daysInPrev = new Date(year, month, 0).getDate();
   const todayStr = today();
 
-  // Build appt lookup by date
+  // Build appt lookup by date (multi-day appts appear on each day in their range)
   const byDate = {};
-  appts.forEach(a => { if (!byDate[a.date]) byDate[a.date] = []; byDate[a.date].push(a); });
+  appts.forEach(a => {
+    getApptDates(a).forEach(d => { if (!byDate[d]) byDate[d] = []; byDate[d].push(a); });
+  });
   // Inject recurring HW payment entries
   hwCalEntries(year, month).forEach(e => { if (!byDate[e.date]) byDate[e.date] = []; byDate[e.date].push(e); });
 
@@ -3109,10 +3113,12 @@ function renderMonthView(appts) {
     const dayAppts = byDate[dateStr] || [];
     const isToday = dateStr === todayStr;
     const isSelected = dateStr === selectedCalDay;
-    const pills = dayAppts.slice(0,3).map(a => a.type === 'hw'
-      ? `<div class="cal-hw-pill${a.paused?' hw-paused':''}" onclick="event.stopPropagation();goToHW('${a.hwId}')" title="${esc(a.clientName)} — ${fmt(a.monthlyRate)}/mo${a.paused?' (Paused)':''}">${esc(a.clientName)}</div>`
-      : `<div class="cal-appt-pill" onclick="event.stopPropagation();openAppt('${a.id}')">${esc(a.clientName||'Appt')}</div>`
-    ).join('');
+    const pills = dayAppts.slice(0,3).map(a => {
+      if (a.type === 'hw') return `<div class="cal-hw-pill${a.paused?' hw-paused':''}" onclick="event.stopPropagation();goToHW('${a.hwId}')" title="${esc(a.clientName)} — ${fmt(a.monthlyRate)}/mo${a.paused?' (Paused)':''}">${esc(a.clientName)}</div>`;
+      const isStart = a.date === dateStr;
+      const isCont  = !isStart && a.endDate;
+      return `<div class="cal-appt-pill${isCont?' cal-appt-cont':''}" onclick="event.stopPropagation();openAppt('${a.id}')" title="${esc(a.clientName||'Appt')}">${isCont?'↳ ':''}${esc(a.clientName||'Appt')}</div>`;
+    }).join('');
     const more = dayAppts.length > 3 ? `<div class="cal-more">+${dayAppts.length-3} more</div>` : '';
     cells += `<div class="cal-cell${isToday?' today':''}${dayAppts.length?' has-appts':''}${isSelected?' selected':''}"
       onclick="selectCalDay('${dateStr}')" style="${isSelected?'border-color:var(--accent)':''}">
@@ -3150,6 +3156,7 @@ function renderMonthView(appts) {
             <div style="flex:1">
               <div class="appt-name">${esc(a.clientName||'')}</div>
               <div class="appt-meta">
+                ${a.endDate?`<span>📅 ${fmtDate(a.date)} – ${fmtDate(a.endDate)}</span>`:''}
                 ${a.time?`<span>🕐 ${fmtTime(a.time)}</span>`:''}
                 ${a.address?`<span>📍 ${esc(a.address)}</span>`:''}
               </div>
@@ -3212,15 +3219,28 @@ function fmtTime(t) {
 }
 
 // ─── APPOINTMENT CRUD ─────────────────────────────────────────────────────────
+function getApptDates(a) {
+  if (!a.allDay || !a.endDate || a.endDate <= a.date) return [a.date];
+  const dates = [];
+  const end = new Date(a.endDate + 'T00:00:00');
+  let cur = new Date(a.date + 'T00:00:00');
+  while (cur <= end) {
+    dates.push(cur.toISOString().slice(0,10));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return dates;
+}
+
 function openAppt(id) {
   editingApptId = id || null;
   const appt = id ? (state.appointments||[]).find(a=>a.id===id) : null;
   document.getElementById('apptModalTitle').textContent = appt ? 'Edit Appointment' : 'New Appointment';
   document.getElementById('ap_name').value    = appt ? (appt.clientName||'') : '';
-  document.getElementById('ap_date').value    = appt ? (appt.date||'') : today();
-  document.getElementById('ap_time').value    = appt ? (appt.time||'') : '';
-  document.getElementById('ap_address').value = appt ? (appt.address||'') : '';
-  document.getElementById('ap_notes').value   = appt ? (appt.notes||'') : '';
+  document.getElementById('ap_date').value     = appt ? (appt.date||'') : today();
+  document.getElementById('ap_time').value     = appt ? (appt.time||'') : '';
+  document.getElementById('ap_endDate').value  = appt ? (appt.endDate||'') : '';
+  document.getElementById('ap_address').value  = appt ? (appt.address||'') : '';
+  document.getElementById('ap_notes').value    = appt ? (appt.notes||'') : '';
   document.getElementById('ap_allDay').checked = appt ? !!appt.allDay : false;
   toggleApptAllDay();
   document.getElementById('apptModal').classList.remove('hidden');
@@ -3229,9 +3249,17 @@ function openAppt(id) {
 function toggleApptAllDay() {
   const allDay = document.getElementById('ap_allDay').checked;
   const timeEl = document.getElementById('ap_time');
-  timeEl.disabled = allDay;
-  timeEl.style.opacity = allDay ? '0.35' : '';
-  if (allDay) timeEl.value = '';
+  const endEl  = document.getElementById('ap_endDate');
+  const label  = document.getElementById('ap_timeLabel');
+  timeEl.style.display  = allDay ? 'none' : '';
+  endEl.style.display   = allDay ? '' : 'none';
+  label.textContent     = allDay ? 'End date' : 'Time';
+  if (allDay) {
+    timeEl.value = '';
+    if (!endEl.value) endEl.value = document.getElementById('ap_date').value || '';
+  } else {
+    endEl.value = '';
+  }
 }
 function openApptOnDate(dateStr) {
   openAppt();
@@ -3244,13 +3272,16 @@ async function saveAppt() {
   if (!clientName) { alert('Please enter a client name.'); return; }
   if (!date)       { alert('Please select a date.'); return; }
   const allDay = document.getElementById('ap_allDay').checked;
+  const rawEnd = document.getElementById('ap_endDate').value;
+  const endDate = (allDay && rawEnd && rawEnd > date) ? rawEnd : null;
   const appt = {
     clientName,
     date,
     allDay,
-    time:    allDay ? '' : document.getElementById('ap_time').value,
-    address: document.getElementById('ap_address').value.trim(),
-    notes:   document.getElementById('ap_notes').value.trim(),
+    endDate:  endDate || null,
+    time:     allDay ? '' : document.getElementById('ap_time').value,
+    address:  document.getElementById('ap_address').value.trim(),
+    notes:    document.getElementById('ap_notes').value.trim(),
     createdBy: currentUser ? currentUser.id : ''
   };
   if (!state.appointments) state.appointments = [];
