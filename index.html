@@ -463,7 +463,7 @@
       </div>
     </div>
     <div class="form-group">
-      <label class="form-label">Contact Person <span style="font-weight:400;color:var(--text3)">(optional — if different from job name)</span></label>
+      <label class="form-label">Contact Name <span style="font-weight:400;color:var(--text3)">(optional — if different from client)</span></label>
       <div class="ac-wrap">
         <input class="form-input" id="f_contact" placeholder="e.g. John the contractor" autocomplete="off" oninput="showAC('f_contact')" onkeydown="navigateAC(event,'f_contact')" onblur="setTimeout(()=>hideAC('f_contact'),150)" />
       </div>
@@ -1009,7 +1009,7 @@
       <div class="form-group">
         <label class="form-label">Type</label>
         <select class="form-input" id="sp_paytype">
-          <option value="">— General</option>
+          <option value="">General</option>
           <option value="advance">Advance</option>
           <option value="final">Final Pay</option>
         </select>
@@ -2645,7 +2645,7 @@ function openAddItem(jobId, type, itemId = null) {
         <div class="form-group"><label class="form-label">Date</label><input class="form-input" id="ai_date" type="date" value="${today()}" /></div>
         <div class="form-group"><label class="form-label">Type</label>
           <select class="form-input" id="ai_paytype">
-            <option value="">— General</option>
+            <option value="">General</option>
             <option value="advance">Advance</option>
             <option value="final">Final Pay</option>
           </select>
