@@ -423,6 +423,7 @@
     <button class="btn btn-ghost btn-sm admin-only" onclick="openSettings()">⚙ Settings</button>
     <button class="btn btn-ghost btn-sm admin-only" id="splitPayBtn" onclick="openSplitPay()">÷ Split Pay</button>
     <button class="btn btn-ghost btn-sm admin-only" id="undoBtn" onclick="undoAction()" style="opacity:0.35" title="Nothing to undo">↩ Undo</button>
+    <button class="btn btn-ghost btn-sm admin-only" id="redoBtn" onclick="redoAction()" style="opacity:0.35" title="Nothing to redo">↻ Redo</button>
     <button class="btn btn-primary admin-only" onclick="openNewJobModal()">+ New Job</button>
   </div>
 </div>
@@ -1255,14 +1256,17 @@ function migrateState(s) {
 }
 
 const undoStack = [];
+const redoStack = [];
 const UNDO_MAX = 50;
 
 async function save() {
   if (isSaving) return;
-  // Snapshot before saving for undo
+  // Snapshot before saving for undo; any new action clears redo
   undoStack.push(JSON.parse(JSON.stringify(state)));
   if (undoStack.length > UNDO_MAX) undoStack.shift();
+  redoStack.length = 0;
   _updateUndoBtn();
+  _updateRedoBtn();
   isSaving = true;
   try {
     await DOC.set(JSON.parse(JSON.stringify(state)));
@@ -1277,8 +1281,12 @@ async function save() {
 async function undoAction() {
   if (!undoStack.length) { showAlert('Nothing to undo.'); return; }
   const prev = undoStack.pop();
+  const description = _describeUndoAction(prev, state);
+  // Push current state onto redo stack before restoring
+  redoStack.push(JSON.parse(JSON.stringify(state)));
   _updateUndoBtn();
-  _showUndoToast();
+  _updateRedoBtn();
+  _showUndoToast('↩ Undid: ' + description);
   isSaving = true;
   try {
     await DOC.set(prev);
@@ -1286,8 +1294,34 @@ async function undoAction() {
   } catch(e) {
     console.error('Undo failed:', e);
     showAlert('Undo failed — check your connection.');
-    undoStack.push(prev); // put it back
+    undoStack.push(prev);
+    redoStack.pop();
     _updateUndoBtn();
+    _updateRedoBtn();
+  } finally {
+    isSaving = false;
+  }
+}
+
+async function redoAction() {
+  if (!redoStack.length) { showAlert('Nothing to redo.'); return; }
+  const next = redoStack.pop();
+  const description = _describeUndoAction(state, next);
+  // Push current state back onto undo stack
+  undoStack.push(JSON.parse(JSON.stringify(state)));
+  _updateUndoBtn();
+  _updateRedoBtn();
+  _showUndoToast('↻ Redid: ' + description);
+  isSaving = true;
+  try {
+    await DOC.set(next);
+  } catch(e) {
+    console.error('Redo failed:', e);
+    showAlert('Redo failed — check your connection.');
+    redoStack.push(next);
+    undoStack.pop();
+    _updateUndoBtn();
+    _updateRedoBtn();
   } finally {
     isSaving = false;
   }
@@ -1299,11 +1333,104 @@ function _updateUndoBtn() {
   btn.style.opacity = undoStack.length ? '1' : '0.35';
   btn.title = undoStack.length ? `Undo (${undoStack.length} action${undoStack.length!==1?'s':''})` : 'Nothing to undo';
 }
-function _showUndoToast() {
+
+function _updateRedoBtn() {
+  const btn = document.getElementById('redoBtn');
+  if (!btn) return;
+  btn.style.opacity = redoStack.length ? '1' : '0.35';
+  btn.title = redoStack.length ? `Redo (${redoStack.length} action${redoStack.length!==1?'s':''})` : 'Nothing to redo';
+}
+function _showUndoToast(msg) {
   const t = document.getElementById('undoToast');
   if (!t) return;
+  t.textContent = msg || '↩ Undo applied';
+  t.classList.remove('show');
+  // Force reflow so re-triggering the animation works
+  void t.offsetWidth;
   t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 2200);
+  setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+function _describeUndoAction(prev, curr) {
+  // Compare prev (before action) vs curr (current/after) to describe what was done
+  const pj = prev.jobs || [], cj = curr.jobs || [];
+  if (cj.length > pj.length) {
+    const a = cj.find(j => !pj.find(p => p.id === j.id));
+    return `Added job "${a?.name || ''}"`;
+  }
+  if (cj.length < pj.length) {
+    const r = pj.find(j => !cj.find(c => c.id === j.id));
+    return `Deleted job "${r?.name || ''}"`;
+  }
+  for (const cjob of cj) {
+    const pjob = pj.find(p => p.id === cjob.id);
+    if (pjob && JSON.stringify(cjob) !== JSON.stringify(pjob)) {
+      if (cjob.name !== pjob.name) return `Renamed job to "${cjob.name}"`;
+      if (JSON.stringify(cjob.milestones) !== JSON.stringify(pjob.milestones)) return `Updated milestones on "${cjob.name}"`;
+      if (JSON.stringify(cjob.advances) !== JSON.stringify(pjob.advances)) return `Updated advance on "${cjob.name}"`;
+      if (cjob.status !== pjob.status) return `Marked "${cjob.name}" ${cjob.status}`;
+      return `Updated job "${cjob.name}"`;
+    }
+  }
+  const ph = prev.homewatch || [], ch = curr.homewatch || [];
+  if (ch.length > ph.length) {
+    const a = ch.find(h => !ph.find(p => p.id === h.id));
+    return `Added HW client "${a?.name || ''}"`;
+  }
+  if (ch.length < ph.length) {
+    const r = ph.find(h => !ch.find(c => c.id === h.id));
+    return `Deleted HW client "${r?.name || ''}"`;
+  }
+  for (const chw of ch) {
+    const phw = ph.find(p => p.id === chw.id);
+    if (phw && JSON.stringify(chw) !== JSON.stringify(phw)) {
+      if (JSON.stringify(chw.payments) !== JSON.stringify(phw.payments)) return `Updated payment on "${chw.name}"`;
+      if (chw.status !== phw.status) return `${chw.status === 'paused' ? 'Paused' : 'Resumed'} HW "${chw.name}"`;
+      return `Updated HW client "${chw.name}"`;
+    }
+  }
+  const pc = prev.clients || [], cc = curr.clients || [];
+  if (cc.length > pc.length) {
+    const a = cc.find(c => !pc.find(p => p.id === c.id));
+    const n = [a?.firstName, a?.surname].filter(Boolean).join(' ') || a?.company || '';
+    return `Added client "${n}"`;
+  }
+  if (cc.length < pc.length) {
+    const r = pc.find(c => !cc.find(cur => cur.id === c.id));
+    const n = [r?.firstName, r?.surname].filter(Boolean).join(' ') || r?.company || '';
+    return `Deleted client "${n}"`;
+  }
+  for (const ccl of cc) {
+    const pcl = pc.find(p => p.id === ccl.id);
+    if (pcl && JSON.stringify(ccl) !== JSON.stringify(pcl)) {
+      const n = [ccl.firstName, ccl.surname].filter(Boolean).join(' ') || ccl.company || '';
+      if (JSON.stringify(ccl.clientNotes) !== JSON.stringify(pcl.clientNotes)) return `Updated notes for "${n}"`;
+      return `Updated client "${n}"`;
+    }
+  }
+  const pa = prev.appointments || [], ca = curr.appointments || [];
+  if (ca.length > pa.length) return 'Added appointment';
+  if (ca.length < pa.length) {
+    const r = pa.find(a => !ca.find(c => c.id === a.id));
+    return `Deleted appointment${r?.clientName ? ` for "${r.clientName}"` : ''}`;
+  }
+  for (const ca_ of ca) {
+    const pa_ = pa.find(p => p.id === ca_.id);
+    if (pa_ && JSON.stringify(ca_) !== JSON.stringify(pa_)) return `Updated appointment${ca_.clientName ? ` for "${ca_.clientName}"` : ''}`;
+  }
+  const pd = prev.debtPayments || [], cd = curr.debtPayments || [];
+  if (cd.length > pd.length) return 'Logged debt payment';
+  if (cd.length < pd.length) return 'Deleted debt payment';
+  if (JSON.stringify(pd) !== JSON.stringify(cd)) return 'Updated debt payment';
+  const pu = prev.users || [], cu = curr.users || [];
+  if (cu.length > pu.length) return 'Added user';
+  if (cu.length < pu.length) return 'Removed user';
+  for (const cu_ of cu) {
+    const pu_ = pu.find(p => p.id === cu_.id);
+    if (pu_ && JSON.stringify(cu_) !== JSON.stringify(pu_)) return `Updated user "${cu_.name}"`;
+  }
+  if (JSON.stringify(prev.settings) !== JSON.stringify(curr.settings)) return 'Updated settings';
+  return 'Last action';
 }
 
 function load() {
@@ -4436,13 +4563,14 @@ firebase.auth().signInAnonymously().catch(e => {
 });
 
 document.addEventListener('keydown', e => {
+  const anyOpen = document.querySelector('.modal-overlay:not(.hidden)');
+  if (anyOpen || !currentUser?.isAdmin) return;
   if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
-    // Only undo when no modal is open and user is admin
-    const anyOpen = document.querySelector('.modal-overlay:not(.hidden)');
-    if (!anyOpen && currentUser?.isAdmin) {
-      e.preventDefault();
-      undoAction();
-    }
+    e.preventDefault();
+    undoAction();
+  } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+    e.preventDefault();
+    redoAction();
   }
 });
 </script>
