@@ -228,15 +228,15 @@
     .tabs::-webkit-scrollbar { display: none; }
     .tab { flex-shrink: 0; padding: 10px 12px; font-size: 11px; letter-spacing: 0.04em; }
     /* Scroll arrow indicators */
-    .tabs-arr { display: block; position: absolute; top: 50%; transform: translateY(-60%); color: var(--accent); font-size: 22px; font-weight: bold; pointer-events: none; z-index: 3; opacity: 0; transition: opacity 0.2s; line-height: 1; }
-    .tabs-arr-l { left: 4px; }
-    .tabs-arr-r { right: 4px; }
+    .tabs-arr { display: block; position: absolute; top: 43%; color: var(--accent); font-size: 22px; font-weight: bold; pointer-events: none; z-index: 3; opacity: 0; transition: opacity 0.2s; line-height: 1; }
+    .tabs-arr-l { left: 4px; transform: translateY(-50%); }
+    .tabs-arr-r { right: 4px; transform: translateY(-50%); }
     .tabs-wrap::before, .tabs-wrap::after { content: ''; position: absolute; top: 0; bottom: 2px; width: 32px; pointer-events: none; z-index: 2; opacity: 0; transition: opacity 0.2s; }
     .tabs-wrap::before { left: 0; background: linear-gradient(to right, var(--bg) 30%, transparent); }
     .tabs-wrap::after { right: 0; background: linear-gradient(to left, var(--bg) 30%, transparent); }
-    .tabs-wrap.tabs-has-left .tabs-arr-l { opacity: 1; }
+    .tabs-wrap.tabs-has-left .tabs-arr-l { opacity: 1; animation: tabs-bounce-l 1.4s ease-in-out infinite; }
     .tabs-wrap.tabs-has-left::before { opacity: 1; }
-    .tabs-wrap.tabs-has-right .tabs-arr-r { opacity: 1; }
+    .tabs-wrap.tabs-has-right .tabs-arr-r { opacity: 1; animation: tabs-bounce-r 1.4s ease-in-out infinite; }
     .tabs-wrap.tabs-has-right::after { opacity: 1; }
 
     /* Job cards */
@@ -281,7 +281,8 @@
 
     /* Prevent content from overflowing modal horizontally */
     .modal { overflow-x: hidden; }
-    .form-row .form-group { min-width: 0; overflow: hidden; }
+    .form-group { overflow: hidden; }
+    .form-row .form-group { min-width: 0; }
     input[type="date"].form-input { min-width: 0; width: 100% !important; max-width: 100%; }
   }
 
@@ -379,6 +380,9 @@
   .conflict-field { color:var(--text3); font-size:11px; text-transform:uppercase; letter-spacing:0.05em; padding-top:2px; }
   .conflict-old { color:var(--red); text-decoration:line-through; word-break:break-all; }
   .conflict-new { color:var(--green); word-break:break-all; }
+  @keyframes tabs-bounce-r { 0%,100%{transform:translateY(-50%)} 50%{transform:translateY(-50%) translateX(4px)} }
+  @keyframes tabs-bounce-l { 0%,100%{transform:translateY(-50%)} 50%{transform:translateY(-50%) translateX(-4px)} }
+
   #undoToast {
     position:fixed;
     bottom:24px;
@@ -978,14 +982,11 @@
 <!-- CLIENT QUICK MODAL -->
 <div id="clientQuickModal" class="modal-overlay hidden">
   <div class="modal" style="max-width:500px;max-height:85vh;overflow-y:auto">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-      <div class="modal-title" id="cqName" style="margin:0"></div>
-      <button class="btn btn-ghost btn-sm" onclick="closeModal('clientQuickModal')" style="font-size:16px;padding:2px 8px">✕</button>
-    </div>
+    <div class="modal-title" id="cqName"></div>
     <div id="cqBody"></div>
     <div class="modal-actions" style="margin-top:14px">
-      <button class="btn btn-ghost btn-sm" onclick="cqShowInClients()">↗ Show in Clients</button>
-      <button class="btn btn-ghost admin-only" id="cqEditBtn" onclick="cqEdit()">✏ Edit</button>
+      <button class="btn btn-ghost btn-sm" onclick="cqShowInClients()">Show in Clients</button>
+      <button class="btn btn-ghost admin-only" id="cqEditBtn" onclick="cqEdit()">Edit</button>
       <button class="btn btn-ghost" onclick="closeModal('clientQuickModal')">Close</button>
     </div>
   </div>
@@ -1334,7 +1335,7 @@ async function undoAction() {
   _lastSavedState = JSON.parse(JSON.stringify(prev));
   _updateUndoBtn();
   _updateRedoBtn();
-  _showUndoToast('↩ Undid: ' + description);
+  _showUndoToast('↩ ' + description);
   isSaving = true;
   try {
     await DOC.set(prev);
@@ -1361,7 +1362,7 @@ async function redoAction() {
   _lastSavedState = JSON.parse(JSON.stringify(next));
   _updateUndoBtn();
   _updateRedoBtn();
-  _showUndoToast('↻ Redid: ' + description);
+  _showUndoToast('↻ ' + description);
   isSaving = true;
   try {
     await DOC.set(next);
@@ -2384,9 +2385,11 @@ function updateSplitTotals() {
   const remColor  = Math.abs(remaining) < 0.01 ? 'var(--green)' : remaining < 0 ? 'var(--red)' : 'var(--accent)';
   const el = document.getElementById('sp_totals');
   if (el) el.innerHTML = `
-    <span>Total: <strong>${fmt(total)}</strong></span>
-    <span>Allocated: <strong style="color:var(--green)">${fmt(allocated)}</strong></span>
-    <span>Remaining: <strong style="color:${remColor}">${fmt(remaining)}</strong></span>`;
+    <span>Total <strong>${fmt(total)}</strong></span>
+    <span style="display:flex;gap:20px;margin-left:auto">
+      <span>Allocated <strong style="color:var(--green)">${fmt(allocated)}</strong></span>
+      <span>Remaining <strong style="color:${remColor}">${fmt(remaining)}</strong></span>
+    </span>`;
 }
 async function saveSplitPay() {
   const total   = parseFloat(document.getElementById('sp_total').value) || 0;
@@ -3070,6 +3073,7 @@ function printQuoteSnapshot() {
   </style></head><body>${content}</body></html>`);
   win.document.close();
   win.focus();
+  win.onafterprint = function() { win.close(); };
   win.print();
 }
 
@@ -4071,9 +4075,10 @@ function renderClients() {
   if (!document.getElementById('tab-clients').classList.contains('active')) return;
   const clients = state.clients || [];
   const search = (document.getElementById('clientSearchInput')?.value || '').toLowerCase().trim();
+  const sorted = [...clients].sort((a, b) => (a.firstName || '').localeCompare(b.firstName || ''));
   const filtered = search
-    ? clients.filter(c => [c.firstName, c.surname, c.company, c.email, c.phone, c.city].some(v => v && v.toLowerCase().includes(search)))
-    : clients;
+    ? sorted.filter(c => [c.firstName, c.surname, c.company, c.email, c.phone, c.city].some(v => v && v.toLowerCase().includes(search)))
+    : sorted;
   const cols = (() => {
     const visible = state.settings.clientColumns && state.settings.clientColumns.length ? state.settings.clientColumns : CLIENT_DEFAULT_COLS;
     return CLIENT_COLS.filter(c => visible.includes(c.key));
