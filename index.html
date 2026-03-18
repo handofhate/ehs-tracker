@@ -807,6 +807,12 @@
         <input class="form-input" id="ap_name" placeholder="e.g. Smith residence" autocomplete="off" oninput="showAC('ap_name')" onkeydown="navigateAC(event,'ap_name')" onblur="setTimeout(()=>hideAC('ap_name'),150)" />
       </div>
     </div>
+    <div class="form-group">
+      <label class="form-label">Contact Person <span style="color:var(--text3);font-weight:400">(optional — if different from client)</span></label>
+      <div class="ac-wrap">
+        <input class="form-input" id="ap_contact" placeholder="e.g. John the contractor" autocomplete="off" oninput="showAC('ap_contact')" onkeydown="navigateAC(event,'ap_contact')" onblur="setTimeout(()=>hideAC('ap_contact'),150)" />
+      </div>
+    </div>
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">Date</label>
@@ -1195,6 +1201,7 @@ function migrateState(s) {
   });
   if (!s.users) s.users = [];
   if (!s.appointments) s.appointments = [];
+  (s.appointments||[]).forEach(a => { if (a.contactName === undefined) a.contactName = ''; });
   if (!s.clients) s.clients = [];
   (s.clients || []).forEach(c => {
     if (typeof c.clientNotes === 'string') {
@@ -3519,6 +3526,7 @@ function renderListView(appts) {
     <div class="appt-card${isPast?' past':''}">
       <div style="flex:1;min-width:0">
         <div class="appt-name" style="display:flex;align-items:center;gap:6px">${esc(a.clientName||'')}${a.clientName && clientByName(a.clientName) ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 7px;flex-shrink:0" onclick="event.stopPropagation();openClientQuick('${esc(a.clientName)}')" title="View Client">👤</button>` : ''}</div>
+        ${a.contactName ? `<div style="font-size:13px;color:var(--blue);margin-top:2px;font-family:var(--mono);display:flex;align-items:center;gap:6px">via ${esc(a.contactName)}${clientByName(a.contactName) ? ` <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 7px" onclick="event.stopPropagation();openClientQuick('${esc(a.contactName)}')" title="View Client">👤</button>` : ''}</div>` : ''}
         <div class="appt-meta">
           <span>📅 ${a.endDate ? `${fmtDate(a.date)} – ${fmtDate(a.endDate)}` : fmtDate(a.date)}</span>
           ${a.time?`<span>🕐 ${fmtTime(a.time)}</span>`:''}
@@ -3711,6 +3719,7 @@ function openAppt(id) {
   const appt = id ? (state.appointments||[]).find(a=>a.id===id) : null;
   document.getElementById('apptModalTitle').textContent = appt ? 'Edit Appointment' : 'New Appointment';
   document.getElementById('ap_name').value    = appt ? (appt.clientName||'') : '';
+  document.getElementById('ap_contact').value = appt ? (appt.contactName||'') : '';
   document.getElementById('ap_date').value     = appt ? (appt.date||'') : today();
   document.getElementById('ap_time').value     = appt ? (appt.time||'') : '';
   document.getElementById('ap_endDate').value  = appt ? (appt.endDate||'') : '';
@@ -3751,6 +3760,7 @@ async function saveAppt() {
   const endDate = (allDay && rawEnd && rawEnd > date) ? rawEnd : null;
   const appt = {
     clientName,
+    contactName: document.getElementById('ap_contact').value.trim(),
     date,
     allDay,
     endDate:  endDate || null,
