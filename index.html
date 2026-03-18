@@ -559,12 +559,11 @@
   <div class="modal settings-modal">
     <div class="settings-modal-header">
       <div class="modal-title">Settings</div>
-      <span style="font-family:var(--mono);font-size:12px;color:var(--text3);cursor:pointer;text-decoration:underline dotted" onclick="openChangelog()">v1.16</span>
+      <span style="font-family:var(--mono);font-size:12px;color:var(--text3);cursor:pointer;text-decoration:underline dotted" onclick="openChangelog()">v1.17</span>
     </div>
     <div class="settings-body">
       <nav class="settings-nav">
-        <button class="settings-nav-btn active" onclick="settingsTab('account',this)">Account</button>
-        <button class="settings-nav-btn" onclick="settingsTab('employees',this)">Employees</button>
+        <button class="settings-nav-btn active" onclick="settingsTab('employees',this)">Employees</button>
         <button class="settings-nav-btn" onclick="settingsTab('fees',this)">Square Fees</button>
         <button class="settings-nav-btn" onclick="settingsTab('debt',this)">Debt</button>
         <button class="settings-nav-btn" onclick="settingsTab('jobs',this)">Jobs</button>
@@ -572,13 +571,6 @@
         <button class="settings-nav-btn" onclick="settingsTab('data',this)">Data</button>
       </nav>
       <div style="flex:1;overflow:hidden;display:flex;flex-direction:column">
-        <div id="stab-account" class="settings-panel active">
-          <div class="form-group">
-            <label class="form-label">Signed in as</label>
-            <div style="font-family:var(--mono);font-size:17px;color:var(--text);margin-bottom:12px" id="s_whoami"></div>
-            <button class="btn btn-ghost btn-sm" onclick="closeModal('settingsModal');openChangePin()">🔑 Change My PIN</button>
-          </div>
-        </div>
         <div id="stab-employees" class="settings-panel">
           <div id="userList" style="margin-bottom:16px"></div>
           <div style="border-top:1px solid var(--border);padding-top:16px">
@@ -875,7 +867,20 @@
     <div class="modal-title">Version History</div>
     <div style="font-family:var(--mono);font-size:13px;line-height:1.7;color:var(--text2)">
       <div style="margin-bottom:14px">
-        <div style="color:var(--accent);font-size:14px;margin-bottom:4px">v1.16 — Mar 2026</div>
+        <div style="color:var(--accent);font-size:14px;margin-bottom:4px">v1.17 — Mar 2026</div>
+        <div>· Clients tab — Square CSV import/export, field-level conflict resolution</div>
+        <div>· Client notes thread (add/edit/delete, employee 30s edit window)</div>
+        <div>· Client quick-view popup (👤 on job, HW, and schedule cards)</div>
+        <div>· Client row expand/collapse inline with 2-column detail grid</div>
+        <div>· Appointment contact person field (same as jobs)</div>
+        <div>· Undo / Redo with descriptive toast (Ctrl+Z / Ctrl+Y)</div>
+        <div>· Action-level undo stack (up to 50 steps)</div>
+        <div>· Themed confirm/alert modals — no more browser dialogs</div>
+        <div>· Column visibility settings for client table, expand view, and quick view</div>
+        <div>· Account settings tab removed (PIN change is in Employees)</div>
+      </div>
+      <div style="margin-bottom:14px">
+        <div style="color:var(--text3);font-size:14px;margin-bottom:4px">v1.16 — Mar 2026</div>
         <div>· Tabbed settings modal (Account · Employees · Square Fees · Debt · Data)</div>
         <div>· Employee management moved inline — no more separate modal</div>
         <div>· Square per-transaction fee ($0.30) support</div>
@@ -3082,7 +3087,6 @@ function toggleClientQuickCol(key, on) {
   save();
 }
 function openSettings() {
-  document.getElementById('s_whoami').textContent    = currentUser?.name || '';
   document.getElementById('s_feeRate').value         = +((state.settings.feeRate || 0.026) * 100).toFixed(3);
   document.getElementById('s_txnFee').value          = state.settings.txnFee ?? 0.30;
   document.getElementById('s_debtOriginal').value    = state.settings.debtOriginal || 2256.58;
@@ -3096,7 +3100,7 @@ function openSettings() {
   dmCount = 0;
   (state.settings.defaultMilestones || []).forEach(m => addDmField(m.label, m.pct));
   // Reset to Account tab
-  settingsTab('account', document.querySelector('#settingsModal .settings-nav-btn'));
+  settingsTab('employees', document.querySelector('#settingsModal .settings-nav-btn'));
   renderUserList();
   document.getElementById('nu_name').value = '';
   document.getElementById('nu_pin').value  = '';
