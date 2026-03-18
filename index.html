@@ -445,12 +445,12 @@
     <span id="headerUserLabel" style="font-family:var(--mono);font-size:12px;color:var(--text3);display:none"></span>
     <button class="btn btn-ghost btn-sm" id="signOutBtn" onclick="signOut()" style="display:none">⎋ Sign Out</button>
     <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)" />
-    <button class="btn btn-ghost btn-sm employee-only" onclick="openMySettings()">⚙ Settings</button>
-    <button class="btn btn-ghost btn-sm admin-only" onclick="openSettings()">⚙ Settings</button>
-    <button class="btn btn-ghost btn-sm admin-only" id="splitPayBtn" onclick="openSplitPay()">÷ Split Pay</button>
-    <button class="btn btn-ghost btn-sm admin-only" id="undoBtn" onclick="undoAction()" style="opacity:0.35" title="Nothing to undo">↩ Undo</button>
-    <button class="btn btn-ghost btn-sm admin-only" id="redoBtn" onclick="redoAction()" style="opacity:0.35" title="Nothing to redo">↻ Redo</button>
-    <button class="btn btn-primary admin-only" onclick="openNewJobModal()">+ New Job</button>
+    <button class="btn btn-ghost btn-sm header-emp" onclick="openMySettings()">⚙ Settings</button>
+    <button class="btn btn-ghost btn-sm header-admin" onclick="openSettings()">⚙ Settings</button>
+    <button class="btn btn-ghost btn-sm header-admin" id="splitPayBtn" onclick="openSplitPay()">÷ Split Pay</button>
+    <button class="btn btn-ghost btn-sm header-admin" id="undoBtn" onclick="undoAction()" style="opacity:0.35" title="Nothing to undo">↩ Undo</button>
+    <button class="btn btn-ghost btn-sm header-admin" id="redoBtn" onclick="redoAction()" style="opacity:0.35" title="Nothing to redo">↻ Redo</button>
+    <button class="btn btn-primary header-admin" onclick="openNewJobModal()">+ New Job</button>
   </div>
 </div>
 
@@ -3322,17 +3322,17 @@ function applyUserView() {
   if (lbl) { lbl.textContent = currentUser ? currentUser.name : ''; lbl.style.display = 'inline'; }
   if (sob) sob.style.display = 'inline-block';
 
-  // Apply admin-only / employee-only visibility
+  // Apply admin-only / employee-only visibility (never touches header-admin/header-emp)
   applyAdminClasses();
 
-  // Header buttons: use visibility instead of display so the container never reflows
-  document.querySelectorAll('.header-actions .admin-only').forEach(el => {
-    el.style.display = '';
+  // Header buttons: visibility only — container size never changes
+  document.querySelectorAll('.header-admin').forEach(el => {
     el.style.visibility = isAdmin ? '' : 'hidden';
+    el.style.pointerEvents = isAdmin ? '' : 'none';
   });
-  document.querySelectorAll('.header-actions .employee-only').forEach(el => {
-    el.style.display = '';
+  document.querySelectorAll('.header-emp').forEach(el => {
     el.style.visibility = isAdmin ? 'hidden' : '';
+    el.style.pointerEvents = isAdmin ? 'none' : '';
   });
 
   // All tabs visible for everyone; debt/summary panels are admin-only
