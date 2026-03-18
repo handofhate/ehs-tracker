@@ -3269,30 +3269,34 @@ function doLogin() {
 }
 
 function signOut() {
-  viewAsAdmin = null;
   currentUser = null;
   selectedLoginUserId = null;
   sessionStorage.removeItem('ehs_user');
+  sessionStorage.removeItem('ehs_viewas_admin');
   localStorage.removeItem('ehs_user_persist');
   showLogin();
 }
 
-let viewAsAdmin = null;
 function viewAs(userId) {
   const u = state.users.find(x => x.id === userId);
   if (!u) return;
-  viewAsAdmin = currentUser;
-  currentUser = { id: u.id, name: u.name, isAdmin: u.isAdmin };
+  sessionStorage.setItem('ehs_viewas_admin', currentUser.id);
   closeModal('settingsModal');
+  currentUser = { id: u.id, name: u.name, isAdmin: u.isAdmin };
+  sessionStorage.setItem('ehs_user', JSON.stringify(currentUser));
   document.getElementById('viewAsName').textContent = u.name;
   document.getElementById('viewAsBanner').style.display = 'flex';
   applyUserView();
   renderAll();
 }
 function exitViewAs() {
-  if (!viewAsAdmin) return;
-  currentUser = viewAsAdmin;
-  viewAsAdmin = null;
+  const adminId = sessionStorage.getItem('ehs_viewas_admin');
+  if (!adminId) return;
+  const admin = state.users.find(u => u.id === adminId);
+  if (!admin) return;
+  sessionStorage.removeItem('ehs_viewas_admin');
+  currentUser = { id: admin.id, name: admin.name, isAdmin: admin.isAdmin };
+  sessionStorage.setItem('ehs_user', JSON.stringify(currentUser));
   document.getElementById('viewAsBanner').style.display = 'none';
   applyUserView();
   renderAll();
