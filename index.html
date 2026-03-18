@@ -221,17 +221,21 @@
     .summary-card { padding: 12px; }
     .summary-value { font-size: 20px; }
 
-    /* Tabs */
-    .tab { padding: 10px 12px; font-size: 11px; letter-spacing: 0.04em; }
+    /* Tabs — horizontal scroll on mobile */
+    .tabs { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+    .tabs::-webkit-scrollbar { display: none; }
+    .tab { flex-shrink: 0; padding: 10px 12px; font-size: 11px; letter-spacing: 0.04em; }
 
     /* Job cards */
     .job-header { padding: 12px 14px; gap: 8px; flex-wrap: wrap; }
-    .job-header-main { gap: 8px; flex-wrap: wrap; }
+    .job-header-main { gap: 8px; flex-wrap: wrap; position: relative; }
     .job-name { font-size: 17px; }
     .job-quick-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; width: 100%; margin-top: 6px; }
     .job-stat { text-align: left; }
     .job-header-btns { width: 100%; justify-content: flex-end; border-top: 1px solid var(--border); padding-top: 8px; margin-top: 2px; }
     .repay-toggle { font-size: 15px; }
+    /* Job status + emp name — upper-right on mobile */
+    .job-status-wrap { position: absolute; top: 0; right: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
 
     /* Line items — stack value/actions below label (except simple inline ones) */
     .line-item:not(.line-item-simple) { flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 3px; padding: 6px 0; }
@@ -261,6 +265,13 @@
 
     /* Detail sections inside job */
     .detail-grid { grid-template-columns: 1fr; }
+
+    /* Modal scroll — contain scrolling inside modal, prevent background scroll */
+    .modal-overlay { align-items: flex-start; padding: 16px 12px; overflow-y: auto; overscroll-behavior: contain; }
+    .modal { max-height: none; overflow-y: visible; }
+
+    /* Hours modal — prevent horizontal scroll from wide date input */
+    .modal .form-input[type="date"] { max-width: 100%; box-sizing: border-box; }
   }
 
   /* ── LOGIN ────────────────────────────────────────────────────────────────── */
@@ -330,7 +341,7 @@
     .cal-hw-pill { display:none; }
     .cal-cell.has-appts::after { content:'•';color:var(--blue);font-size:16px;display:block;text-align:center; }
     .cal-dow { font-size:10px;padding:4px 0; }
-    .sched-toolbar { flex-direction:column;align-items:flex-start; }
+    .sched-toolbar { flex-direction:row;align-items:center;justify-content:space-between;flex-wrap:nowrap; }
   }
 
   /* ─── CLIENTS ─── */
@@ -1853,9 +1864,9 @@ function renderDebtPanel() {
         const linkedHW  = p.linkedHWId  ? (state.homewatch||[]).find(h => h.id === p.linkedHWId) : null;
         const jobTag = linkedJob ? `<span style="font-size:11px;background:rgba(91,141,239,0.15);color:var(--blue);border-radius:2px;padding:1px 6px;font-family:var(--mono);margin-left:6px">⇒ ${esc(linkedJob.name)}</span>` : '';
         const hwTag  = linkedHW  ? `<span style="font-size:11px;background:rgba(76,175,130,0.15);color:var(--green);border-radius:2px;padding:1px 6px;font-family:var(--mono);margin-left:6px">⇒ HW: ${esc(linkedHW.name)}</span>` : '';
-        return `<div class="line-item" style="padding:6px 0">
+        return `<div class="line-item line-item-simple" style="padding:6px 0">
           <div class="line-item-label" style="font-size:15px">${esc(p.label||'Manual payment')}${jobTag}${hwTag}<span style="font-size:11px;color:var(--text3);margin-left:8px;font-family:var(--mono)">${fmtDate(p.date)||''}</span></div>
-          <div style="display:flex;align-items:center;gap:8px">
+          <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
             <div class="line-item-value green">+${fmt(p.amount)}</div>
             <button class="btn btn-danger btn-sm" onclick="deleteDebtPayment('${p.id}')">DEL</button>
           </div>
@@ -2033,7 +2044,7 @@ function jobCard(job) {
           ${job.contactName ? `<div style="font-size:13px;color:var(--blue);margin-top:2px;font-family:var(--mono);display:flex;align-items:center;gap:6px">via ${esc(job.contactName)} <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 7px" onclick="event.stopPropagation();openClientQuick('${esc(job.contactName)}')" title="View in Clients">👤</button></div>` : ''}
           <div style="font-size:15px;color:var(--text3);margin-top:2px;font-family:var(--mono)">${job.date||''}</div>
         </div>
-        <div style="display:flex;flex-direction:column;align-items:center;gap:5px">
+        <div class="job-status-wrap" style="display:flex;flex-direction:column;align-items:center;gap:5px">
           <span class="job-status ${sb}">${sl}</span>
           ${jobEmpName ? `<span style="font-family:var(--mono);font-size:13px;color:var(--purple);white-space:nowrap">${esc(jobEmpName)}</span>` : ''}
         </div>
