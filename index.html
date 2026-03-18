@@ -445,7 +445,7 @@
     <span id="headerUserLabel" style="font-family:var(--mono);font-size:12px;color:var(--text3);display:none"></span>
     <button class="btn btn-ghost btn-sm" id="signOutBtn" onclick="signOut()" style="display:none">⎋ Sign Out</button>
     <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)" />
-    <button class="btn btn-ghost btn-sm header-emp" onclick="openMySettings()">⚙ Settings</button>
+    <button class="btn btn-ghost btn-sm header-emp" onclick="openMySettings()" style="display:none">⚙ Settings</button>
     <button class="btn btn-ghost btn-sm header-admin" onclick="openSettings()">⚙ Settings</button>
     <button class="btn btn-ghost btn-sm header-admin" id="splitPayBtn" onclick="openSplitPay()">÷ Split Pay</button>
     <button class="btn btn-ghost btn-sm header-admin" id="undoBtn" onclick="undoAction()" style="opacity:0.35" title="Nothing to undo">↩ Undo</button>
@@ -3325,14 +3325,14 @@ function applyUserView() {
   // Apply admin-only / employee-only visibility (never touches header-admin/header-emp)
   applyAdminClasses();
 
-  // Header buttons: visibility only — container size never changes
+  // Header buttons: admin buttons use visibility (always hold space, container never resizes)
+  // employee button uses display (doesn't need to hold space)
   document.querySelectorAll('.header-admin').forEach(el => {
     el.style.visibility = isAdmin ? '' : 'hidden';
     el.style.pointerEvents = isAdmin ? '' : 'none';
   });
   document.querySelectorAll('.header-emp').forEach(el => {
-    el.style.visibility = isAdmin ? 'hidden' : '';
-    el.style.pointerEvents = isAdmin ? 'none' : '';
+    el.style.display = isAdmin ? 'none' : '';
   });
 
   // All tabs visible for everyone; debt/summary panels are admin-only
