@@ -1300,7 +1300,6 @@ async function undoAction() {
   const prev = undoStack.pop();
   const description = _describeUndoAction(prev, state);
   redoStack.push(JSON.parse(JSON.stringify(state)));
-  // The restored state becomes the new baseline for subsequent saves
   _lastSavedState = JSON.parse(JSON.stringify(prev));
   _updateUndoBtn();
   _updateRedoBtn();
@@ -1308,7 +1307,8 @@ async function undoAction() {
   isSaving = true;
   try {
     await DOC.set(prev);
-    // onSnapshot fires after isSaving = false and applies prev to state
+    // Apply directly — don't rely on onSnapshot (it fires before set() resolves and gets suppressed by isSaving)
+    _applyRestoredState(prev);
   } catch(e) {
     console.error('Undo failed:', e);
     showAlert('Undo failed — check your connection.');
@@ -1334,6 +1334,7 @@ async function redoAction() {
   isSaving = true;
   try {
     await DOC.set(next);
+    _applyRestoredState(next);
   } catch(e) {
     console.error('Redo failed:', e);
     showAlert('Redo failed — check your connection.');
@@ -1345,6 +1346,15 @@ async function redoAction() {
   } finally {
     isSaving = false;
   }
+}
+
+function _applyRestoredState(restored) {
+  state = migrateState(JSON.parse(JSON.stringify(restored)));
+  if (currentUser) {
+    const fresh = state.users.find(u => u.id === currentUser.id);
+    if (fresh) currentUser = { id: fresh.id, name: fresh.name, isAdmin: fresh.isAdmin };
+  }
+  renderAll();
 }
 
 function _updateUndoBtn() {
