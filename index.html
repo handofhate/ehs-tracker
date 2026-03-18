@@ -3325,6 +3325,10 @@ function applyUserView() {
   // Apply admin-only / employee-only visibility
   applyAdminClasses();
 
+  // Force header-actions to re-measure after buttons show/hide
+  const _ha = document.querySelector('.header-actions');
+  if (_ha) { _ha.style.display = 'none'; void _ha.offsetWidth; _ha.style.display = ''; }
+
   // All tabs visible for everyone; debt/summary panels are admin-only
   document.getElementById('summaryCards').style.display    = isAdmin ? '' : 'none';
   document.getElementById('empSummaryCards').style.display = isAdmin ? 'none' : '';
