@@ -309,8 +309,8 @@
     .settings-nav-wrap.snav-has-right::after { opacity: 1; }
     .settings-panel { padding: 16px; }
     .settings-modal-footer { padding: 10px 16px; }
-    /* Fix form-row stacked spacing — grid gap handles it, no double-spacing */
-    .form-row { gap: 16px; }
+    /* Fix form-row stacked spacing — grid gap handles Name→PIN, margin-bottom handles PIN→Role */
+    .form-row { gap: 16px; margin-bottom: 16px; }
     .form-row .form-group { margin-bottom: 0; }
   }
 
@@ -913,6 +913,7 @@
     <div class="form-group"><label class="form-label">Startup Debt</label>
       <div id="ee_debtInfo"></div></div>
     <div class="modal-actions">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('empEditModal');openResetPin(editEmpId)" style="margin-right:auto">Reset PIN</button>
       <button class="btn btn-ghost" onclick="closeModal('empEditModal')">Cancel</button>
       <button class="btn btn-primary" onclick="saveEmpEdit()">Save</button>
     </div>
@@ -3368,7 +3369,7 @@ function renderUserList() {
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           ${!u.isAdmin ? `<button class="btn btn-ghost btn-sm" onclick="openEditEmp('${u.id}')">Edit</button>` : ''}
-          <button class="btn btn-ghost btn-sm" onclick="openResetPin('${u.id}')">Reset PIN</button>
+          ${u.isAdmin ? `<button class="btn btn-ghost btn-sm" onclick="openResetPin('${u.id}')">Reset PIN</button>` : ''}
           ${!u.isAdmin || users.filter(x=>x.isAdmin).length > 1
             ? `<button class="btn btn-danger btn-sm" onclick="deleteUser('${u.id}')">DEL</button>`
             : ''}
