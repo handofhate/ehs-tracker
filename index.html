@@ -281,8 +281,8 @@
 
     /* Prevent content from overflowing modal horizontally */
     .modal { overflow-x: hidden; }
-    .form-group { overflow: hidden; }
     .form-row .form-group { min-width: 0; }
+    .form-group:not(:has(.ac-wrap)) { overflow: hidden; }
     input[type="date"].form-input { min-width: 0; width: 100% !important; max-width: 100%; }
   }
 
