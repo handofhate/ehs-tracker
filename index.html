@@ -119,9 +119,9 @@
   .settlement-big.orange { color: var(--accent); }
   .settlement-big.red { color: var(--red); }
 
-  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 20px; overflow-y: auto; }
   .modal-overlay.hidden { display: none; }
-  .modal { background: var(--bg2); border: 1px solid var(--border2); border-radius: 6px; padding: 28px; width: 100%; max-width: 560px; max-height: 90vh; overflow-y: auto; }
+  .modal { background: var(--bg2); border: 1px solid var(--border2); border-radius: 6px; padding: 28px; width: 100%; max-width: 560px; max-height: 90vh; overflow-y: auto; overscroll-behavior: contain; }
   .modal-wide { max-width: 660px; }
   .modal-title { font-family: var(--mono); font-size: 18px; font-weight: 600; color: var(--accent); margin-bottom: 24px; text-transform: uppercase; letter-spacing: 0.08em; }
   .form-group { margin-bottom: 16px; }
@@ -222,7 +222,9 @@
     .summary-value { font-size: 20px; }
 
     /* Tabs — horizontal scroll on mobile */
-    .tabs { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+    .tabs-wrap { position: relative; overflow: hidden; }
+    .tabs-wrap::after { content: ''; position: absolute; right: 0; top: 0; bottom: 2px; width: 36px; background: linear-gradient(to right, transparent, var(--bg)); pointer-events: none; z-index: 1; }
+    .tabs { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; touch-action: pan-x; overscroll-behavior-x: contain; }
     .tabs::-webkit-scrollbar { display: none; }
     .tab { flex-shrink: 0; padding: 10px 12px; font-size: 11px; letter-spacing: 0.04em; }
 
@@ -266,12 +268,9 @@
     /* Detail sections inside job */
     .detail-grid { grid-template-columns: 1fr; }
 
-    /* Modal scroll — contain scrolling inside modal, prevent background scroll */
-    .modal-overlay { align-items: flex-start; padding: 16px 12px; overflow-y: auto; overscroll-behavior: contain; }
-    .modal { max-height: none; overflow-y: visible; }
-
-    /* Hours modal — prevent horizontal scroll from wide date input */
-    .modal .form-input[type="date"] { max-width: 100%; box-sizing: border-box; }
+    /* Prevent date input from overflowing modal on mobile */
+    .form-row .form-group { min-width: 0; }
+    input[type="date"].form-input { min-width: 0; width: 100%; }
   }
 
   /* ── LOGIN ────────────────────────────────────────────────────────────────── */
@@ -443,13 +442,15 @@
   <div id="debtPanel"></div>
   <div id="summaryCards" class="summary-grid"></div>
   <div id="empSummaryCards" class="summary-grid" style="display:none"></div>
-  <div class="tabs">
-    <div class="tab job-tab active" onclick="switchTab('active', this)">Active</div>
-    <div class="tab job-tab" onclick="switchTab('complete', this)">Completed</div>
-    <div class="tab job-tab" onclick="switchTab('all', this)">All Jobs</div>
-    <div class="tab" onclick="switchTab('homewatch', this)">HomeWatch</div>
-    <div class="tab" id="schedTab" onclick="switchTab('schedule', this)">Schedule</div>
-    <div class="tab" id="clientsTab" onclick="switchTab('clients', this)">Clients</div>
+  <div class="tabs-wrap">
+    <div class="tabs">
+      <div class="tab job-tab active" onclick="switchTab('active', this)">Active</div>
+      <div class="tab job-tab" onclick="switchTab('complete', this)">Completed</div>
+      <div class="tab job-tab" onclick="switchTab('all', this)">All Jobs</div>
+      <div class="tab" onclick="switchTab('homewatch', this)">HomeWatch</div>
+      <div class="tab" id="schedTab" onclick="switchTab('schedule', this)">Schedule</div>
+      <div class="tab" id="clientsTab" onclick="switchTab('clients', this)">Clients</div>
+    </div>
   </div>
   <div id="tab-active" class="tab-content active">
     <div class="section-header"><span class="section-title" id="activeCount"></span></div>
@@ -1862,8 +1863,8 @@ function renderDebtPanel() {
     ? [...state.debtPayments].reverse().map(p => {
         const linkedJob = p.linkedJobId ? state.jobs.find(j => j.id === p.linkedJobId) : null;
         const linkedHW  = p.linkedHWId  ? (state.homewatch||[]).find(h => h.id === p.linkedHWId) : null;
-        const jobTag = linkedJob ? `<span style="font-size:11px;background:rgba(91,141,239,0.15);color:var(--blue);border-radius:2px;padding:1px 6px;font-family:var(--mono);margin-left:6px">⇒ ${esc(linkedJob.name)}</span>` : '';
-        const hwTag  = linkedHW  ? `<span style="font-size:11px;background:rgba(76,175,130,0.15);color:var(--green);border-radius:2px;padding:1px 6px;font-family:var(--mono);margin-left:6px">⇒ HW: ${esc(linkedHW.name)}</span>` : '';
+        const jobTag = linkedJob ? `<span style="font-size:11px;background:rgba(91,141,239,0.15);color:var(--blue);border-radius:2px;padding:1px 6px;font-family:var(--mono);margin-left:6px;white-space:nowrap;display:inline-block">⇒ ${esc(linkedJob.name)}</span>` : '';
+        const hwTag  = linkedHW  ? `<span style="font-size:11px;background:rgba(76,175,130,0.15);color:var(--green);border-radius:2px;padding:1px 6px;font-family:var(--mono);margin-left:6px;white-space:nowrap;display:inline-block">⇒ HW: ${esc(linkedHW.name)}</span>` : '';
         return `<div class="line-item line-item-simple" style="padding:6px 0">
           <div class="line-item-label" style="font-size:15px">${esc(p.label||'Manual payment')}${jobTag}${hwTag}<span style="font-size:11px;color:var(--text3);margin-left:8px;font-family:var(--mono)">${fmtDate(p.date)||''}</span></div>
           <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
@@ -4654,6 +4655,17 @@ firebase.auth().signInAnonymously().catch(e => {
     <div style="font-family:var(--mono);font-size:13px;color:var(--text3);margin-top:8px">${e.message}</div>
     <div style="font-family:var(--mono);font-size:13px;color:var(--text3);margin-top:4px">Make sure Anonymous auth is enabled in Firebase console.</div>`;
 });
+
+// ─── BODY SCROLL LOCK — prevent background scroll when any modal is open ───────
+(function() {
+  const observer = new MutationObserver(() => {
+    const anyOpen = !!document.querySelector('.modal-overlay:not(.hidden)');
+    document.body.style.overflow = anyOpen ? 'hidden' : '';
+  });
+  document.querySelectorAll('.modal-overlay').forEach(el =>
+    observer.observe(el, { attributes: true, attributeFilter: ['class'] })
+  );
+})();
 
 document.addEventListener('keydown', e => {
   const anyOpen = document.querySelector('.modal-overlay:not(.hidden)');
