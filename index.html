@@ -152,6 +152,8 @@
 
   .tabs-wrap { position: relative; overflow: hidden; }
   .tabs-arr { display: none; }
+  .settings-nav-wrap { position: relative; }
+  .settings-nav-arr { display: none; }
   .tabs { display: flex; gap: 0; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
   .tab { font-family: var(--mono); font-size: 15px; text-transform: uppercase; letter-spacing: 0.08em; padding: 10px 18px; cursor: pointer; color: var(--text3); border-bottom: 2px solid transparent; transition: all 0.15s; margin-bottom: -1px; }
   .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
@@ -285,16 +287,31 @@
     .form-group:not(:has(.ac-wrap)) { overflow: hidden; }
     input[type="date"].form-input { min-width: 0; width: 100% !important; max-width: 100%; }
 
-    /* Settings modal — flip sidebar to top tab bar */
-    .settings-modal { width: 100%; height: auto; max-height: 90vh; }
+    /* Settings modal — flip sidebar to top tab bar, fixed height */
+    .settings-modal { width: 100%; height: 85vh; }
     .settings-modal-header { padding: 16px 16px 12px; }
     .settings-body { flex-direction: column; }
-    .settings-nav { flex-direction: row; width: 100%; border-right: none; border-bottom: 1px solid var(--border); padding: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; flex-shrink: 0; }
+    .settings-nav-wrap { flex-shrink: 0; overflow: hidden; border-bottom: 1px solid var(--border); }
+    .settings-nav { flex-direction: row; width: 100%; border-right: none; border-bottom: none; padding: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; flex-shrink: 0; }
     .settings-nav::-webkit-scrollbar { display: none; }
     .settings-nav-btn { padding: 9px 13px; white-space: nowrap; width: auto; flex-shrink: 0; font-size: 11px; text-align: center; }
     .settings-nav-btn.active { box-shadow: inset 0 -2px 0 var(--accent); }
+    /* Scroll arrows for settings nav */
+    .settings-nav-arr { display: block; position: absolute; top: 50%; transform: translateY(-50%); color: var(--accent); font-size: 18px; font-weight: bold; pointer-events: none; z-index: 3; opacity: 0; transition: opacity 0.2s; }
+    .settings-nav-arr-l { left: 4px; }
+    .settings-nav-arr-r { right: 4px; }
+    .settings-nav-wrap::before, .settings-nav-wrap::after { content: ''; position: absolute; top: 0; bottom: 0; width: 28px; pointer-events: none; z-index: 2; opacity: 0; transition: opacity 0.2s; }
+    .settings-nav-wrap::before { left: 0; background: linear-gradient(to right, var(--bg2) 30%, transparent); }
+    .settings-nav-wrap::after { right: 0; background: linear-gradient(to left, var(--bg2) 30%, transparent); }
+    .settings-nav-wrap.snav-has-left .settings-nav-arr-l { opacity: 1; animation: tabs-bounce-l 1.4s ease-in-out infinite; }
+    .settings-nav-wrap.snav-has-left::before { opacity: 1; }
+    .settings-nav-wrap.snav-has-right .settings-nav-arr-r { opacity: 1; animation: tabs-bounce-r 1.4s ease-in-out infinite; }
+    .settings-nav-wrap.snav-has-right::after { opacity: 1; }
     .settings-panel { padding: 16px; }
     .settings-modal-footer { padding: 10px 16px; }
+    /* Fix form-row stacked spacing — grid gap handles it, no double-spacing */
+    .form-row { gap: 16px; }
+    .form-row .form-group { margin-bottom: 0; }
   }
 
   /* ── LOGIN ────────────────────────────────────────────────────────────────── */
@@ -354,7 +371,7 @@
   .user-row { display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);gap:8px; }
   .user-row:last-child { border-bottom:none; }
   .user-row-name { font-family:var(--mono);font-size:14px; }
-  .user-row-badge { font-family:var(--mono);font-size:11px;padding:2px 7px;border-radius:2px;background:rgba(245,166,35,0.12);color:var(--accent); }
+  .user-row-badge { display:inline-block;margin-top:4px;font-family:var(--mono);font-size:11px;padding:2px 7px;border-radius:2px;background:rgba(245,166,35,0.12);color:var(--accent); }
   .user-row-badge.emp { background:rgba(91,141,239,0.12);color:var(--blue); }
 
   @media (max-width:600px) {
@@ -446,10 +463,6 @@
   <div style="font-family:var(--mono);font-size:13px;color:var(--text3)">Connecting to database...</div>
 </div>
 
-<div id="viewAsBanner" style="display:none;position:sticky;top:0;z-index:150;background:var(--accent);color:#000;font-family:var(--mono);font-size:13px;font-weight:600;padding:7px 16px;align-items:center;gap:12px">
-  <span>👁 Viewing as <span id="viewAsName"></span></span>
-  <button onclick="exitViewAs()" style="margin-left:auto;background:rgba(0,0,0,0.15);border:none;border-radius:2px;padding:3px 10px;font-family:var(--mono);font-size:12px;font-weight:700;cursor:pointer;color:#000">✕ Exit</button>
-</div>
 <div class="header">
   <div class="header-title">JOB<span>/</span>TRACKER</div>
   <div class="header-actions">
@@ -603,14 +616,18 @@
       <span style="font-family:var(--mono);font-size:12px;color:var(--text3);cursor:pointer;text-decoration:underline dotted" onclick="openChangelog()">v1.17</span>
     </div>
     <div class="settings-body">
-      <nav class="settings-nav">
-        <button class="settings-nav-btn active" onclick="settingsTab('employees',this)">Employees</button>
-        <button class="settings-nav-btn" onclick="settingsTab('fees',this)">Square Fees</button>
-        <button class="settings-nav-btn" onclick="settingsTab('debt',this)">Debt</button>
-        <button class="settings-nav-btn" onclick="settingsTab('jobs',this)">Jobs</button>
-        <button class="settings-nav-btn" onclick="settingsTab('clients',this)">Clients</button>
-        <button class="settings-nav-btn" onclick="settingsTab('data',this)">Data</button>
-      </nav>
+      <div class="settings-nav-wrap">
+        <span class="settings-nav-arr settings-nav-arr-l">‹</span>
+        <nav class="settings-nav">
+          <button class="settings-nav-btn active" onclick="settingsTab('employees',this)">Employees</button>
+          <button class="settings-nav-btn" onclick="settingsTab('fees',this)">Square Fees</button>
+          <button class="settings-nav-btn" onclick="settingsTab('debt',this)">Debt</button>
+          <button class="settings-nav-btn" onclick="settingsTab('jobs',this)">Jobs</button>
+          <button class="settings-nav-btn" onclick="settingsTab('clients',this)">Clients</button>
+          <button class="settings-nav-btn" onclick="settingsTab('data',this)">Data</button>
+        </nav>
+        <span class="settings-nav-arr settings-nav-arr-r">›</span>
+      </div>
       <div style="flex:1;overflow:hidden;display:flex;flex-direction:column">
         <div id="stab-employees" class="settings-panel">
           <div id="userList" style="margin-bottom:16px"></div>
@@ -709,7 +726,7 @@
     <div class="settings-modal-footer">
       <button class="btn btn-ghost btn-sm" onclick="closeModal('settingsModal');signOut()" style="margin-right:auto">⎋ Sign Out</button>
       <button class="btn btn-ghost" onclick="closeModal('settingsModal')">Close</button>
-      <button class="btn btn-primary" id="s_saveBtn" style="display:none" onclick="saveSettings()">Save</button>
+      <button class="btn btn-primary" id="s_saveBtn" onclick="saveSettings()">Save</button>
     </div>
   </div>
 </div>
@@ -1963,8 +1980,8 @@ function renderSummary() {
     return `<div class="summary-card"><div class="summary-label">Owed to ${esc(emp.name)}</div><div class="summary-value ${total < 0 ? 'red' : 'orange'}">${fmt(Math.max(0, total))}</div><div class="summary-sub">jobs ${fmt(jobBal)} + HW ${fmt(hwBal)}</div></div>`;
   }).join('');
   document.getElementById('summaryCards').innerHTML = `
-    <div class="summary-card"><div class="summary-label">Active Jobs</div><div class="summary-value">${active.length}</div></div>
-    <div class="summary-card"><div class="summary-label">HomeWatch</div><div class="summary-value">${activeHW.length}</div><div class="summary-sub">${pausedHW.length > 0 ? `${pausedHW.length} paused` : 'none paused'}</div></div>
+    <div class="summary-card" onclick="goToTab('active')" style="cursor:pointer"><div class="summary-label">Active Jobs</div><div class="summary-value">${active.length}</div></div>
+    <div class="summary-card" onclick="goToTab('homewatch')" style="cursor:pointer"><div class="summary-label">HomeWatch</div><div class="summary-value">${activeHW.length}</div><div class="summary-sub">${pausedHW.length > 0 ? `${pausedHW.length} paused` : 'none paused'}</div></div>
     <div class="summary-card"><div class="summary-label">Total Contract Value</div><div class="summary-value orange">${fmt(tContract)}</div></div>
     <div class="summary-card"><div class="summary-label">Collected</div><div class="summary-value green">${fmt(tCollected)}</div><div class="summary-sub">${fmt(tPending)} pending</div></div>
     <div class="summary-card"><div class="summary-label">Your Profit (active)</div><div class="summary-value green">${fmt(tOwner)}</div><div class="summary-sub">from collected revenue</div></div>
@@ -2020,8 +2037,8 @@ function renderEmpSummary() {
   ].map(([v,l]) => `<option value="${v}"${empSummaryTimeframe===v?' selected':''}>${l}</option>`).join('');
 
   el.innerHTML = `
-    <div class="summary-card"><div class="summary-label">Active Jobs</div><div class="summary-value">${active.length}</div></div>
-    <div class="summary-card"><div class="summary-label">HomeWatch</div><div class="summary-value">${activeHW.length}</div><div class="summary-sub">${pausedHW.length > 0 ? `${pausedHW.length} paused` : 'none paused'}</div></div>
+    <div class="summary-card" onclick="goToTab('active')" style="cursor:pointer"><div class="summary-label">Active Jobs</div><div class="summary-value">${active.length}</div></div>
+    <div class="summary-card" onclick="goToTab('homewatch')" style="cursor:pointer"><div class="summary-label">HomeWatch</div><div class="summary-value">${activeHW.length}</div><div class="summary-sub">${pausedHW.length > 0 ? `${pausedHW.length} paused` : 'none paused'}</div></div>
     <div class="summary-card">
       <div class="summary-label" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">Recent Pay
         <select onchange="empSummaryTimeframe=this.value;localStorage.setItem('empSummaryTF',this.value);renderEmpSummary()" style="font-size:12px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:1px 4px">${tfOpts}</select>
@@ -3092,8 +3109,6 @@ function settingsTab(name, btn) {
   document.querySelectorAll('#settingsModal .settings-panel').forEach(p => p.classList.remove('active'));
   btn.classList.add('active');
   document.getElementById('stab-' + name).classList.add('active');
-  const needsSave = name === 'fees' || name === 'debt' || name === 'jobs';
-  document.getElementById('s_saveBtn').style.display = needsSave ? '' : 'none';
   if (name === 'clients') _populateClientColSettings();
 }
 function _populateClientColSettings() {
@@ -3148,6 +3163,7 @@ function openSettings() {
   document.getElementById('nu_pin').value  = '';
   document.getElementById('nu_role').value = 'employee';
   document.getElementById('settingsModal').classList.remove('hidden');
+  requestAnimationFrame(_initSettingsNavScroll);
 }
 function saveSettings() {
   state.settings.feeRate        = (parseFloat(document.getElementById('s_feeRate').value) || 2.6) / 100;
@@ -3283,34 +3299,8 @@ function signOut() {
   currentUser = null;
   selectedLoginUserId = null;
   sessionStorage.removeItem('ehs_user');
-  sessionStorage.removeItem('ehs_viewas_admin');
   localStorage.removeItem('ehs_user_persist');
   showLogin();
-}
-
-function viewAs(userId) {
-  const u = state.users.find(x => x.id === userId);
-  if (!u) return;
-  sessionStorage.setItem('ehs_viewas_admin', currentUser.id);
-  closeModal('settingsModal');
-  currentUser = { id: u.id, name: u.name, isAdmin: u.isAdmin };
-  sessionStorage.setItem('ehs_user', JSON.stringify(currentUser));
-  document.getElementById('viewAsName').textContent = u.name;
-  document.getElementById('viewAsBanner').style.display = 'flex';
-  applyUserView();
-  renderAll();
-}
-function exitViewAs() {
-  const adminId = sessionStorage.getItem('ehs_viewas_admin');
-  if (!adminId) return;
-  const admin = state.users.find(u => u.id === adminId);
-  if (!admin) return;
-  sessionStorage.removeItem('ehs_viewas_admin');
-  currentUser = { id: admin.id, name: admin.name, isAdmin: admin.isAdmin };
-  sessionStorage.setItem('ehs_user', JSON.stringify(currentUser));
-  document.getElementById('viewAsBanner').style.display = 'none';
-  applyUserView();
-  renderAll();
 }
 
 function loadExpandedState() {
@@ -3374,11 +3364,10 @@ function renderUserList() {
       <div class="user-row">
         <div>
           <div class="user-row-name">${esc(u.name)}</div>
+          <span class="user-row-badge${u.isAdmin?'':' emp'}">${u.isAdmin ? 'Admin' : `Employee · ${Math.round((u.empShare??0.66)*100)}%`}</span>
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <span class="user-row-badge${u.isAdmin?'':' emp'}">${u.isAdmin ? 'Admin' : `Employee · ${Math.round((u.empShare??0.66)*100)}%`}</span>
           ${!u.isAdmin ? `<button class="btn btn-ghost btn-sm" onclick="openEditEmp('${u.id}')">Edit</button>` : ''}
-          ${!u.isAdmin ? `<button class="btn btn-ghost btn-sm" onclick="viewAs('${u.id}')">View As</button>` : ''}
           <button class="btn btn-ghost btn-sm" onclick="openResetPin('${u.id}')">Reset PIN</button>
           ${!u.isAdmin || users.filter(x=>x.isAdmin).length > 1
             ? `<button class="btn btn-danger btn-sm" onclick="deleteUser('${u.id}')">DEL</button>`
@@ -4691,7 +4680,28 @@ firebase.auth().signInAnonymously().catch(e => {
     <div style="font-family:var(--mono);font-size:13px;color:var(--text3);margin-top:4px">Make sure Anonymous auth is enabled in Firebase console.</div>`;
 });
 
+function goToTab(name) {
+  const btn = document.querySelector(`.tabs .tab[onclick*="'${name}'"]`);
+  if (btn) switchTab(name, btn);
+}
+
 // ─── TABS SCROLL INDICATOR ────────────────────────────────────────────────────
+function _initSettingsNavScroll() {
+  const nav = document.querySelector('.settings-nav');
+  const wrap = document.querySelector('.settings-nav-wrap');
+  if (!nav || !wrap) return;
+  function update() {
+    const atStart = nav.scrollLeft <= 2;
+    const atEnd = nav.scrollLeft + nav.clientWidth >= nav.scrollWidth - 2;
+    wrap.classList.toggle('snav-has-left', !atStart);
+    wrap.classList.toggle('snav-has-right', !atEnd);
+  }
+  nav.removeEventListener('scroll', nav._snavHandler);
+  nav._snavHandler = update;
+  nav.addEventListener('scroll', update, { passive: true });
+  requestAnimationFrame(update);
+}
+
 function _initTabsScroll() {
   const tabs = document.querySelector('.tabs');
   const wrap = document.querySelector('.tabs-wrap');
