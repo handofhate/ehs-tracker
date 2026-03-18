@@ -3325,6 +3325,16 @@ function applyUserView() {
   // Apply admin-only / employee-only visibility
   applyAdminClasses();
 
+  // Header buttons: use visibility instead of display so the container never reflows
+  document.querySelectorAll('.header-actions .admin-only').forEach(el => {
+    el.style.display = '';
+    el.style.visibility = isAdmin ? '' : 'hidden';
+  });
+  document.querySelectorAll('.header-actions .employee-only').forEach(el => {
+    el.style.display = '';
+    el.style.visibility = isAdmin ? 'hidden' : '';
+  });
+
   // All tabs visible for everyone; debt/summary panels are admin-only
   document.getElementById('summaryCards').style.display    = isAdmin ? '' : 'none';
   document.getElementById('empSummaryCards').style.display = isAdmin ? 'none' : '';
