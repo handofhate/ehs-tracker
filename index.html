@@ -458,7 +458,10 @@
     <div class="section-header" style="flex-wrap:wrap;gap:10px">
       <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
         <span class="section-title" id="clientCount">0 Clients</span>
-        <input class="form-input" id="clientSearchInput" placeholder="Search..." oninput="renderClients()" style="width:200px;padding:5px 10px;font-size:14px" />
+        <div style="position:relative;display:inline-flex;align-items:center">
+          <input class="form-input" id="clientSearchInput" placeholder="Search..." oninput="renderClients()" style="width:200px;padding:5px 28px 5px 10px;font-size:14px" />
+          <button onclick="document.getElementById('clientSearchInput').value='';renderClients()" style="position:absolute;right:6px;background:none;border:none;color:var(--text3);cursor:pointer;font-size:15px;line-height:1;padding:0" title="Clear search">✕</button>
+        </div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <span style="font-family:var(--mono);font-size:12px;color:var(--text3)" id="clientsLastImport"></span>
@@ -1258,18 +1261,25 @@ function migrateState(s) {
 const undoStack = [];
 const redoStack = [];
 const UNDO_MAX = 50;
+// Tracks the last successfully written state so save() always snapshots
+// the pre-mutation baseline, not the already-mutated current state.
+let _lastSavedState = null;
 
 async function save() {
   if (isSaving) return;
-  // Snapshot before saving for undo; any new action clears redo
-  undoStack.push(JSON.parse(JSON.stringify(state)));
-  if (undoStack.length > UNDO_MAX) undoStack.shift();
+  // Push the last confirmed Firestore state (pre-mutation baseline) onto undo stack
+  if (_lastSavedState !== null) {
+    undoStack.push(JSON.parse(JSON.stringify(_lastSavedState)));
+    if (undoStack.length > UNDO_MAX) undoStack.shift();
+  }
   redoStack.length = 0;
   _updateUndoBtn();
   _updateRedoBtn();
   isSaving = true;
   try {
     await DOC.set(JSON.parse(JSON.stringify(state)));
+    // Record the just-written state as the new baseline
+    _lastSavedState = JSON.parse(JSON.stringify(state));
   } catch(e) {
     console.error('Save failed:', e);
     showAlert('Save failed — check your connection.');
@@ -1282,20 +1292,22 @@ async function undoAction() {
   if (!undoStack.length) { showAlert('Nothing to undo.'); return; }
   const prev = undoStack.pop();
   const description = _describeUndoAction(prev, state);
-  // Push current state onto redo stack before restoring
   redoStack.push(JSON.parse(JSON.stringify(state)));
+  // The restored state becomes the new baseline for subsequent saves
+  _lastSavedState = JSON.parse(JSON.stringify(prev));
   _updateUndoBtn();
   _updateRedoBtn();
   _showUndoToast('↩ Undid: ' + description);
   isSaving = true;
   try {
     await DOC.set(prev);
-    // state will update via onSnapshot
+    // onSnapshot fires after isSaving = false and applies prev to state
   } catch(e) {
     console.error('Undo failed:', e);
     showAlert('Undo failed — check your connection.');
     undoStack.push(prev);
     redoStack.pop();
+    _lastSavedState = JSON.parse(JSON.stringify(state));
     _updateUndoBtn();
     _updateRedoBtn();
   } finally {
@@ -1307,8 +1319,8 @@ async function redoAction() {
   if (!redoStack.length) { showAlert('Nothing to redo.'); return; }
   const next = redoStack.pop();
   const description = _describeUndoAction(state, next);
-  // Push current state back onto undo stack
   undoStack.push(JSON.parse(JSON.stringify(state)));
+  _lastSavedState = JSON.parse(JSON.stringify(next));
   _updateUndoBtn();
   _updateRedoBtn();
   _showUndoToast('↻ Redid: ' + description);
@@ -1320,6 +1332,7 @@ async function redoAction() {
     showAlert('Redo failed — check your connection.');
     redoStack.push(next);
     undoStack.pop();
+    _lastSavedState = JSON.parse(JSON.stringify(state));
     _updateUndoBtn();
     _updateRedoBtn();
   } finally {
@@ -1440,6 +1453,7 @@ function load() {
   DOC.get().then(doc => {
     if (doc.exists) {
       state = migrateState(doc.data());
+      _lastSavedState = JSON.parse(JSON.stringify(state));
     } else if (legacy) {
       // First time using Firebase — migrate local data up
       try {
@@ -1460,6 +1474,7 @@ function load() {
   // Real-time listener — keeps all open tabs/devices in sync
   DOC.onSnapshot(doc => {
     if (doc.exists && !isSaving) {
+      _lastSavedState = JSON.parse(JSON.stringify(doc.data()));
       state = migrateState(doc.data());
       if (currentUser) {
         // Refresh currentUser data in case PIN/name changed
@@ -4037,6 +4052,7 @@ function renderClients() {
         <thead><tr>
           <th>Name</th>
           ${cols.map(c=>`<th>${c.label}</th>`).join('')}
+          <th style="width:24px"></th>
         </tr></thead>
         <tbody>
           ${sorted.map(c => {
@@ -4062,13 +4078,12 @@ function renderClients() {
               c.lifetimeSpend ? `$${parseFloat(c.lifetimeSpend).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})} lifetime` : '',
             ].filter(Boolean).join(' · ');
             return `<tr class="client-row${isExpanded?' client-row-expanded':''}" id="crow_${c.id}" onclick="toggleClientExpand('${c.id}')">
-              <td style="color:var(--text);font-weight:500">${esc(name)}${sub}${note}
-                <span style="float:right;font-size:11px;color:var(--text3);font-family:var(--mono)">${isExpanded?'▲':'▼'}</span>
-              </td>
+              <td style="color:var(--text);font-weight:500">${esc(name)}${sub}${note}</td>
               ${cols.map(col=>`<td title="${esc(String(c[col.key]||''))}">${fmtVal(c,col.key)}</td>`).join('')}
+              <td style="text-align:right;white-space:nowrap;color:var(--text3);font-size:11px;font-family:var(--mono);width:24px">${isExpanded?'▲':'▼'}</td>
             </tr>
             <tr class="client-expand-row" id="cexp_${c.id}" style="${isExpanded?'':'display:none'}">
-              <td colspan="${cols.length + 1}" style="padding:0;border-bottom:1px solid var(--border)">
+              <td colspan="${cols.length + 2}" style="padding:0;border-bottom:1px solid var(--border)">
                 <div style="padding:14px 16px;background:var(--bg2)">
                   ${sqParts ? `<div style="font-family:var(--mono);font-size:12px;color:var(--text3);padding:7px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;margin-bottom:8px">📊 ${sqParts}</div>` : ''}
                   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px 24px;margin-bottom:12px">
@@ -4106,11 +4121,9 @@ function renderClients() {
 }
 
 function toggleClientExpand(id) {
-  if (expandedClients.has(id)) {
-    expandedClients.delete(id);
-  } else {
-    expandedClients.add(id);
-  }
+  const wasExpanded = expandedClients.has(id);
+  expandedClients.clear();
+  if (!wasExpanded) expandedClients.add(id);
   renderClients();
 }
 
@@ -4234,6 +4247,7 @@ function _renderClientNotesThread(c) {
     el.innerHTML = `<div style="font-family:var(--mono);font-size:13px;color:var(--text3);padding:4px 0">No notes yet.</div>`;
     return;
   }
+  const now = Date.now();
   el.innerHTML = notes.map(n => {
     if (_editingNoteId === n.id) {
       return `<div style="background:var(--bg3);border:1px solid var(--accent);border-radius:3px;padding:8px 12px;margin-bottom:6px">
@@ -4245,17 +4259,44 @@ function _renderClientNotesThread(c) {
         </div>
       </div>`;
     }
+    const empExpiry = _empNoteTimers[n.id];
+    const empCanAct = !isAdmin && currentUser?.id && n.authorId === currentUser.id && empExpiry && now < empExpiry;
+    const secsLeft = empCanAct ? Math.ceil((empExpiry - now) / 1000) : 0;
+    const actionBtns = isAdmin
+      ? `<div style="display:flex;gap:4px">
+          <button class="btn btn-ghost btn-sm" style="padding:1px 6px;font-size:11px" onclick="startNoteEdit('${c.id}','${n.id}')">✏</button>
+          <button class="btn btn-danger btn-sm" style="padding:1px 6px;font-size:11px" onclick="deleteClientNote('${c.id}','${n.id}')">DEL</button>
+        </div>`
+      : empCanAct
+      ? `<div style="display:flex;gap:4px;align-items:center">
+          <span style="font-family:var(--mono);font-size:10px;color:var(--text3)">${secsLeft}s</span>
+          <button class="btn btn-ghost btn-sm" style="padding:1px 6px;font-size:11px" onclick="startNoteEdit('${c.id}','${n.id}')">✏</button>
+          <button class="btn btn-danger btn-sm" style="padding:1px 6px;font-size:11px" onclick="empDeleteNote('${c.id}','${n.id}')">DEL</button>
+        </div>`
+      : '';
     return `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:3px;padding:8px 12px;margin-bottom:6px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
         <span style="font-family:var(--mono);font-size:11px;color:var(--text3)">${esc(n.authorName||'Unknown')} · ${fmtDate(n.date)||n.date}</span>
-        ${isAdmin ? `<div style="display:flex;gap:4px">
-          <button class="btn btn-ghost btn-sm" style="padding:1px 6px;font-size:11px" onclick="startNoteEdit('${c.id}','${n.id}')">✏</button>
-          <button class="btn btn-danger btn-sm" style="padding:1px 6px;font-size:11px" onclick="deleteClientNote('${c.id}','${n.id}')">DEL</button>
-        </div>` : ''}
+        ${actionBtns}
       </div>
       <div style="font-family:var(--mono);font-size:13px;color:var(--text2);white-space:pre-wrap">${esc(n.text)}</div>
     </div>`;
   }).join('');
+  // Start countdown interval if any employee timers are active
+  const hasActive = notes.some(n => _empNoteTimers[n.id] && now < _empNoteTimers[n.id]);
+  if (hasActive && !_noteCountdownInterval) {
+    _noteCountdownInterval = setInterval(() => {
+      const c2 = (state.clients||[]).find(cl=>cl.id===viewingClientId);
+      if (!c2 || !document.getElementById('clientNotesThread')) {
+        clearInterval(_noteCountdownInterval); _noteCountdownInterval = null; return;
+      }
+      const t = Date.now();
+      let anyLeft = false;
+      for (const [nid, exp] of Object.entries(_empNoteTimers)) { if (t < exp) anyLeft = true; else delete _empNoteTimers[nid]; }
+      _renderClientNotesThread(c2);
+      if (!anyLeft) { clearInterval(_noteCountdownInterval); _noteCountdownInterval = null; }
+    }, 1000);
+  }
 }
 function startNoteEdit(clientId, noteId) {
   _editingNoteId = noteId;
@@ -4271,12 +4312,22 @@ function saveNoteEdit(clientId, noteId) {
   const note = (c.clientNotes||[]).find(n=>n.id===noteId);
   if (note) note.text = text;
   _editingNoteId = null;
+  if (!currentUser?.isAdmin && !clientDetailIsNew) save();
   _renderClientNotesThread(c);
 }
 function cancelNoteEdit(clientId) {
   _editingNoteId = null;
   const c = (state.clients||[]).find(cl=>cl.id===clientId);
   if (c) _renderClientNotesThread(c);
+}
+function empDeleteNote(clientId, noteId) {
+  const c = (state.clients||[]).find(cl=>cl.id===clientId);
+  if (!c) return;
+  delete _empNoteTimers[noteId];
+  c.clientNotes = (c.clientNotes||[]).filter(n=>n.id!==noteId);
+  save();
+  _renderClientNotesThread(c);
+  renderClients();
 }
 
 function addClientNote() {
@@ -4285,16 +4336,14 @@ function addClientNote() {
   const c = (state.clients||[]).find(cl=>cl.id===viewingClientId);
   if (!c) return;
   if (!Array.isArray(c.clientNotes)) c.clientNotes = [];
-  c.clientNotes.push({
-    id: uid(),
-    text,
-    date: today(),
-    authorId: currentUser?.id || '',
-    authorName: currentUser?.name || 'Unknown'
-  });
+  const newNote = { id: uid(), text, date: today(), authorId: currentUser?.id || '', authorName: currentUser?.name || 'Unknown' };
+  c.clientNotes.push(newNote);
   document.getElementById('clientNoteInput').value = '';
-  // Admins: notes saved with the main Save button. Employees: save immediately.
-  if (!currentUser?.isAdmin && !clientDetailIsNew) save();
+  if (!currentUser?.isAdmin && !clientDetailIsNew) {
+    // Employee: save immediately and start 30s edit window
+    _empNoteTimers[newNote.id] = Date.now() + 30000;
+    save();
+  }
   _renderClientNotesThread(c);
 }
 
@@ -4334,6 +4383,7 @@ function saveClientDetail() {
   }
   clientDetailIsNew = false;
   pendingNewClientName = null;
+  if (_noteCountdownInterval) { clearInterval(_noteCountdownInterval); _noteCountdownInterval = null; }
   save(); closeModal('clientDetailModal'); renderClients();
 }
 
@@ -4345,6 +4395,7 @@ function cancelClientDetail() {
   }
   _clientNotesSnapshot = null;
   _editingNoteId = null;
+  if (_noteCountdownInterval) { clearInterval(_noteCountdownInterval); _noteCountdownInterval = null; }
   clientDetailIsNew = false;
   pendingNewClientName = null;
   closeModal('clientDetailModal');
@@ -4453,6 +4504,8 @@ function goToClient(name) {
 let _cqClientId = null;
 let _editingNoteId = null;
 let _clientNotesSnapshot = null;
+const _empNoteTimers = {}; // noteId → expiry timestamp (ms) for employee 30s edit window
+let _noteCountdownInterval = null;
 function openClientQuick(name) {
   const c = clientByName(name);
   if (!c) return;
