@@ -4075,10 +4075,10 @@ function renderClients() {
   if (!document.getElementById('tab-clients').classList.contains('active')) return;
   const clients = state.clients || [];
   const search = (document.getElementById('clientSearchInput')?.value || '').toLowerCase().trim();
-  const sorted = [...clients].sort((a, b) => (a.firstName || '').localeCompare(b.firstName || ''));
+  const clientsByName = [...clients].sort((a, b) => (a.firstName || '').localeCompare(b.firstName || ''));
   const filtered = search
-    ? sorted.filter(c => [c.firstName, c.surname, c.company, c.email, c.phone, c.city].some(v => v && v.toLowerCase().includes(search)))
-    : sorted;
+    ? clientsByName.filter(c => [c.firstName, c.surname, c.company, c.email, c.phone, c.city].some(v => v && v.toLowerCase().includes(search)))
+    : clientsByName;
   const cols = (() => {
     const visible = state.settings.clientColumns && state.settings.clientColumns.length ? state.settings.clientColumns : CLIENT_DEFAULT_COLS;
     return CLIENT_COLS.filter(c => visible.includes(c.key));
