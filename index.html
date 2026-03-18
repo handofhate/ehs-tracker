@@ -208,7 +208,7 @@
     /* Header — stacked on mobile */
     .header { padding: 10px 12px; flex-direction: column; align-items: center; gap: 8px; }
     .header-title { font-size: 18px; }
-    .header-actions { gap: 5px; justify-content: center; flex-wrap: nowrap; width: 100%; }
+    .header-actions { gap: 5px; justify-content: center; flex-wrap: wrap; width: 100%; }
     .header-actions .btn-ghost.btn-sm { padding: 4px 7px; font-size: 11px; white-space: nowrap; }
     .header-actions .btn-primary { padding: 5px 9px; font-size: 11px; white-space: nowrap; }
     /* On mobile, hide sign out and user label — sign out is in Settings modal */
@@ -3324,10 +3324,6 @@ function applyUserView() {
 
   // Apply admin-only / employee-only visibility
   applyAdminClasses();
-
-  // Force header-actions to re-measure after buttons show/hide
-  const _ha = document.querySelector('.header-actions');
-  if (_ha) { _ha.style.display = 'none'; void _ha.offsetWidth; _ha.style.display = ''; }
 
   // All tabs visible for everyone; debt/summary panels are admin-only
   document.getElementById('summaryCards').style.display    = isAdmin ? '' : 'none';
