@@ -4313,7 +4313,8 @@ function _renderClientNotesThread(c) {
       const t = Date.now();
       let anyLeft = false;
       for (const [nid, exp] of Object.entries(_empNoteTimers)) { if (t < exp) anyLeft = true; else delete _empNoteTimers[nid]; }
-      _renderClientNotesThread(c2);
+      // Skip re-render while employee is mid-edit — would reset the textarea
+      if (!_editingNoteId) _renderClientNotesThread(c2);
       if (!anyLeft) { clearInterval(_noteCountdownInterval); _noteCountdownInterval = null; }
     }, 1000);
   }
@@ -4332,7 +4333,11 @@ function saveNoteEdit(clientId, noteId) {
   const note = (c.clientNotes||[]).find(n=>n.id===noteId);
   if (note) note.text = text;
   _editingNoteId = null;
-  if (!currentUser?.isAdmin && !clientDetailIsNew) save();
+  if (!currentUser?.isAdmin && !clientDetailIsNew) {
+    // Restart the 30s window from the moment of save
+    if (_empNoteTimers[noteId] !== undefined) _empNoteTimers[noteId] = Date.now() + 30000;
+    save();
+  }
   _renderClientNotesThread(c);
 }
 function cancelNoteEdit(clientId) {
