@@ -66,8 +66,8 @@
   .job-card.active { border-left: 3px solid var(--accent); }
   .job-card.complete { border-left: 3px solid var(--green); }
 
-  .job-header { display: grid; grid-template-columns: 16px minmax(170px, 0.78fr) auto 74px; align-items: center; column-gap: 10px; padding: 16px 20px; }
-  .job-header-main { cursor: pointer; min-width: 0; }
+  .job-header { display: grid; grid-template-columns: 16px minmax(170px, 0.78fr) auto 74px; align-items: center; column-gap: 10px; padding: 16px 20px; cursor: pointer; }
+  .job-header-main { min-width: 0; }
   .job-name { font-size: 20px; font-weight: 500; flex: 1; min-width: 0; }
   .job-status { font-family: var(--mono); font-size: 14px; text-transform: uppercase; letter-spacing: 0.1em; padding: 3px 8px; border-radius: 2px; white-space: nowrap; }
   .status-active { background: rgba(245,166,35,0.15); color: var(--accent); }
@@ -223,6 +223,13 @@
   .hours-item:last-child { border-bottom: none; }
 
   /* ── MOBILE ───────────────────────────────────────────────────────────────── */
+  @media (min-width: 601px) {
+    .hw-pay-right { display: contents; }
+    .hw-pay-spacer { display: none; }
+    .hw-pay-meta { flex: 1; color: var(--text2); }
+    .hw-pay-amount { white-space: nowrap; }
+  }
+
   @media (max-width: 600px) {
     /* Header — stacked on mobile */
     .header { padding: 10px 12px; flex-direction: column; align-items: center; gap: 8px; }

@@ -958,9 +958,9 @@ function jobCard(job) {
   const jobEmpName = currentUser?.isAdmin ? (getEmp(job.employeeId)?.name || '') : '';
   return `
   <div class="job-card ${sc} ${isExp?'expanded':''}" id="job_${job.id}" onclick="toggleCardMobile(event, 'job', '${job.id}')">
-    <div class="job-header">
+    <div class="job-header" onclick="toggleHeaderRow(event, 'job', '${job.id}')">
       ${jobEmpName ? `<div class="job-emp-rail">${esc(jobEmpName)}</div>` : '<div class="job-emp-rail"></div>'}
-      <div class="job-header-main job-header-main-grid" onclick="toggleHeaderDesktop(event, 'job', '${job.id}')">
+      <div class="job-header-main job-header-main-grid">
         <div class="job-name-block">
           <div class="job-name" style="display:flex;align-items:center;gap:8px">
             ${esc(job.name)}
@@ -1033,6 +1033,12 @@ function toggleCardMobile(event, type, id) {
 function toggleHeaderDesktop(event, type, id) {
   if (window.innerWidth <= 600) return;
   if (event.target.closest('button, a, input, select, textarea, .job-chevron')) return;
+  if (type === 'hw') toggleHW(id);
+  else toggleJob(id);
+}
+function toggleHeaderRow(event, type, id) {
+  if (event.target.closest('button, a, input, select, textarea, .job-chevron')) return;
+  event.stopPropagation();
   if (type === 'hw') toggleHW(id);
   else toggleJob(id);
 }
