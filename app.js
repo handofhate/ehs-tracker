@@ -546,9 +546,9 @@ function hwCard(hw) {
   const paused = hw.status === 'paused';
   const hwEmpName = currentUser?.isAdmin ? (getEmp(hw.employeeId)?.name || '') : '';
   return `
-    <div class="job-card${isExp?' expanded':''}${paused?' job-complete':''}">
-      <div class="job-header">
-        <div class="job-header-main" onclick="toggleHW('${hw.id}')">
+    <div class="job-card${isExp?' expanded':''}${paused?' job-complete':''}" onclick="toggleCardMobile(event, 'hw', '${hw.id}')">
+      <div class="job-header hw-header">
+        <div class="job-header-main" onclick="toggleHeaderDesktop(event, 'hw', '${hw.id}')">
           <div class="job-name" style="display:flex;align-items:center;gap:8px">
             ${esc(hw.name)}${paused?' <span style="font-size:13px;color:var(--text3)">(paused)</span>':''}
             ${clientByName(hw.name) ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 7px;flex-shrink:0" onclick="event.stopPropagation();openClientQuick('${esc(hw.name)}')" title="View in Clients">👤</button>` : ''}
@@ -556,11 +556,11 @@ function hwCard(hw) {
           <div class="job-meta"><span style="font-size:13px;color:var(--text3)">Since ${hw.startDate ? fmtDate(hw.startDate) : '—'} · ${fmt(hw.monthlyRate)}/mo</span>${hwEmpName ? `<span style="font-size:13px;color:var(--text3)"> · </span><span style="color:var(--purple);font-size:13px">${esc(hwEmpName)}</span>` : ''}</div>
         </div>
         <div class="job-header-btns">
-          <button class="btn btn-ghost btn-sm" onclick="openNotes('hw','${hw.id}')" title="Notes">📝${nc>0?` ${nc}`:''}</button>
-          <button class="btn btn-ghost btn-sm admin-only" onclick="toggleHWPause('${hw.id}')" title="${paused?'Resume':'Pause'}">${paused?'▶ Resume':'⏸ Pause'}</button>
-          <button class="btn btn-ghost btn-sm admin-only" onclick="openEditHW('${hw.id}')" title="Edit">Edit</button>
-          <button class="btn btn-danger btn-sm admin-only" onclick="deleteHW('${hw.id}')" title="Delete">DEL</button>
-          <div class="job-chevron" onclick="toggleHW('${hw.id}')">▾</div>
+          <button class="btn btn-ghost btn-sm job-icon-btn hw-notes-btn${nc>0?' accent':''}" onclick="event.stopPropagation();openNotes('hw','${hw.id}')" title="Notes" aria-label="Notes">${jobIconSvg('notes')}</button>
+          <button class="btn btn-ghost btn-sm admin-only" onclick="event.stopPropagation();toggleHWPause('${hw.id}')" title="${paused?'Resume':'Pause'}">${paused?'▶ Resume':'⏸ Pause'}</button>
+          <button class="btn btn-ghost btn-sm admin-only" onclick="event.stopPropagation();openEditHW('${hw.id}')" title="Edit">Edit</button>
+          <button class="btn btn-danger btn-sm admin-only" onclick="event.stopPropagation();deleteHW('${hw.id}')" title="Delete">DEL</button>
+          <div class="job-chevron" onclick="event.stopPropagation();toggleHW('${hw.id}')">▾</div>
         </div>
       </div>
       ${isExp ? hwDetail(hw, c) : ''}
@@ -586,10 +586,13 @@ function hwDetail(hw, c) {
       </div>
       ${payments.length
         ? payments.slice().reverse().map((p,i)=>`
-          <div class="line-item" style="gap:8px">
+          <div class="line-item hw-pay-row" style="gap:8px">
             ${hwPayBadgeHtml(p.status, hw.id, p.id)}
-            <span style="flex:1">${fmtDate(p.date)||p.date||'—'} · ${fmt(p.amount)}</span>
-            <button class="btn btn-danger btn-sm admin-only" onclick="removeHWPayment('${hw.id}','${p.id}')">DEL</button>
+            <div class="hw-pay-right">
+              <span class="hw-pay-meta">${fmtDate(p.date)||p.date||'—'}</span>
+              <span class="hw-pay-amount">${fmt(p.amount)}</span>
+              <button class="btn btn-danger btn-sm admin-only" onclick="removeHWPayment('${hw.id}','${p.id}')">DEL</button>
+            </div>
           </div>`).join('')
         : '<div style="color:var(--text3);font-size:15px;padding:4px 0">No payments logged yet.</div>'}
       <div class="section-header admin-only" style="margin-top:12px">
@@ -598,10 +601,13 @@ function hwDetail(hw, c) {
       </div>
       ${advances.length
         ? advances.slice().reverse().map(a=>`
-          <div class="line-item admin-only" style="gap:8px">
-            <span style="flex:1;color:var(--text2)">${fmtDate(a.date)||a.date||'—'}</span>
-            <span class="green">-${fmt(a.amount)}</span>
-            <button class="btn btn-danger btn-sm" onclick="removeHWAdvance('${hw.id}','${a.id}')">DEL</button>
+          <div class="line-item admin-only hw-pay-row hw-advance-row" style="gap:8px">
+            <span class="hw-pay-spacer"></span>
+            <div class="hw-pay-right">
+              <span class="hw-pay-meta">${fmtDate(a.date)||a.date||'—'}</span>
+              <span class="hw-pay-amount green">-${fmt(a.amount)}</span>
+              <button class="btn btn-danger btn-sm" onclick="removeHWAdvance('${hw.id}','${a.id}')">DEL</button>
+            </div>
           </div>`).join('')
         : '<div class="admin-only" style="color:var(--text3);font-size:15px;padding:4px 0">No payments made yet.</div>'}
       <div class="total-line admin-only" style="margin-top:8px">
@@ -924,54 +930,66 @@ function applyAdminClasses() {
   document.querySelectorAll('.admin-only').forEach(el => { el.style.display = isAdmin ? '' : 'none'; });
   document.querySelectorAll('.employee-only').forEach(el => { el.style.display = isAdmin ? 'none' : ''; });
 }
-function emptyState(msg) { return `<div class="empty-state"><div class="empty-state-icon">📋</div>${msg}</div>`; }
+function emptyState(msg) { return `<div class="empty-state"><div class="empty-state-icon">[]</div>${msg}</div>`; }
+
+function jobIconSvg(kind) {
+  const icons = {
+    client: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"></circle><path d="M5 19c1.8-3 4.3-4.5 7-4.5s5.2 1.5 7 4.5"></path></svg>',
+    estimate: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5h8l3 3V19a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1Z"></path><path d="M15 4.5V8h3"></path><path d="M9 12h6"></path><path d="M9 16h4"></path></svg>',
+    notes: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h12a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-7l-4 3v-3H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z"></path><path d="M9 9.5h6"></path><path d="M9 12.5h4.5"></path></svg>',
+    hours: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><path d="M12 8v4.5l3 2"></path></svg>',
+    edit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l4.5-1 8.8-8.8a1.8 1.8 0 0 0 0-2.5l-1-1a1.8 1.8 0 0 0-2.5 0L5 15.5 4 20Z"></path><path d="M12.5 7.5l4 4"></path></svg>',
+    smile: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><path d="M9.5 10h.01"></path><path d="M14.5 10h.01"></path><path d="M9 14c.8 1 1.8 1.5 3 1.5s2.2-.5 3-1.5"></path></svg>'
+  };
+  return icons[kind] || '';
+}
+
+function jobIconButton({ title, icon, onclick = '', accent = false, disabled = false }) {
+  const cls = `btn btn-ghost btn-sm job-icon-btn${accent ? ' accent' : ''}`;
+  return `<button class="${cls}" type="button"${disabled ? ' disabled' : ''}${disabled ? '' : ` onclick="${onclick}"`} title="${title}" aria-label="${title}">${jobIconSvg(icon)}</button>`;
+}
 
 function jobCard(job) {
   const c = calcJob(job);
   const isExp = expandedJobs.has(job.id);
   const sc    = job.status === 'complete' ? 'complete' : 'active';
-  const sl    = job.status === 'complete' ? 'Complete' : 'Active';
-  const sb    = job.status === 'complete' ? 'status-complete' : 'status-active';
   const nc    = (job.jobNotes||[]).length;
   const th    = c.totalHours;
   const jobEmpName = currentUser?.isAdmin ? (getEmp(job.employeeId)?.name || '') : '';
   return `
-  <div class="job-card ${sc} ${isExp?'expanded':''}" id="job_${job.id}">
+  <div class="job-card ${sc} ${isExp?'expanded':''}" id="job_${job.id}" onclick="toggleCardMobile(event, 'job', '${job.id}')">
     <div class="job-header">
-      <div class="job-header-main job-header-main-grid" onclick="toggleJob('${job.id}')">
+      ${jobEmpName ? `<div class="job-emp-rail">${esc(jobEmpName)}</div>` : '<div class="job-emp-rail"></div>'}
+      <div class="job-header-main job-header-main-grid" onclick="toggleHeaderDesktop(event, 'job', '${job.id}')">
         <div class="job-name-block">
           <div class="job-name" style="display:flex;align-items:center;gap:8px">
             ${esc(job.name)}
-            ${clientByName(job.name) ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 7px;flex-shrink:0" onclick="event.stopPropagation();openClientQuick('${esc(job.name)}')" title="View in Clients">CL</button>` : ''}
+            ${clientByName(job.name) ? `<button class="btn btn-ghost btn-sm job-icon-btn" style="width:24px;height:24px" onclick="event.stopPropagation();openClientQuick('${esc(job.name)}')" title="View in Clients" aria-label="View in Clients">${jobIconSvg('client')}</button>` : ''}
           </div>
-          ${job.contactName ? `<div style="font-size:13px;color:var(--blue);margin-top:2px;font-family:var(--mono);display:flex;align-items:center;gap:6px">via ${esc(job.contactName)} <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 7px" onclick="event.stopPropagation();openClientQuick('${esc(job.contactName)}')" title="View in Clients">CL</button></div>` : ''}
+          ${job.contactName ? `<div style="font-size:13px;color:var(--blue);margin-top:2px;font-family:var(--mono);display:flex;align-items:center;gap:6px">via ${esc(job.contactName)} <button class="btn btn-ghost btn-sm job-icon-btn" style="width:22px;height:22px" onclick="event.stopPropagation();openClientQuick('${esc(job.contactName)}')" title="View in Clients" aria-label="View in Clients">${jobIconSvg('client')}</button></div>` : ''}
           <div style="font-size:15px;color:var(--text3);margin-top:2px;font-family:var(--mono)">${job.date||''}</div>
-        </div>
-        <div class="job-status-wrap">
-          <span class="job-status ${sb}">${sl}</span>
-          ${jobEmpName ? `<span style="font-family:var(--mono);font-size:13px;color:var(--purple);white-space:nowrap">${esc(jobEmpName)}</span>` : ''}
         </div>
         <div class="job-quick-stats job-quick-stats-grid">
           <div class="job-stat"><div class="job-stat-label">Quote</div><div class="job-stat-value">${fmt(job.quote)}</div></div>
-          <div class="job-stat"><div class="job-stat-label">Adjustments</div><div class="job-stat-value" style="color:${c.addOnTotal-c.subtractionTotal>=0?'var(--purple)':'var(--red)'}">${fmt(c.addOnTotal-c.subtractionTotal)}</div></div>
-          <div class="job-stat"><div class="job-stat-label">Contract Total</div><div class="job-stat-value">${fmt(c.contractTotal)}</div></div>
+          <div class="job-stat"><div class="job-stat-label">Adjust</div><div class="job-stat-value" style="color:${c.addOnTotal-c.subtractionTotal>=0?'var(--purple)':'var(--red)'}">${fmt(c.addOnTotal-c.subtractionTotal)}</div></div>
+          <div class="job-stat"><div class="job-stat-label">Contract</div><div class="job-stat-value">${fmt(c.contractTotal)}</div></div>
           <div class="job-stat"><div class="job-stat-label">Collected</div><div class="job-stat-value" style="color:var(--green)">${fmt(c.collectedGross)}</div></div>
           <div class="job-stat"><div class="job-stat-label">Outstanding</div><div class="job-stat-value" style="color:${c.outstanding>0?'var(--blue)':'var(--text2)'}">${fmt(c.outstanding)}</div></div>
-          <div class="job-stat"><div class="job-stat-label">Emp. Balance</div><div class="job-stat-value" style="color:var(--accent)">${fmt(c.empBalance)}</div></div>
-          <div class="job-stat"><div class="job-stat-label">Potential Emp.</div><div class="job-stat-value" style="color:${c.potentialEmpBalance>0?'var(--yellow)':'var(--text2)'}">${fmt(c.potentialEmpBalance)}</div></div>
+          <div class="job-emp-stats">
+            <div class="job-stat"><div class="job-stat-label">Emp. Balance</div><div class="job-stat-value" style="color:var(--accent)">${fmt(c.empBalance)}</div></div>
+            <div class="job-stat"><div class="job-stat-label">Potential</div><div class="job-stat-value" style="color:${c.potentialEmpBalance>0?'var(--yellow)':'var(--text2)'}">${fmt(c.potentialEmpBalance)}</div></div>
+          </div>
         </div>
       </div>
       <div class="job-header-btns job-header-btns-stacked">
-        <div class="job-header-btn-grid">
-          <div class="job-header-btn-row">
-            ${job.isItemized ? `<button class="btn btn-ghost btn-sm" onclick="openQuoteSnapshot('${job.id}')" title="View Quote Snapshot" style="color:var(--accent);border-color:var(--accent)">EST</button>` : ''}
-            <button class="btn btn-ghost btn-sm" onclick="openNotes('job','${job.id}')" title="Notes">NOTES${nc>0?` ${nc}`:''}</button>
-          </div>
-          <div class="job-header-btn-row">
-            <button class="btn btn-ghost btn-sm" onclick="openHours('${job.id}')" title="Hours">HRS${th>0?` ${th}h`:''}</button>
-          </div>
+        <div class="job-action-pad">
+          ${jobIconButton({ title: job.isItemized ? 'View estimate snapshot' : 'Estimate snapshot unavailable', icon:'estimate', onclick:`openQuoteSnapshot('${job.id}')`, accent: !!job.isItemized, disabled: !job.isItemized })}
+          ${jobIconButton({ title:'Notes', icon:'notes', onclick:`openNotes(&quot;job&quot;,&quot;${job.id}&quot;)`, accent: nc > 0 })}
+          ${currentUser?.isAdmin
+            ? jobIconButton({ title:'Edit job', icon:'edit', onclick:`editJob(&quot;${job.id}&quot;)`, accent: true })
+            : jobIconButton({ title:'Hi', icon:'smile', disabled: true })}
+          ${jobIconButton({ title:'Hours', icon:'hours', onclick:`openHours(&quot;${job.id}&quot;)`, accent: th > 0 })}
         </div>
-        <div class="job-chevron" onclick="toggleJob('${job.id}')">v</div>
       </div>
     </div>
     ${isExp ? jobDetail(job, c) : ''}
@@ -998,6 +1016,25 @@ function payTypeBadgeHtml(payType, jobId, idx) {
   const { cls, label } = cfg[payType] || cfg[''];
   const admin = currentUser?.isAdmin;
   return `<span class="status-badge ${cls}"${admin ? ` onclick="cyclePayType('${jobId}',${idx})" title="Click to cycle type"` : ''}>${label}</span>`;
+}
+function toggleHeaderMobile(event, type, id) {
+  if (window.innerWidth > 600) return;
+  if (event.target.closest('button, a, input, select, textarea, .job-chevron')) return;
+  if (type === 'hw') toggleHW(id);
+  else toggleJob(id);
+}
+function toggleCardMobile(event, type, id) {
+  if (window.innerWidth > 600) return;
+  if (event.target.closest('.job-detail')) return;
+  if (event.target.closest('button, a, input, select, textarea, .job-chevron')) return;
+  if (type === 'hw') toggleHW(id);
+  else toggleJob(id);
+}
+function toggleHeaderDesktop(event, type, id) {
+  if (window.innerWidth <= 600) return;
+  if (event.target.closest('button, a, input, select, textarea, .job-chevron')) return;
+  if (type === 'hw') toggleHW(id);
+  else toggleJob(id);
 }
 function cyclePayType(jobId, idx) {
   const job = state.jobs.find(j=>j.id===jobId);
@@ -1079,7 +1116,7 @@ function jobDetail(job, c) {
 
       <div class="detail-section">
         <div class="detail-section-title">Revenue</div>
-        <div class="line-item line-item-simple"><div class="line-item-label">Base Quote</div><div class="line-item-value">${fmt(job.quote)}</div></div>
+        <div class="line-item line-item-simple mobile-base-quote-row"><div class="line-item-label">Base Quote</div><div class="line-item-value">${fmt(job.quote)}</div></div>
         ${milestonesHtml}
       </div>
 
@@ -1087,8 +1124,8 @@ function jobDetail(job, c) {
         <div class="detail-section-title">Collected / Net Revenue</div>
         <div class="total-line"><span style="color:var(--text2)">Collected (gross)</span><span class="line-item-value green">${fmt(c.collectedGross)}</span></div>
         <div class="admin-only">
-          <div class="line-item" style="padding-top:6px">
-            <div class="line-item-label" style="font-size:16px">Est. Square fees (~${(state.settings.feeRate*100).toFixed(1)}%${state.settings.txnFee ? ` + $${state.settings.txnFee.toFixed(2)}/txn` : ''})</div>
+          <div class="line-item mobile-fee-row" style="padding-top:6px">
+            <div class="line-item-label" style="font-size:16px"><span class="fee-label-main">Est. Square fees</span><span class="fee-label-detail"> (~${(state.settings.feeRate*100).toFixed(1)}%${state.settings.txnFee ? ` + $${state.settings.txnFee.toFixed(2)}/txn` : ''})</span></div>
             <div class="line-item-value red" style="font-size:16px">-${fmt(c.totalFees)}</div>
           </div>
           <div class="total-line"><span style="color:var(--text2)">Net Revenue</span><span class="line-item-value orange">${fmt(c.netRevenue)}</span></div>
@@ -1096,7 +1133,7 @@ function jobDetail(job, c) {
       </div>
 
       <div class="detail-section">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+        <div class="detail-section-header" style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
           <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Subtractions</div>
           <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','subtraction')">+</button>
         </div>
@@ -1105,7 +1142,7 @@ function jobDetail(job, c) {
       </div>
 
       <div class="detail-section">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+        <div class="detail-section-header" style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
           <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Additions</div>
           <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','addon')">+</button>
         </div>
@@ -1114,7 +1151,7 @@ function jobDetail(job, c) {
       </div>
 
       <div class="detail-section">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+        <div class="detail-section-header" style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
           <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Materials</div>
           <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','material')">+</button>
         </div>
@@ -1127,7 +1164,7 @@ function jobDetail(job, c) {
       </div>
 
       <div class="detail-section">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+        <div class="detail-section-header" style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
           <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Employee Pay</div>
           <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','advance')">+</button>
         </div>
@@ -1166,13 +1203,11 @@ function jobDetail(job, c) {
 
     <div class="admin-only job-detail-footer">
       <div class="job-detail-admin-actions">
-        <button class="btn btn-ghost btn-sm" onclick="editJob('${job.id}')">Edit Job</button>
+        <button class="btn btn-ghost btn-sm" onclick="editJob('${job.id}')">Edit</button>
         <button class="btn btn-${job.status==='complete'?'ghost':'green'} btn-sm" onclick="toggleComplete('${job.id}')">
           ${job.status==='complete'?'Reopen':'Complete'}
         </button>
         <button class="btn btn-danger btn-sm" onclick="deleteJob('${job.id}')">DEL</button>
-      </div>
-      <div class="job-detail-mode-actions">
         <button class="repay-toggle${job.repaymentMode?' active':''}" onclick="toggleRepayment('${job.id}')" title="Toggle debt repayment split for this job">${job.repaymentMode?'Repaying':'Normal'}</button>
       </div>
     </div>
@@ -3017,6 +3052,7 @@ function renderClients() {
             const note = (c.clientNotes||[]).length ? ` <span title="Has notes" style="color:var(--accent)">✎</span>` : '';
             const isExpanded = expandedClients.has(c.id);
             const expandCols = (() => {
+              if (window.innerWidth <= 600) return CLIENT_COLS;
               const ec = state.settings.clientExpandCols;
               if (!ec || !ec.length) return CLIENT_COLS;
               return CLIENT_COLS.filter(col => ec.includes(col.key));

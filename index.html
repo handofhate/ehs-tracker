@@ -66,28 +66,33 @@
   .job-card.active { border-left: 3px solid var(--accent); }
   .job-card.complete { border-left: 3px solid var(--green); }
 
-  .job-header { display: flex; align-items: center; padding: 16px 20px; gap: 12px; }
-  .job-header-main { display: flex; align-items: center; gap: 16px; flex: 1; cursor: pointer; min-width: 0; }
+  .job-header { display: grid; grid-template-columns: 16px minmax(170px, 0.78fr) auto 74px; align-items: center; column-gap: 10px; padding: 16px 20px; }
+  .job-header-main { cursor: pointer; min-width: 0; }
   .job-name { font-size: 20px; font-weight: 500; flex: 1; min-width: 0; }
   .job-status { font-family: var(--mono); font-size: 14px; text-transform: uppercase; letter-spacing: 0.1em; padding: 3px 8px; border-radius: 2px; white-space: nowrap; }
   .status-active { background: rgba(245,166,35,0.15); color: var(--accent); }
   .status-complete { background: rgba(76,175,130,0.15); color: var(--green); }
-  .job-quick-stats { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
-  .job-stat { text-align: right; }
-  .job-stat-label { font-size: 14px; color: var(--text3); font-family: var(--mono); }
-  .job-stat-value { font-family: var(--mono); font-size: 18px; font-weight: 500; }
-  .job-header-btns { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
-  .job-chevron { color: var(--text3); transition: transform 0.2s; font-size: 22px; cursor: pointer; padding: 0 4px; flex-shrink: 0; }
-  .job-card.expanded .job-chevron { transform: rotate(180deg); }
-  .job-header-main-grid { display: grid; grid-template-columns: minmax(220px, 1.05fr) auto minmax(760px, 2.4fr); align-items: center; gap: 18px; width: 100%; }
+  .job-quick-stats { display: block; justify-self: start; width: max-content; max-width: 100%; }
+  .job-stat { text-align: right; min-width: 0; cursor: pointer; }
+  .job-stat-label { font-size: 12px; color: var(--text3); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .job-stat-value { font-family: var(--mono); font-size: 17px; font-weight: 500; white-space: nowrap; }
+  .job-header-btns { display: flex; align-items: center; justify-content: flex-end; }
+  .hw-header { display: flex; align-items: center; padding: 16px 20px; gap: 12px; }
+  .hw-header .job-header-main { display: flex; align-items: center; gap: 16px; flex: 1; cursor: pointer; min-width: 0; }
+  .hw-header .job-header-btns { display: flex; gap: 6px; align-items: center; flex-shrink: 0; width: auto; border-top: none; padding-top: 0; margin-top: 0; }
+  .job-header-main-grid { display: contents; }
+  .job-emp-rail { writing-mode: vertical-rl; transform: rotate(180deg); justify-self: start; align-self: stretch; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--purple); opacity: 0.9; white-space: nowrap; overflow: hidden; margin-left: -4px; }
   .job-name-block { min-width: 0; }
-  .job-status-wrap { display: flex; flex-direction: column; align-items: center; gap: 5px; }
-  .job-quick-stats-grid { display: grid; grid-template-columns: repeat(7, minmax(92px, 1fr)); gap: 10px 14px; min-width: 0; width: 100%; }
-  .job-quick-stats-grid .job-stat { min-width: 0; }
-  .job-quick-stats-grid .job-stat-value { white-space: nowrap; }
-  .job-header-btns-stacked { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-  .job-header-btn-grid { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
-  .job-header-btn-row { display: flex; gap: 6px; justify-content: flex-end; }
+  .job-status-wrap { display: none; }
+  .job-quick-stats-grid { display: grid; grid-template-columns: repeat(5, minmax(108px, max-content)) minmax(250px, max-content); column-gap: 22px; align-items: end; justify-content: start; }
+  .job-emp-stats { grid-column: 6; display: grid; grid-template-columns: repeat(2, minmax(108px, max-content)); column-gap: 22px; row-gap: 4px; justify-content: start; }
+  .job-emp-name { display: none; }
+  .job-header-btns-stacked { display: flex; align-items: center; justify-content: flex-end; width: 100%; }
+  .job-action-pad { width: 74px; display: grid; grid-template-columns: repeat(2, 34px); grid-template-rows: repeat(2, 34px); gap: 6px; justify-content: end; }
+  .job-icon-btn { width: 34px; height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; position: relative; }
+  .job-icon-btn svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .job-icon-btn.accent { color: var(--accent); border-color: var(--accent); }
+  .job-icon-btn:disabled { opacity: 0.45; cursor: default; }
   .job-detail-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
   .job-detail-admin-actions { display: flex; gap: 10px; flex-wrap: wrap; }
   .job-detail-mode-actions { display: flex; justify-content: flex-end; }
@@ -222,9 +227,14 @@
     /* Header — stacked on mobile */
     .header { padding: 10px 12px; flex-direction: column; align-items: center; gap: 8px; }
     .header-title { font-size: 18px; }
-    .header-actions { gap: 5px; justify-content: center; flex-wrap: wrap; width: 100%; }
+    .header-actions { gap: 4px; justify-content: center; flex-wrap: nowrap; width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+    .header-actions::-webkit-scrollbar { display: none; }
+    .header-actions > * { flex: 0 0 auto; }
     .header-actions .btn-ghost.btn-sm { padding: 4px 7px; font-size: 11px; white-space: nowrap; }
-    .header-actions .btn-primary { padding: 5px 9px; font-size: 11px; white-space: nowrap; }
+    .header-actions .btn-primary { padding: 4px 8px; font-size: 11px; white-space: nowrap; }
+    #undoBtn, #redoBtn { font-size: 0 !important; min-width: 28px; padding: 4px 6px !important; }
+    #undoBtn::before { content: '↩'; font-size: 14px; line-height: 1; }
+    #redoBtn::before { content: '↻'; font-size: 14px; line-height: 1; }
     /* On mobile, hide sign out and user label — sign out is in Settings modal */
     #signOutBtn { display: none !important; }
     #headerUserLabel { display: none !important; }
@@ -254,22 +264,37 @@
     .tabs-wrap.tabs-has-right::after { opacity: 1; }
 
     /* Job cards */
-    .job-header { padding: 12px 14px; gap: 8px; flex-wrap: wrap; }
-    .job-header-main { gap: 8px; flex-wrap: wrap; position: relative; }
+    .job-header { grid-template-columns: 1fr; padding: 12px 14px; gap: 8px; }
+    .job-header-main { position: relative; }
     .job-name { font-size: 17px; }
-    .job-quick-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; width: 100%; margin-top: 6px; }
+    .job-quick-stats { display: block; width: 100%; margin-top: 6px; }
     .job-stat { text-align: left; }
     .job-header-btns { width: 100%; justify-content: flex-end; border-top: 1px solid var(--border); padding-top: 8px; margin-top: 2px; }
     .repay-toggle { font-size: 15px; }
     /* Job status + emp name — upper-right on mobile */
-    .job-status-wrap { position: absolute; top: 0; right: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
-    .job-header-main-grid { grid-template-columns: 1fr; gap: 10px; }
-    .job-quick-stats-grid { grid-template-columns: 1fr 1fr; gap: 8px 16px; }
-    .job-header-btns-stacked { width: 100%; justify-content: space-between; border-top: 1px solid var(--border); padding-top: 8px; margin-top: 2px; }
-    .job-header-btn-grid { align-items: stretch; flex: 1; }
-    .job-header-btn-row { flex-wrap: wrap; }
-    .job-detail-footer { flex-direction: column; align-items: stretch; }
-    .job-detail-mode-actions { justify-content: flex-start; }
+    .job-status-wrap { display: none; }
+    .job-header-main-grid { display: grid; grid-template-columns: 1fr auto; column-gap: 12px; row-gap: 8px; align-items: start; }
+    .job-emp-rail { display: none; }
+    .job-name-block { grid-column: 1; grid-row: 1; min-width: 0; }
+    .job-quick-stats-grid { display: contents; }
+    .job-quick-stats-grid > .job-stat:nth-child(1) { grid-column: 2; grid-row: 1; text-align: right; align-self: start; }
+    .job-quick-stats-grid > .job-stat:nth-child(2) { grid-column: 1; grid-row: 2; }
+    .job-quick-stats-grid > .job-stat:nth-child(3) { grid-column: 2; grid-row: 2; text-align: right; }
+    .job-quick-stats-grid > .job-stat:nth-child(4) { grid-column: 1; grid-row: 3; }
+    .job-quick-stats-grid > .job-stat:nth-child(5) { grid-column: 2; grid-row: 3; text-align: right; }
+    .job-emp-stats { grid-column: 1 / -1; grid-row: 4; display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; }
+    .job-emp-stats .job-stat:nth-child(1) { grid-column: 1; text-align: left; }
+    .job-emp-stats .job-stat:nth-child(2) { grid-column: 2; text-align: right; }
+    .job-header-btns-stacked { width: 100%; justify-content: center; border-top: 1px solid var(--border); padding-top: 8px; margin-top: 2px; }
+    .job-action-pad { width: auto; grid-template-columns: repeat(4, 34px); grid-template-rows: 34px; justify-content: center; }
+    .hw-header { padding: 12px 14px; gap: 8px; flex-wrap: wrap; }
+    .hw-header .job-header-main { gap: 8px; flex-wrap: wrap; position: relative; }
+    .hw-header .job-header-btns { width: 100%; justify-content: center; border-top: 1px solid var(--border); padding-top: 8px; margin-top: 2px; gap: 8px; }
+    .hw-header .job-chevron { display: none; }
+    .hw-notes-btn { width: 34px; height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+    .job-detail-footer { flex-direction: row; align-items: center; justify-content: center; flex-wrap: wrap; }
+    .job-detail-admin-actions { justify-content: center; width: 100%; }
+    .job-detail-mode-actions { justify-content: center; }
 
     /* Line items — stack value/actions below label (except simple inline ones) */
     .line-item:not(.line-item-simple) { flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 3px; padding: 6px 0; }
@@ -279,6 +304,11 @@
 
     /* HW card meta — force to its own line and truncate */
     .job-meta { flex-basis: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .hw-pay-row { flex-direction: row !important; align-items: center !important; justify-content: space-between !important; }
+    .hw-pay-right { margin-left: auto; display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex: 1; min-width: 0; text-align: right; }
+    .hw-pay-meta { color: var(--text2); font-family: var(--mono); font-size: 14px; white-space: nowrap; }
+    .hw-pay-amount { font-family: var(--mono); white-space: nowrap; }
+    .hw-pay-spacer { flex: 1 1 auto; }
 
     /* Expanded job detail */
     .job-detail { padding: 12px 10px; }
@@ -286,12 +316,42 @@
     /* Debt panel */
     .debt-panel { padding: 14px; }
     .debt-panel-status { display: none; }
-    .debt-stats { grid-template-columns: 1fr 1fr !important; gap: 12px; }
+    .debt-stats { display: flex; flex-wrap: wrap; gap: 12px; }
+    .debt-stats > div { width: calc(50% - 6px); }
+    .debt-stats > div:nth-child(1) { order: 1; }
+    .debt-stats > div:nth-child(4) { order: 2; }
+    .debt-stats > div:nth-child(3) { order: 3; }
+    .debt-stats > div:nth-child(2) { order: 4; }
     .debt-stat-value { font-size: 18px; }
+    .debt-panel .btn { display: block; margin: 0 auto; }
+
+    .mobile-base-quote-row { flex-direction: column; align-items: flex-start; gap: 2px; }
+    .mobile-base-quote-row .line-item-value { width: 100%; text-align: left; }
+    .mobile-fee-row { flex-direction: row !important; align-items: center !important; justify-content: space-between !important; }
+    .mobile-fee-row .line-item-label { display: flex; align-items: center; gap: 0; flex: 1; min-width: 0; }
+    .mobile-fee-row .line-item-value { margin-left: auto; text-align: right; }
+    .fee-label-detail { display: none; }
+    .detail-section-header { justify-content: space-between; }
+    .detail-section-header .detail-section-title { flex: 1; }
+    .clients-header { align-items: stretch; }
+    .clients-header-main { width: 100%; gap: 10px !important; }
+    .clients-header-main > div { width: 100%; }
+    #clientSearchInput { width: 100% !important; }
+    .clients-header-actions { width: 100%; display: grid !important; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .clients-header-actions .btn { width: 100%; }
+    .clients-col-toggle { display: none !important; }
+    .clients-last-import { order: 3; grid-column: 1 / -1; text-align: center; }
+    .clients-table thead th:not(:first-child):not(:last-child),
+    .clients-table tbody tr:not(.client-expand-row) td:not(:first-child):not(:last-child) { display: none; }
+    .clients-table thead th:first-child,
+    .clients-table tbody tr:not(.client-expand-row) td:first-child { width: 100%; }
+    .client-expand-row td { display: table-cell !important; }
 
     /* Settlement box */
     .settlement-grid { grid-template-columns: 1fr; }
     .settlement-big { font-size: 26px; }
+    .settlement-grid > div { text-align: right; }
+    .settlement-grid > div .settlement-col-title { text-align: right; }
 
     /* Forms */
     .form-row { grid-template-columns: 1fr; }
@@ -529,19 +589,19 @@
     <div id="hwList"></div>
   </div>
   <div id="tab-clients" class="tab-content">
-    <div class="section-header" style="flex-wrap:wrap;gap:10px">
-      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+    <div class="section-header clients-header" style="flex-wrap:wrap;gap:10px">
+      <div class="clients-header-main" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
         <span class="section-title" id="clientCount">0 Clients</span>
         <div style="position:relative;display:inline-flex;align-items:center">
           <input class="form-input" id="clientSearchInput" placeholder="Search..." oninput="renderClients()" style="width:200px;padding:5px 28px 5px 10px;font-size:14px" />
           <button onclick="document.getElementById('clientSearchInput').value='';renderClients()" style="position:absolute;right:6px;background:none;border:none;color:var(--text3);cursor:pointer;font-size:15px;line-height:1;padding:0" title="Clear search">✕</button>
         </div>
       </div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <span style="font-family:var(--mono);font-size:12px;color:var(--text3)" id="clientsLastImport"></span>
+      <div class="clients-header-actions" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span class="clients-last-import" style="font-family:var(--mono);font-size:12px;color:var(--text3)" id="clientsLastImport"></span>
         <button class="btn btn-ghost btn-sm admin-only" onclick="triggerClientImport()">⬆ Import CSV</button>
         <button class="btn btn-ghost btn-sm admin-only" onclick="exportAllClientsToSquare()">⬇ Export All</button>
-        <div class="col-toggle-wrap">
+        <div class="col-toggle-wrap clients-col-toggle">
           <button class="btn btn-ghost btn-sm" onclick="toggleColPanel()">Columns ▾</button>
           <div class="col-toggle-panel" id="colTogglePanel"></div>
         </div>
