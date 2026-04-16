@@ -1530,7 +1530,7 @@ function renderSplitPayAlloc() {
     return `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
       <div style="flex:1;min-width:0">
         <div style="font-size:17px;font-weight:500">${name}</div>
-        <div style="font-family:var(--mono);font-size:13px;color:${owedColor}">owes: ${fmt(bal)}${advanceStr}</div>
+        <div style="font-family:var(--mono);font-size:13px;color:${owedColor}">owed: ${fmt(bal)}${advanceStr}</div>
       </div>
       <select class="form-input sp-type-select" id="${id}_type" style="display:none;width:100px;font-size:12px;padding:4px 6px;flex-shrink:0">
         <option value="">General</option>
@@ -1562,19 +1562,16 @@ function maxAlloc(inputId, bal, potentialBal, allowAdvances) {
   document.querySelectorAll('.sp-alloc-input').forEach(el => {
     if (el.id !== inputId) otherAllocated += parseFloat(el.value) || 0;
   });
-  const remaining = total - otherAllocated;
+  const cap = total > 0 ? total - otherAllocated : Infinity;
   let target;
   if (!allowAdvances || potentialBal <= bal + 0.005) {
-    // no advance mode — single click caps at owed
-    target = Math.max(0, Math.min(bal, remaining));
+    target = Math.max(0, Math.min(bal, cap));
     if (btn) btn.dataset.step = '0';
   } else if (step === 0) {
-    // first click: fill to owed
-    target = Math.max(0, Math.min(bal, remaining));
+    target = Math.max(0, Math.min(bal, cap));
     if (btn) btn.dataset.step = '1';
   } else {
-    // second click: fill to full potential
-    target = Math.max(0, Math.min(potentialBal, remaining));
+    target = Math.max(0, Math.min(potentialBal, cap));
     if (btn) btn.dataset.step = '0';
   }
   document.getElementById(inputId).value = target > 0 ? target.toFixed(2) : '';
