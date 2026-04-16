@@ -1523,20 +1523,21 @@ function renderSplitPayAlloc() {
   if (track) track.style.background = allowAdvances ? 'var(--accent)' : 'var(--border2)';
   if (thumb) thumb.style.transform = allowAdvances ? 'translateX(18px)' : 'translateX(0)';
   const row = (id, name, bal, potentialBal) => {
-    const displayBal = allowAdvances ? potentialBal : bal;
-    const balColor = Math.round(displayBal * 100) > 0 ? 'var(--accent)' : 'var(--text3)';
-    const balLabel = allowAdvances ? 'potential:' : 'owes:';
+    const owedColor = Math.round(bal * 100) > 0 ? 'var(--accent)' : 'var(--text3)';
+    const advance = potentialBal - bal;
+    const advanceStr = allowAdvances && advance > 0.005
+      ? ` &nbsp;<span style="color:var(--text3)">+${fmt(advance)} potential</span>` : '';
     return `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
       <div style="flex:1;min-width:0">
         <div style="font-size:17px;font-weight:500">${name}</div>
-        <div style="font-family:var(--mono);font-size:13px;color:${balColor}">${balLabel} ${fmt(displayBal)}</div>
+        <div style="font-family:var(--mono);font-size:13px;color:${owedColor}">owes: ${fmt(bal)}${advanceStr}</div>
       </div>
       <select class="form-input sp-type-select" id="${id}_type" style="display:none;width:100px;font-size:12px;padding:4px 6px;flex-shrink:0">
         <option value="">General</option>
         <option value="advance">Advance</option>
         <option value="final">Final Pay</option>
       </select>
-      <button class="btn btn-ghost btn-sm" onclick="maxAlloc('${id}',${displayBal})" style="flex-shrink:0">Max</button>
+      <button class="btn btn-ghost btn-sm" id="${id}_maxBtn" data-step="0" onclick="maxAlloc('${id}',${bal},${potentialBal},${allowAdvances})" style="flex-shrink:0">Max</button>
       <input class="form-input sp-alloc-input" type="number" step="0.01" placeholder="0.00"
         id="${id}" style="max-width:100px" oninput="updateSplitTotals()" />
     </div>`;
@@ -1553,15 +1554,30 @@ function renderSplitPayAlloc() {
   allocEl.innerHTML = html || '<div style="color:var(--text3);font-size:16px;padding:8px 0">No active jobs or HomeWatch clients.</div>';
   updateSplitTotals();
 }
-function maxAlloc(inputId, bal) {
+function maxAlloc(inputId, bal, potentialBal, allowAdvances) {
+  const btn = document.getElementById(inputId + '_maxBtn');
+  const step = parseInt(btn?.dataset.step || '0');
   const total = parseFloat(document.getElementById('sp_total').value) || 0;
   let otherAllocated = 0;
   document.querySelectorAll('.sp-alloc-input').forEach(el => {
     if (el.id !== inputId) otherAllocated += parseFloat(el.value) || 0;
   });
   const remaining = total - otherAllocated;
-  const value = Math.max(0, Math.min(bal, remaining));
-  document.getElementById(inputId).value = value > 0 ? value.toFixed(2) : '';
+  let target;
+  if (!allowAdvances || potentialBal <= bal + 0.005) {
+    // no advance mode — single click caps at owed
+    target = Math.max(0, Math.min(bal, remaining));
+    if (btn) btn.dataset.step = '0';
+  } else if (step === 0) {
+    // first click: fill to owed
+    target = Math.max(0, Math.min(bal, remaining));
+    if (btn) btn.dataset.step = '1';
+  } else {
+    // second click: fill to full potential
+    target = Math.max(0, Math.min(potentialBal, remaining));
+    if (btn) btn.dataset.step = '0';
+  }
+  document.getElementById(inputId).value = target > 0 ? target.toFixed(2) : '';
   updateSplitTotals();
 }
 function updateSplitTotals() {
