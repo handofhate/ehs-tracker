@@ -1503,17 +1503,23 @@ function openSplitPay() {
   document.getElementById('sp_total').value = '';
   document.getElementById('sp_date').value  = today();
   document.getElementById('sp_label').value = '';
-  document.getElementById('sp_allowAdvances').checked = false;
+  const track = document.getElementById('sp_toggleTrack');
+  if (track) track.dataset.on = 'false';
   renderSplitPayAlloc();
   document.getElementById('splitPayModal').classList.remove('hidden');
+}
+function toggleSplitAdvances() {
+  const track = document.getElementById('sp_toggleTrack');
+  track.dataset.on = track.dataset.on === 'true' ? 'false' : 'true';
+  renderSplitPayAlloc();
 }
 function renderSplitPayAlloc() {
   const activeJobs = state.jobs.filter(j => j.status !== 'complete');
   const activeHW   = (state.homewatch || []).filter(hw => hw.status !== 'paused');
   const allocEl    = document.getElementById('sp_allocList');
-  const allowAdvances = document.getElementById('sp_allowAdvances').checked;
   const track = document.getElementById('sp_toggleTrack');
   const thumb = document.getElementById('sp_toggleThumb');
+  const allowAdvances = track?.dataset.on === 'true';
   if (track) track.style.background = allowAdvances ? 'var(--accent)' : 'var(--border2)';
   if (thumb) thumb.style.transform = allowAdvances ? 'translateX(18px)' : 'translateX(0)';
   const row = (id, name, bal, potentialBal) => {
