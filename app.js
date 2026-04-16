@@ -1512,8 +1512,10 @@ function renderSplitPayAlloc() {
   const activeHW   = (state.homewatch || []).filter(hw => hw.status !== 'paused');
   const allocEl    = document.getElementById('sp_allocList');
   const allowAdvances = document.getElementById('sp_allowAdvances').checked;
-  const hintEl = document.getElementById('sp_advanceHint');
-  if (hintEl) hintEl.textContent = allowAdvances ? 'Max includes uncollected invoices' : '';
+  const track = document.getElementById('sp_toggleTrack');
+  const thumb = document.getElementById('sp_toggleThumb');
+  if (track) track.style.background = allowAdvances ? 'var(--accent)' : 'var(--border2)';
+  if (thumb) thumb.style.transform = allowAdvances ? 'translateX(18px)' : 'translateX(0)';
   const row = (id, name, bal, potentialBal) => {
     const displayBal = allowAdvances ? potentialBal : bal;
     const balColor = Math.round(displayBal * 100) > 0 ? 'var(--accent)' : 'var(--text3)';
