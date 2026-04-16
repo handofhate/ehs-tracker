@@ -1,0 +1,16 @@
+# Firebase / backend — not needed for GitHub Pages
+functions/
+.firebase/
+firebase.json
+.firebaserc
+.firebaserc.example
+
+# Secrets & logs
+.env
+.env.*
+*.log
+
+# Docs (keep locally, not needed in repo)
+DEPLOY_CHECKLIST.md
+SQUARE_INTEGRATION.md
+SQUARE_TEST_SCENARIOS.md

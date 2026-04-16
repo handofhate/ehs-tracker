@@ -708,6 +708,7 @@
         <nav class="settings-nav">
           <button class="settings-nav-btn active" onclick="settingsTab('employees',this)">Employees</button>
           <button class="settings-nav-btn" onclick="settingsTab('fees',this)">Square Fees</button>
+          <button class="settings-nav-btn" onclick="settingsTab('square',this)">Square API</button>
           <button class="settings-nav-btn" onclick="settingsTab('debt',this)">Debt</button>
           <button class="settings-nav-btn" onclick="settingsTab('jobs',this)">Jobs</button>
           <button class="settings-nav-btn" onclick="settingsTab('clients',this)">Clients</button>
@@ -758,6 +759,29 @@
               <input class="form-input" id="s_txnFee" type="number" step="0.01" min="0" style="max-width:120px" />
             </div>
             <div class="form-hint">Standard Square rate is $0.30 per transaction. Both fees are deducted before the profit split.</div>
+          </div>
+        </div>
+        <div id="stab-square" class="settings-panel">
+          <div class="form-group">
+            <label class="form-label">Functions Base URL</label>
+            <input class="form-input" id="s_squareBaseUrl" placeholder="https://us-central1-<project>.cloudfunctions.net" />
+            <div class="form-hint">Backend endpoint root used for squareHealth/squareInvoice/squareAlerts/squareReconcileNow.</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">High-Value Confirm Threshold ($)</label>
+            <input class="form-input" id="s_squareHighValue" type="number" min="1" step="1" style="max-width:160px" />
+          </div>
+          <div class="form-group">
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-ghost btn-sm" onclick="checkSquareHealth()">Check Health</button>
+              <button class="btn btn-ghost btn-sm" onclick="runSquareReconcileNow()">Run Reconcile Now</button>
+              <button class="btn btn-ghost btn-sm" onclick="refreshSquareAlerts()">Refresh Alerts</button>
+            </div>
+            <div id="squareHealthOut" style="font-family:var(--mono);font-size:12px;color:var(--text3);margin-top:8px"></div>
+          </div>
+          <div class="form-group" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">
+            <label class="form-label">Billing Alerts</label>
+            <div id="squareAlertsList"></div>
           </div>
         </div>
         <div id="stab-debt" class="settings-panel">
@@ -1207,6 +1231,11 @@
     <div class="form-group">
       <label class="form-label">Description (optional)</label>
       <input class="form-input" id="sp_label" placeholder="e.g. Weekly pay" />
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 0 4px">
+      <label class="form-label" style="margin:0;cursor:pointer" for="sp_allowAdvances">Allow Advances</label>
+      <input type="checkbox" id="sp_allowAdvances" onchange="renderSplitPayAlloc()" style="width:18px;height:18px;cursor:pointer;accent-color:var(--accent)" />
+      <span style="font-family:var(--mono);font-size:12px;color:var(--text3)" id="sp_advanceHint"></span>
     </div>
     <div style="border-top:1px solid var(--border);padding-top:14px;margin-top:4px">
       <div class="form-label" style="margin-bottom:10px">Allocate to Jobs &amp; HomeWatch</div>

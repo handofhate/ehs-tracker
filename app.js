@@ -13,7 +13,16 @@ const DOC = db.collection('jobtracker').doc('state');
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
 let state = {
-  settings: { empName: 'Employee', empShare: 0.66, feeRate: 0.026, txnFee: 0.30, debtOriginal: 2256.58, debtOwnerShare: 0.50, defaultMilestones: [] },
+  settings: {
+    empName: 'Employee',
+    empShare: 0.66,
+    feeRate: 0.026,
+    txnFee: 0.30,
+    debtOriginal: 2256.58,
+    debtOwnerShare: 0.50,
+    defaultMilestones: [],
+    square: { functionBaseUrl: '', highValueConfirmAmount: 1000 }
+  },
   debtPayments: [],
   jobs: [],
   users: [],
@@ -50,6 +59,9 @@ function migrateState(s) {
   if (s.settings.debtOwnerShare === undefined) s.settings.debtOwnerShare = 0.50;
   if (s.settings.txnFee === undefined) s.settings.txnFee = 0.30;
   if (!s.settings.defaultMilestones) s.settings.defaultMilestones = [];
+  if (!s.settings.square || typeof s.settings.square !== 'object') s.settings.square = {};
+  if (s.settings.square.functionBaseUrl === undefined) s.settings.square.functionBaseUrl = '';
+  if (s.settings.square.highValueConfirmAmount === undefined) s.settings.square.highValueConfirmAmount = 1000;
   if (!s.debtPayments) s.debtPayments = [];
   (s.debtPayments).forEach(p => {
     if (p.linkedJobId === undefined) p.linkedJobId = null;
@@ -86,7 +98,12 @@ function migrateState(s) {
     if (!hw.hwNotes) hw.hwNotes = [];
     if (!hw.advances) hw.advances = [];
     if (!hw.status) hw.status = 'active';
-    hw.payments.forEach(p => { if (!p.status) p.status = 'pending'; });
+    hw.payments.forEach(p => {
+      if (!p.status) p.status = 'pending';
+      if (!p.billingState) p.billingState = 'none';
+      if (!p.squarePaymentIds) p.squarePaymentIds = [];
+      if (!p.reconcileStatus) p.reconcileStatus = 'none';
+    });
     if (!hw.employeeId && defaultEmp) hw.employeeId = defaultEmp.id;
   });
   (s.jobs || []).forEach(job => {
@@ -104,16 +121,25 @@ function migrateState(s) {
     if (!job.hours) job.hours = [];
     (job.milestones || []).forEach(m => {
       if (m.status === undefined) { m.status = m.collected ? 'collected' : 'pending'; delete m.collected; }
+      if (!m.billingState) m.billingState = 'none';
+      if (!m.squarePaymentIds) m.squarePaymentIds = [];
+      if (!m.reconcileStatus) m.reconcileStatus = 'none';
     });
     (job.addOns || []).forEach(a => {
       if (a.status === undefined) { a.status = a.collected ? 'collected' : 'pending'; delete a.collected; }
       if (a.date === undefined) a.date = '';
+      if (!a.billingState) a.billingState = 'none';
+      if (!a.squarePaymentIds) a.squarePaymentIds = [];
+      if (!a.reconcileStatus) a.reconcileStatus = 'none';
     });
     if (!job.subtractions) job.subtractions = [];
     (job.subtractions || []).forEach(a => {
       if (a.status === undefined) { a.status = 'pending'; }
       if (a.date === undefined) a.date = '';
       if (a.sourceItemId === undefined) a.sourceItemId = null;
+      if (!a.billingState) a.billingState = 'none';
+      if (!a.squarePaymentIds) a.squarePaymentIds = [];
+      if (!a.reconcileStatus) a.reconcileStatus = 'none';
     });
     if (job.isItemized === undefined) job.isItemized = false;
     if (!job.quoteItems) job.quoteItems = [];
@@ -380,6 +406,32 @@ function fmtDate(d) {
 }
 function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
+function _squareBaseUrl() {
+  return (state.settings?.square?.functionBaseUrl || '').trim().replace(/\/+$/,'');
+}
+
+async function callSquareFn(endpoint, payload = {}) {
+  const base = _squareBaseUrl();
+  if (!base) throw new Error('Square Functions Base URL is not configured in Settings → Square API.');
+  const u = firebase.auth().currentUser;
+  if (!u) throw new Error('Not authenticated.');
+  const token = await u.getIdToken();
+  const res = await fetch(`${base}/${endpoint}`, {
+    method: 'POST',
+    headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${token}` },
+    body: JSON.stringify(payload || {})
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = json?.error || `HTTP ${res.status}`;
+    const err = new Error(msg);
+    err.code = json?.code || '';
+    err.details = json;
+    throw err;
+  }
+  return json;
+}
+
 // ─── CALCULATIONS ─────────────────────────────────────────────────────────────
 function calcSplit(gross, { empShare, feeRate, txnFee = 0, txnCount = 0 }) {
   const totalFees  = gross * feeRate + txnFee * txnCount;
@@ -477,7 +529,9 @@ function calcHW(hw) {
   const advancesPaid   = (hw.advances||[]).reduce((s,a)=>s+(a.amount||0),0);
   const linkedDebtPaid = (state.debtPayments||[]).filter(p=>p.linkedHWId===hw.id).reduce((s,p)=>s+(p.amount||0),0);
   const empBalance     = empOwed - advancesPaid - linkedDebtPaid;
-  return { collectedGross, pendingGross, totalFees, netRevenue, empOwed, ownerOwed, advancesPaid, linkedDebtPaid, empBalance };
+  const { empOwed: potentialEmpOwed } = calcSplit(collectedGross + pendingGross, { empShare, feeRate, txnFee, txnCount: txnCount + (hw.payments||[]).filter(p=>p.status!=='collected').length });
+  const potentialEmpBalance = potentialEmpOwed - advancesPaid - linkedDebtPaid;
+  return { collectedGross, pendingGross, totalFees, netRevenue, empOwed, ownerOwed, advancesPaid, linkedDebtPaid, empBalance, potentialEmpBalance };
 }
 
 function getHWBillDateForMonth(hw, year, month) {
@@ -582,7 +636,11 @@ function hwDetail(hw, c) {
       <div class="line-item"><b>${en}'s share (${empPct}%)</b><b class="${c.empOwed>0?'green':''}"> ${fmt(c.empOwed)}</b></div>
       <div class="section-header" style="margin-top:12px">
         <span class="section-title">Client Payments</span>
-        <button class="btn btn-ghost btn-sm admin-only" onclick="openAddHWPayment('${hw.id}')">+ Log Payment</button>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-ghost btn-sm admin-only" onclick="createHWSquareInvoice('${hw.id}', false)">Square Draft</button>
+          <button class="btn btn-ghost btn-sm admin-only" onclick="createHWSquareInvoice('${hw.id}', true)">Square Send</button>
+          <button class="btn btn-ghost btn-sm admin-only" onclick="openAddHWPayment('${hw.id}')">+ Log Payment</button>
+        </div>
       </div>
       ${payments.length
         ? payments.slice().reverse().map((p,i)=>`
@@ -1050,6 +1108,175 @@ function cyclePayType(jobId, idx) {
   save(); renderJobs();
 }
 
+function _customerFromName(clientName) {
+  const c = clientByName(clientName);
+  if (c) {
+    return {
+      client: c,
+      customer: {
+        squareCustomerId: c.squareCustomerId || c.squareId || '',
+        givenName: c.firstName || '',
+        familyName: c.surname || '',
+        companyName: c.company || '',
+        email: c.email || '',
+        phone: c.phone || '',
+        referenceId: c.refId || c.id || '',
+        note: c.memo || ''
+      }
+    };
+  }
+  const parts = String(clientName || '').trim().split(/\s+/).filter(Boolean);
+  return {
+    client: null,
+    customer: {
+      givenName: parts[0] || '',
+      familyName: parts.slice(1).join(' '),
+      companyName: '',
+      email: '',
+      phone: '',
+      referenceId: '',
+      note: ''
+    }
+  };
+}
+
+async function _sendSquareInvoicePayload(payload) {
+  const rsp = await callSquareFn('squareInvoice', payload);
+  showAlert(
+    payload.send
+      ? `Invoice sent in Square (${rsp.squareInvoiceId || 'no id'}).`
+      : `Draft invoice created (${rsp.squareInvoiceId || 'no id'}).`
+  );
+}
+
+function _jobInvoiceItems(job) {
+  const refs = [], lineItems = [];
+  (job.milestones || []).forEach(m => {
+    if ((m.status || 'pending') === 'collected') return;
+    if (m.squareInvoiceId) return;
+    const amountCents = Math.round(((m.pct || 0) / 100) * (job.quote || 0) * 100);
+    if (!amountCents) return;
+    lineItems.push({ name: `${job.name} — ${m.label || 'Milestone'}`, amountCents });
+    refs.push({ kind:'job', jobId:job.id, itemType:'milestones', itemId:m.id });
+  });
+  (job.addOns || []).forEach(a => {
+    if ((a.status || 'pending') === 'collected') return;
+    if (a.squareInvoiceId) return;
+    const amountCents = Math.round((a.amount || 0) * 100);
+    if (!amountCents) return;
+    lineItems.push({ name: `${job.name} — ${a.label || 'Addition'}`, amountCents });
+    refs.push({ kind:'job', jobId:job.id, itemType:'addOns', itemId:a.id });
+  });
+  (job.subtractions || []).forEach(s => {
+    if ((s.status || 'pending') === 'collected') return;
+    if (s.squareInvoiceId) return;
+    const amountCents = -Math.round((s.amount || 0) * 100);
+    if (!amountCents) return;
+    lineItems.push({ name: `${job.name} — ${s.label || 'Subtraction'}`, amountCents });
+    refs.push({ kind:'job', jobId:job.id, itemType:'subtractions', itemId:s.id });
+  });
+  return { lineItems, refs };
+}
+
+async function createJobSquareInvoice(jobId, send) {
+  if (!currentUser?.isAdmin) return;
+  const job = (state.jobs || []).find(j => j.id === jobId);
+  if (!job) return;
+  const built = _jobInvoiceItems(job);
+  if (!built.lineItems.length) { showAlert('No invoiceable pending job items found.'); return; }
+  const totalCents = built.lineItems.reduce((s, li) => s + li.amountCents, 0);
+  if (totalCents <= 0) { showAlert('Invoice total must be greater than $0.00.'); return; }
+  const { client, customer } = _customerFromName(job.name);
+  const payload = {
+    dryRun: false,
+    send: !!send,
+    currency: 'USD',
+    dueDate: today(),
+    lineItems: built.lineItems,
+    lineItemName: 'Job Work',
+    title: `${job.name} Invoice`,
+    description: 'Job invoice from EHS Tracker',
+    referenceId: job.id,
+    note: job.contactName ? `Contact: ${job.contactName}` : '',
+    customer,
+    source: {
+      kind: 'job',
+      jobId: job.id,
+      clientId: client?.id || '',
+      refs: built.refs
+    }
+  };
+  const total = built.lineItems.reduce((s, li) => s + li.amountCents, 0) / 100;
+  const threshold = Number(state.settings?.square?.highValueConfirmAmount || 1000);
+  const run = async () => {
+    try { await _sendSquareInvoicePayload(payload); }
+    catch (e) { showAlert(`Square invoice failed: ${e.message || 'unknown error'}`); }
+  };
+  if (!send) { run(); return; }
+  showConfirm('Send this job invoice through Square now?', () => {
+    if (total >= threshold) {
+      showConfirm(
+        `This invoice is ${fmt(total)} (>= ${fmt(threshold)}). Confirm send.`,
+        () => { payload.highValueConfirmed = true; run(); },
+        { title:'High-Value Send Check', okLabel:'Confirm Send', danger:false }
+      );
+    } else {
+      run();
+    }
+  }, { title:'Send Invoice', okLabel:'Send', danger:false });
+}
+
+async function createHWSquareInvoice(hwId, send) {
+  if (!currentUser?.isAdmin) return;
+  const hw = (state.homewatch || []).find(h => h.id === hwId);
+  if (!hw) return;
+  const pending = (hw.payments || []).filter(p => (p.status || 'pending') !== 'collected' && !p.squareInvoiceId);
+  if (!pending.length) { showAlert('No invoiceable HomeWatch payments found.'); return; }
+  const lineItems = pending.map(p => ({
+    name: `${hw.name} — ${fmtDate(p.date) || p.date || 'Service'}`,
+    amountCents: Math.round((p.amount || 0) * 100)
+  })).filter(li => li.amountCents > 0);
+  if (!lineItems.length) { showAlert('Invoice total must be greater than $0.00.'); return; }
+  const refs = pending.map(p => ({ kind:'homewatch', hwId:hw.id, itemType:'payments', itemId:p.id }));
+  const { client, customer } = _customerFromName(hw.name);
+  const payload = {
+    dryRun: false,
+    send: !!send,
+    currency: 'USD',
+    dueDate: today(),
+    lineItems,
+    lineItemName: 'HomeWatch Service',
+    title: `${hw.name} HomeWatch Invoice`,
+    description: 'HomeWatch service invoice from EHS Tracker',
+    referenceId: hw.id,
+    customer,
+    source: {
+      kind: 'homewatch',
+      hwId: hw.id,
+      clientId: client?.id || '',
+      refs
+    }
+  };
+  const total = lineItems.reduce((s, li) => s + li.amountCents, 0) / 100;
+  const threshold = Number(state.settings?.square?.highValueConfirmAmount || 1000);
+  const run = async () => {
+    try { await _sendSquareInvoicePayload(payload); }
+    catch (e) { showAlert(`Square invoice failed: ${e.message || 'unknown error'}`); }
+  };
+  if (!send) { run(); return; }
+  showConfirm('Send this HomeWatch invoice through Square now?', () => {
+    if (total >= threshold) {
+      showConfirm(
+        `This invoice is ${fmt(total)} (>= ${fmt(threshold)}). Confirm send.`,
+        () => { payload.highValueConfirmed = true; run(); },
+        { title:'High-Value Send Check', okLabel:'Confirm Send', danger:false }
+      );
+    } else {
+      run();
+    }
+  }, { title:'Send Invoice', okLabel:'Send', danger:false });
+}
+
 function jobDetail(job, c) {
   const emp    = getEmp(job.employeeId);
   const en     = esc(emp?.name || 'Employee');
@@ -1209,6 +1436,8 @@ function jobDetail(job, c) {
 
     <div class="admin-only job-detail-footer">
       <div class="job-detail-admin-actions">
+        <button class="btn btn-ghost btn-sm" onclick="createJobSquareInvoice('${job.id}', false)">Square Draft</button>
+        <button class="btn btn-ghost btn-sm" onclick="createJobSquareInvoice('${job.id}', true)">Square Send</button>
         <button class="btn btn-ghost btn-sm" onclick="editJob('${job.id}')">Edit</button>
         <button class="btn btn-${job.status==='complete'?'ghost':'green'} btn-sm" onclick="toggleComplete('${job.id}')">
           ${job.status==='complete'?'Reopen':'Complete'}
@@ -1274,22 +1503,32 @@ function openSplitPay() {
   document.getElementById('sp_total').value = '';
   document.getElementById('sp_date').value  = today();
   document.getElementById('sp_label').value = '';
+  document.getElementById('sp_allowAdvances').checked = false;
+  renderSplitPayAlloc();
+  document.getElementById('splitPayModal').classList.remove('hidden');
+}
+function renderSplitPayAlloc() {
   const activeJobs = state.jobs.filter(j => j.status !== 'complete');
   const activeHW   = (state.homewatch || []).filter(hw => hw.status !== 'paused');
   const allocEl    = document.getElementById('sp_allocList');
-  const row = (id, name, bal) => {
-    const balColor = Math.round(bal * 100) > 0 ? 'var(--accent)' : 'var(--text3)';
+  const allowAdvances = document.getElementById('sp_allowAdvances').checked;
+  const hintEl = document.getElementById('sp_advanceHint');
+  if (hintEl) hintEl.textContent = allowAdvances ? 'Max includes uncollected invoices' : '';
+  const row = (id, name, bal, potentialBal) => {
+    const displayBal = allowAdvances ? potentialBal : bal;
+    const balColor = Math.round(displayBal * 100) > 0 ? 'var(--accent)' : 'var(--text3)';
+    const balLabel = allowAdvances ? 'potential:' : 'owes:';
     return `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
       <div style="flex:1;min-width:0">
         <div style="font-size:17px;font-weight:500">${name}</div>
-        <div style="font-family:var(--mono);font-size:13px;color:${balColor}">owes: ${fmt(bal)}</div>
+        <div style="font-family:var(--mono);font-size:13px;color:${balColor}">${balLabel} ${fmt(displayBal)}</div>
       </div>
       <select class="form-input sp-type-select" id="${id}_type" style="display:none;width:100px;font-size:12px;padding:4px 6px;flex-shrink:0">
         <option value="">General</option>
         <option value="advance">Advance</option>
         <option value="final">Final Pay</option>
       </select>
-      <button class="btn btn-ghost btn-sm" onclick="maxAlloc('${id}',${bal})" style="flex-shrink:0">Max</button>
+      <button class="btn btn-ghost btn-sm" onclick="maxAlloc('${id}',${displayBal})" style="flex-shrink:0">Max</button>
       <input class="form-input sp-alloc-input" type="number" step="0.01" placeholder="0.00"
         id="${id}" style="max-width:100px" oninput="updateSplitTotals()" />
     </div>`;
@@ -1297,15 +1536,14 @@ function openSplitPay() {
   let html = '';
   if (activeJobs.length) {
     if (activeHW.length) html += `<div style="font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);padding:4px 0 6px">Jobs</div>`;
-    html += activeJobs.map(j => row(`sp_job_${j.id}`, esc(j.name), calcJob(j).empBalance)).join('');
+    html += activeJobs.map(j => { const c = calcJob(j); return row(`sp_job_${j.id}`, esc(j.name), c.empBalance, c.potentialEmpBalance); }).join('');
   }
   if (activeHW.length) {
     html += `<div style="font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);padding:${activeJobs.length?'12px':'4px'} 0 6px">HomeWatch</div>`;
-    html += activeHW.map(hw => row(`sp_hw_${hw.id}`, esc(hw.name), calcHW(hw).empBalance)).join('');
+    html += activeHW.map(hw => { const c = calcHW(hw); return row(`sp_hw_${hw.id}`, esc(hw.name), c.empBalance, c.potentialEmpBalance); }).join('');
   }
   allocEl.innerHTML = html || '<div style="color:var(--text3);font-size:16px;padding:8px 0">No active jobs or HomeWatch clients.</div>';
   updateSplitTotals();
-  document.getElementById('splitPayModal').classList.remove('hidden');
 }
 function maxAlloc(inputId, bal) {
   const total = parseFloat(document.getElementById('sp_total').value) || 0;
@@ -2047,6 +2285,7 @@ function settingsTab(name, btn) {
   btn.classList.add('active');
   document.getElementById('stab-' + name).classList.add('active');
   if (name === 'clients') _populateClientColSettings();
+  if (name === 'square') refreshSquareAlerts();
 }
 function _populateClientColSettings() {
   const expandCols = state.settings.clientExpandCols || CLIENT_COLS.map(c=>c.key);
@@ -2085,6 +2324,8 @@ function openSettings() {
   document.getElementById('s_txnFee').value          = state.settings.txnFee ?? 0.30;
   document.getElementById('s_debtOriginal').value    = state.settings.debtOriginal || 2256.58;
   document.getElementById('s_debtOwnerShare').value  = Math.round((state.settings.debtOwnerShare || 0.50) * 100);
+  document.getElementById('s_squareBaseUrl').value   = state.settings.square?.functionBaseUrl || '';
+  document.getElementById('s_squareHighValue').value = state.settings.square?.highValueConfirmAmount || 1000;
   const debtEmp = getEmp(state.settings.debtEmployeeId);
   document.getElementById('s_debtHint').textContent  = debtEmp
     ? `Debt assigned to ${debtEmp.name}. Extra above their normal split counts toward debt.`
@@ -2107,6 +2348,9 @@ function saveSettings() {
   state.settings.txnFee         = parseFloat(document.getElementById('s_txnFee').value) || 0;
   state.settings.debtOriginal   = parseFloat(document.getElementById('s_debtOriginal').value) || 0;
   state.settings.debtOwnerShare = (parseFloat(document.getElementById('s_debtOwnerShare').value) || 50) / 100;
+  if (!state.settings.square || typeof state.settings.square !== 'object') state.settings.square = {};
+  state.settings.square.functionBaseUrl = (document.getElementById('s_squareBaseUrl').value || '').trim().replace(/\/+$/,'');
+  state.settings.square.highValueConfirmAmount = parseFloat(document.getElementById('s_squareHighValue').value) || 1000;
   const defaultMilestones = []; let dmTotal = 0;
   document.querySelectorAll('[id^="dmpct_"]').forEach((el, i) => {
     const pct = parseFloat(el.value) || 0;
@@ -2119,6 +2363,56 @@ function saveSettings() {
   }
   state.settings.defaultMilestones = defaultMilestones;
   save(); renderAll(); closeModal('settingsModal');
+}
+
+function renderSquareAlerts(alerts = []) {
+  const el = document.getElementById('squareAlertsList');
+  if (!el) return;
+  if (!alerts.length) {
+    el.innerHTML = '<div style="color:var(--text3);font-size:13px">No active billing alerts.</div>';
+    return;
+  }
+  el.innerHTML = alerts.map(a => `
+    <div style="border:1px solid var(--border);background:var(--bg3);border-radius:3px;padding:8px 10px;margin-bottom:8px">
+      <div style="font-family:var(--mono);font-size:11px;color:var(--text3);margin-bottom:4px">${esc(a.status || 'alert')} ${a.type ? `· ${esc(a.type)}` : ''}</div>
+      <div style="font-size:13px;color:var(--text2)">${esc(a.error?.message || a.eventType || a.objectId || 'See logs')}</div>
+    </div>
+  `).join('');
+}
+
+async function checkSquareHealth() {
+  const out = document.getElementById('squareHealthOut');
+  if (out) out.textContent = 'Checking...';
+  try {
+    const rsp = await callSquareFn('squareHealth', {});
+    if (out) out.textContent = `env=${rsp.env} · enabled=${rsp.flags?.squareEnabled ? 'yes' : 'no'} · send=${rsp.flags?.squareSendEnabled ? 'yes' : 'no'}`;
+  } catch (e) {
+    if (out) out.textContent = `Error: ${e.message || 'failed'}`;
+  }
+}
+
+async function refreshSquareAlerts() {
+  const el = document.getElementById('squareAlertsList');
+  if (!el) return;
+  el.innerHTML = '<div style="color:var(--text3);font-size:13px">Loading alerts...</div>';
+  try {
+    const rsp = await callSquareFn('squareAlerts', { limit: 25 });
+    renderSquareAlerts(rsp.alerts || []);
+  } catch (e) {
+    el.innerHTML = `<div style="color:var(--red);font-size:13px">Failed to load alerts: ${esc(e.message || 'unknown')}</div>`;
+  }
+}
+
+async function runSquareReconcileNow() {
+  const out = document.getElementById('squareHealthOut');
+  if (out) out.textContent = 'Running reconcile...';
+  try {
+    const rsp = await callSquareFn('squareReconcileNow', {});
+    if (out) out.textContent = `Reconciled ${rsp.checkedInvoices || 0} invoices, touched ${rsp.touchedItems || 0} items, errors ${rsp.errors || 0}.`;
+    refreshSquareAlerts();
+  } catch (e) {
+    if (out) out.textContent = `Reconcile failed: ${e.message || 'unknown'}`;
+  }
 }
 function openMySettings() {
   document.getElementById('ms_whoami').textContent = currentUser?.name || '';
@@ -3193,7 +3487,7 @@ function _renderClientDetailModal(c) {
         <div class="form-group"><label class="form-label">Zip</label><input class="form-input" id="cd_postal" value="${esc(c.postal||'')}" style="max-width:110px" /></div>
       </div>
       <div class="form-group"><label class="form-label">Birthday</label><input class="form-input" id="cd_birthday" value="${esc(c.birthday||'')}" placeholder="e.g. 1985-06-15" style="max-width:160px" /></div>
-      ${!clientDetailIsNew ? `<div style="margin-top:8px"><button class="btn btn-ghost btn-sm" onclick="exportClientToSquare('${id}')">⬇ Export to Square CSV</button></div>` : ''}
+      ${!clientDetailIsNew ? `<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-ghost btn-sm" onclick="syncClientToSquare('${id}')">Sync to Square API</button><button class="btn btn-ghost btn-sm" onclick="exportClientToSquare('${id}')">⬇ Export to Square CSV</button></div>` : ''}
       ${notesSection}
     `;
   } else {
@@ -3419,6 +3713,26 @@ function exportClientToSquare(id) {
   const vals    = [c.firstName, c.surname, c.company, c.email, c.phone, c.address1, c.address2, c.city, c.state, c.postal, c.refId, c.birthday, c.emailSubStatus];
   const line    = vals.map(v => `"${(v||'').replace(/"/g,'""')}"`).join(',');
   downloadCSV(headers.join(',') + '\n' + line + '\n', `square-import-${(c.firstName||'client').toLowerCase().replace(/\s+/g,'-')}.csv`);
+}
+
+async function syncClientToSquare(id) {
+  try {
+    const rsp = await callSquareFn('squareCustomerSync', { clientId: id });
+    const c = (state.clients||[]).find(cl=>cl.id===id);
+    if (c && rsp.squareCustomerId) {
+      c.squareId = rsp.squareCustomerId;
+      c.squareCustomerId = rsp.squareCustomerId;
+      c.contactSyncSource = 'square';
+      c.lastSyncedAt = new Date().toISOString();
+      c.syncVersion = Number(c.syncVersion || 0) + 1;
+      save();
+      _renderClientDetailModal(c);
+      renderClients();
+    }
+    showAlert('Client synced to Square.');
+  } catch (e) {
+    showAlert(`Client sync failed: ${e.message || 'unknown error'}`);
+  }
 }
 
 function downloadCSV(csv, filename) {
