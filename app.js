@@ -42,6 +42,7 @@ let isSaving = false;
 let currentUser = null; // { id, name, isAdmin }
 let editingApptId = null;
 let resetPinUserId = null;
+let partialCollectCtx = null;
 let calYear = new Date().getFullYear();
 let calMonth = new Date().getMonth(); // 0-indexed
 let schedView = 'list'; // 'list' | 'month'
@@ -124,6 +125,13 @@ function migrateState(s) {
       if (!m.billingState) m.billingState = 'none';
       if (!m.squarePaymentIds) m.squarePaymentIds = [];
       if (!m.reconcileStatus) m.reconcileStatus = 'none';
+      if (m.partialState === undefined) m.partialState = '';
+      if (m.partialGroupId === undefined) m.partialGroupId = '';
+      if (m.partialParentLabel === undefined) m.partialParentLabel = '';
+      if (m.partialParentPct === undefined) m.partialParentPct = 0;
+      if (m.partialMode === undefined) m.partialMode = '';
+      if (m.partialPercent === undefined) m.partialPercent = 0;
+      if (m.partialDate === undefined) m.partialDate = '';
     });
     (job.addOns || []).forEach(a => {
       if (a.status === undefined) { a.status = a.collected ? 'collected' : 'pending'; delete a.collected; }
@@ -131,6 +139,13 @@ function migrateState(s) {
       if (!a.billingState) a.billingState = 'none';
       if (!a.squarePaymentIds) a.squarePaymentIds = [];
       if (!a.reconcileStatus) a.reconcileStatus = 'none';
+      if (a.partialState === undefined) a.partialState = '';
+      if (a.partialGroupId === undefined) a.partialGroupId = '';
+      if (a.partialParentAmount === undefined) a.partialParentAmount = 0;
+      if (a.partialParentLabel === undefined) a.partialParentLabel = '';
+      if (a.partialMode === undefined) a.partialMode = '';
+      if (a.partialPercent === undefined) a.partialPercent = 0;
+      if (a.partialDate === undefined) a.partialDate = '';
     });
     if (!job.subtractions) job.subtractions = [];
     (job.subtractions || []).forEach(a => {
@@ -140,9 +155,35 @@ function migrateState(s) {
       if (!a.billingState) a.billingState = 'none';
       if (!a.squarePaymentIds) a.squarePaymentIds = [];
       if (!a.reconcileStatus) a.reconcileStatus = 'none';
+      if (a.partialState === undefined) a.partialState = '';
+      if (a.partialGroupId === undefined) a.partialGroupId = '';
+      if (a.partialParentAmount === undefined) a.partialParentAmount = 0;
+      if (a.partialParentLabel === undefined) a.partialParentLabel = '';
+      if (a.partialMode === undefined) a.partialMode = '';
+      if (a.partialPercent === undefined) a.partialPercent = 0;
+      if (a.partialDate === undefined) a.partialDate = '';
     });
     if (job.isItemized === undefined) job.isItemized = false;
     if (!job.quoteItems) job.quoteItems = [];
+    if (!job.partialCollections) job.partialCollections = [];
+    (job.partialCollections || []).forEach(p => {
+      if (!p.id) p.id = uid();
+      if (p.date === undefined) p.date = job.date || today();
+      if (p.note === undefined) p.note = '';
+      if (p.mode === undefined) p.mode = 'dollar';
+      if (p.partialPercent === undefined) p.partialPercent = 0;
+      if (p.paymentTotal === undefined) p.paymentTotal = 0;
+      if (p.autoSub === undefined) p.autoSub = false;
+      if (!p.presetByKey || typeof p.presetByKey !== 'object') p.presetByKey = {};
+      if (!p.snapshotBefore || typeof p.snapshotBefore !== 'object') {
+        p.snapshotBefore = {
+          milestones: JSON.parse(JSON.stringify(job.milestones || [])),
+          addOns: JSON.parse(JSON.stringify(job.addOns || [])),
+          subtractions: JSON.parse(JSON.stringify(job.subtractions || []))
+        };
+      }
+      if (p.createdAt === undefined) p.createdAt = '';
+    });
   });
   return s;
 }
@@ -1060,9 +1101,15 @@ function badgeHtml(status, jobId, itemType, idx) {
     invoiced:  { cls:'badge-invoiced',  label:'◑ Invoiced' },
     collected: { cls:'badge-collected', label:'✓ Collected'}
   };
-  const { cls, label } = cfg[status] || cfg.pending;
+  const { cls } = cfg[status] || cfg.pending;
+  let label = (cfg[status] || cfg.pending).label;
+  if (itemType === 'subtractions' && status === 'collected') label = '✓ Applied';
   const admin = currentUser?.isAdmin;
-  return `<span class="status-badge ${cls}"${admin ? ` onclick="cycleStatus('${jobId}','${itemType}',${idx})" title="Click to cycle"` : ''}>${label}</span>`;
+  const job = state.jobs.find(j => j.id === jobId);
+  const item = job?.[itemType]?.[idx];
+  const locked = itemType === 'subtractions' && !!item?.appliedByPartial;
+  const title = locked ? 'Locked: applied via partial payment' : 'Click to cycle';
+  return `<span class="status-badge ${cls}"${admin && !locked ? ` onclick="cycleStatus('${jobId}','${itemType}',${idx})"` : ''} title="${title}">${label}</span>`;
 }
 
 function payTypeBadgeHtml(payType, jobId, idx) {
@@ -1283,12 +1330,86 @@ function jobDetail(job, c) {
   const admin  = currentUser?.isAdmin;
   const empShare = emp?.empShare ?? 0.66;
   const empPct = Math.round((job.repaymentMode ? (1-(state.settings.debtOwnerShare||0.5)) : empShare)*100);
+  const partialTag = (item) => {
+    if (!item?.partialState) return '';
+    const label = item.partialState === 'remaining' ? 'Partial Left' : 'Partial Paid';
+    return `<span class="tag tag-his" style="margin-left:6px">${label}</span>`;
+  };
+  const fmtPctDisplay = (pct) => {
+    const n = Number(pct || 0);
+    const s = n.toFixed(2);
+    return s.endsWith('.00') ? String(Math.round(n)) : s.replace(/0$/, '');
+  };
+  const partialSplitHint = (item) => {
+    if (!item) return '';
+    const pct = Number(item.partialPercent || 0);
+    const mode = item.partialMode || '';
+    let hintDate = item.partialDate || '';
+    if (!hintDate && mode) {
+      const match = (job.partialCollections || []).slice().reverse().find(p => {
+        if ((p.mode || '') !== mode) return false;
+        if (mode === 'percent' && pct > 0) return Math.abs(Number(p.partialPercent || 0) - pct) < 0.0001;
+        return true;
+      });
+      hintDate = match?.date || '';
+    }
+    const dateTxt = hintDate ? fmtDate(hintDate) : '';
+    if (mode === 'percent' && pct > 0) {
+      return ` <span style="font-size:12px;color:var(--text3)">(${fmtPctDisplay(pct)}% partial${dateTxt ? ` - ${dateTxt}` : ''})</span>`;
+    }
+    if (mode) {
+      return ` <span style="font-size:12px;color:var(--text3)">(partial${dateTxt ? ` - ${dateTxt}` : ''})</span>`;
+    }
+    return '';
+  };
 
-  const milestonesHtml = (job.milestones||[]).map((m,i) => {
-    const amt = (m.pct/100)*(job.quote||0);
-    const st  = m.status||'pending';
+  const hasLegacyPartial = !(job.partialCollections || []).length && (
+    (job.milestones || []).some(m => !!m.partialState) ||
+    (job.addOns || []).some(a => !!a.partialState) ||
+    (job.subtractions || []).some(s => !!s.partialState)
+  );
+  const milestoneEntries = (job.milestones || []).map((m, i) => ({ m, i }));
+  const renderedGroups = new Set();
+  const milestonesHtml = milestoneEntries.map(({ m, i }) => {
+    const groupId = m.partialGroupId || '';
+    if (groupId && renderedGroups.has(groupId)) return '';
+    if (groupId) {
+      renderedGroups.add(groupId);
+      const group = milestoneEntries.filter(x => x.m.partialGroupId === groupId);
+      const parentLabel = group[0]?.m.partialParentLabel || group[0]?.m.label || `Milestone ${i + 1}`;
+      const rawParentPct = Number(group[0]?.m.partialParentPct || 0);
+      const parentPct = rawParentPct > 0 ? rawParentPct : group.reduce((sum, x) => sum + Number(x.m.pct || 0), 0);
+      const parentAmt = (parentPct / 100) * (job.quote || 0);
+      const splitHint = partialSplitHint(group[0]?.m);
+      const childrenHtml = group.map(({ m: gm, i: gi }) => {
+        const amt = (gm.pct / 100) * (job.quote || 0);
+        const st = gm.status || 'pending';
+        const childTag = partialTag(gm);
+        return `<div class="line-item" style="padding-left:16px">
+          <div class="line-item-label" style="display:flex;align-items:center;gap:6px">
+            <span style="color:var(--text3)">&#8627;</span>${childTag || '<span class="tag tag-his">Partial</span>'}
+          </div>
+          <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
+            <div class="line-item-value ${st==='collected'?'green':'dim'}">${fmt(amt)}</div>
+            ${badgeHtml(st,job.id,'milestones',gi)}
+          </div>
+        </div>`;
+      }).join('');
+      return `<div class="line-item">
+        <div class="line-item-label">${esc(parentLabel)} (${fmtPctDisplay(parentPct)}%)${splitHint}</div>
+        <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
+          <div class="line-item-value dim">${fmt(parentAmt)}</div>
+        </div>
+      </div>${childrenHtml}`;
+    }
+    const amt = (m.pct / 100) * (job.quote || 0);
+    const st = m.status || 'pending';
+    const tag = partialTag(m);
     return `<div class="line-item">
-      <div class="line-item-label">${esc(m.label||`Milestone ${i+1}`)} (${m.pct}%)</div>
+      <div class="line-item-label" style="display:flex;flex-direction:column;gap:4px">
+        <span>${esc(m.label||`Milestone ${i+1}`)} (${fmtPctDisplay(m.pct)}%)</span>
+        ${tag ? `<span>${tag}</span>` : ''}
+      </div>
       <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
         <div class="line-item-value ${st==='collected'?'green':'dim'}">${fmt(amt)}</div>
         ${badgeHtml(st,job.id,'milestones',i)}
@@ -1299,7 +1420,7 @@ function jobDetail(job, c) {
   const subtractionsHtml = (job.subtractions||[]).map((a,i) => {
     const st = a.status||'pending';
     return `<div class="line-item">
-      <div class="line-item-label">${esc(a.label||'Subtraction')}${a.date?`<span style="font-size:14px;color:var(--text3);margin-left:6px">${fmtDate(a.date)}</span>`:''}</div>
+      <div class="line-item-label">${esc(a.label||'Subtraction')}${partialTag(a)}${a.date?`<span style="font-size:14px;color:var(--text3);margin-left:6px">${fmtDate(a.date)}</span>`:''}</div>
       <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
         <div class="line-item-value red">-${fmt(a.amount)}</div>
         ${badgeHtml(st,job.id,'subtractions',i)}
@@ -1309,12 +1430,49 @@ function jobDetail(job, c) {
     </div>`;
   }).join('');
 
-  const addOnsHtml = (job.addOns||[]).map((a,i) => {
-    const st = a.status||'pending';
+  const addOnEntries = (job.addOns || []).map((a, i) => ({ a, i }));
+  const renderedAddOnGroups = new Set();
+  const addOnsHtml = addOnEntries.map(({ a, i }) => {
+    const groupId = a.partialGroupId || '';
+    if (groupId && renderedAddOnGroups.has(groupId)) return '';
+    if (groupId) {
+      renderedAddOnGroups.add(groupId);
+      const group = addOnEntries.filter(x => x.a.partialGroupId === groupId);
+      const parentLabel = group[0]?.a.partialParentLabel || group[0]?.a.label || 'Addition';
+      const rawParentAmt = Number(group[0]?.a.partialParentAmount || 0);
+      const parentAmt = _roundMoney(rawParentAmt > 0 ? rawParentAmt : group.reduce((sum, x) => sum + Number(x.a.amount || 0), 0));
+      const splitHint = partialSplitHint(group[0]?.a);
+      const childrenHtml = group.map(({ a: ga, i: gi }) => {
+        const st = ga.status || 'pending';
+        const childTag = partialTag(ga);
+        return `<div class="line-item" style="padding-left:16px">
+          <div class="line-item-label" style="display:flex;align-items:center;gap:6px">
+            <span style="color:var(--text3)">&#8627;</span>${childTag || '<span class="tag tag-his">Partial</span>'}
+          </div>
+          <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
+            <div class="line-item-value ${st==='collected' ? 'green' : 'dim'}">${fmt(ga.amount)}</div>
+            ${badgeHtml(st,job.id,'addOns',gi)}
+            <button class="btn btn-ghost btn-sm admin-only" onclick="openAddItem('${job.id}','addon','${ga.id}')">✏</button>
+            <button class="btn btn-danger btn-sm admin-only" onclick="removeItem('${job.id}','addOns',${gi})">DEL</button>
+          </div>
+        </div>`;
+      }).join('');
+      return `<div class="line-item">
+        <div class="line-item-label">${esc(parentLabel)}${splitHint}</div>
+        <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
+          <div class="line-item-value dim">${fmt(parentAmt)}</div>
+        </div>
+      </div>${childrenHtml}`;
+    }
+    const st = a.status || 'pending';
+    const tag = partialTag(a);
     return `<div class="line-item">
-      <div class="line-item-label">${esc(a.label||'Addition')}${a.date?`<span style="font-size:14px;color:var(--text3);margin-left:6px">${fmtDate(a.date)}</span>`:''}</div>
+      <div class="line-item-label" style="display:flex;flex-direction:column;gap:4px">
+        <span>${esc(a.label || 'Addition')}${a.date ? `<span style="font-size:14px;color:var(--text3);margin-left:6px">${fmtDate(a.date)}</span>` : ''}</span>
+        ${tag ? `<span>${tag}</span>` : ''}
+      </div>
       <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
-        <div class="line-item-value ${st==='collected'?'green':'dim'}">${fmt(a.amount)}</div>
+        <div class="line-item-value ${st==='collected' ? 'green' : 'dim'}">${fmt(a.amount)}</div>
         ${badgeHtml(st,job.id,'addOns',i)}
         <button class="btn btn-ghost btn-sm admin-only" onclick="openAddItem('${job.id}','addon','${a.id}')">✏</button>
         <button class="btn btn-danger btn-sm admin-only" onclick="removeItem('${job.id}','addOns',${i})">DEL</button>
@@ -1322,6 +1480,31 @@ function jobDetail(job, c) {
     </div>`;
   }).join('');
 
+  const partialHistoryHtml = (job.partialCollections || []).length
+    ? `<div style="margin-top:10px;border-top:1px dashed var(--border);padding-top:10px">
+        <div style="font-family:var(--mono);font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--text3);margin-bottom:6px">Partial Payments</div>
+        ${(job.partialCollections || []).slice().reverse().map((p, revIdx) => {
+          const isLatest = revIdx === 0;
+          const modeTxt = p.mode === 'percent' ? `${fmtPctDisplay(p.partialPercent || 0)}%` : 'Dollar';
+          return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+            <div style="min-width:0">
+              <div style="font-size:14px">${fmt(p.paymentTotal || 0)} <span style="font-size:12px;color:var(--text3)">(${modeTxt})</span></div>
+              <div style="font-size:12px;color:var(--text3)">${fmtDate(p.date) || p.date || ''}${p.note ? ` - ${esc(p.note)}` : ''}</div>
+            </div>
+            <div class="admin-only" style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+              <button class="btn btn-ghost btn-sm" onclick="editPartialCollection('${job.id}','${p.id}')" ${isLatest ? '' : 'disabled'}>Edit</button>
+              <button class="btn btn-danger btn-sm" onclick="deletePartialCollection('${job.id}','${p.id}')" ${isLatest ? '' : 'disabled'}>DEL</button>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`
+    : '';
+  const legacyPartialHtml = hasLegacyPartial
+    ? `<div style="margin-top:10px;border-top:1px dashed var(--border);padding-top:10px">
+        <div style="font-size:13px;color:var(--text3);margin-bottom:8px">Legacy partial payment detected (created before edit history support).</div>
+        <button class="btn btn-ghost btn-sm admin-only" onclick="rebuildLegacyPartial('${job.id}')">Rebuild Legacy Partial</button>
+      </div>`
+    : '';
   const matsHtml = (job.materials||[]).map((m,i) => `
     <div class="line-item">
       <div class="line-item-label">${esc(m.label||'Materials')}<span class="tag ${m.who==='owner'?'tag-mine':'tag-his'}">${m.who==='owner'?'EHS':en}</span></div>
@@ -1348,9 +1531,14 @@ function jobDetail(job, c) {
     <div class="detail-grid">
 
       <div class="detail-section">
-        <div class="detail-section-title">Revenue</div>
+        <div class="detail-section-header" style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+          <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Revenue</div>
+          <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openPartialCollect('${job.id}')">+</button>
+        </div>
         <div class="line-item line-item-simple mobile-base-quote-row"><div class="line-item-label">Base Quote</div><div class="line-item-value">${fmt(job.quote)}</div></div>
         ${milestonesHtml}
+        ${partialHistoryHtml}
+        ${legacyPartialHtml}
       </div>
 
       <div class="detail-section">
@@ -1635,6 +1823,577 @@ async function saveSplitPay() {
   }
 }
 
+// ─── PARTIAL COLLECTION (JOBS) ───────────────────────────────────────────────
+function _roundMoney(n) { return Math.round((Number(n) + Number.EPSILON) * 100) / 100; }
+function _roundPct(n) { return Math.round((Number(n) + Number.EPSILON) * 1000000) / 1000000; }
+function _clearSquareFields(item) {
+  if (!item || typeof item !== 'object') return;
+  item.squareInvoiceId = '';
+  item.squareOrderId = '';
+  item.squarePaymentIds = [];
+  item.billingState = 'none';
+  item.reconcileStatus = 'none';
+  item.lastSquareEventAt = '';
+  item.partialPaidAmountCents = 0;
+}
+function _setPartialAutoSubUI() {
+  const track = document.getElementById('pc_autoTrack');
+  const thumb = document.getElementById('pc_autoThumb');
+  const on = partialCollectCtx?.autoSub !== false;
+  if (track) {
+    track.dataset.on = on ? 'true' : 'false';
+    track.style.background = on ? 'var(--accent)' : 'var(--border2)';
+  }
+  if (thumb) thumb.style.transform = on ? 'translateX(18px)' : 'translateX(0)';
+}
+function _buildPartialCollectCtx(jobId) {
+  const job = state.jobs.find(j => j.id === jobId);
+  if (!job) return null;
+  const rows = [];
+  (job.milestones || []).forEach((m, idx) => {
+    if ((m.status || 'pending') === 'collected') return;
+    const gross = _roundMoney(((m.pct || 0) / 100) * (job.quote || 0));
+    if (gross <= 0) return;
+    rows.push({
+      key: `milestones:${idx}`,
+      itemType: 'milestones',
+      idx,
+      label: m.label || `Milestone ${idx + 1}`,
+      gross,
+      assignedSub: 0,
+      net: gross,
+      alloc: 0,
+      included: false
+    });
+  });
+  (job.addOns || []).forEach((a, idx) => {
+    if ((a.status || 'pending') === 'collected') return;
+    const gross = _roundMoney(a.amount || 0);
+    if (gross <= 0) return;
+    rows.push({
+      key: `addOns:${idx}`,
+      itemType: 'addOns',
+      idx,
+      label: a.label || `Addition ${idx + 1}`,
+      gross,
+      assignedSub: 0,
+      net: gross,
+      alloc: 0,
+      included: false
+    });
+  });
+  const subtractions = [];
+  (job.subtractions || []).forEach((s, idx) => {
+    if ((s.status || 'pending') === 'collected') return;
+    const amt = _roundMoney(s.amount || 0);
+    if (amt <= 0) return;
+    subtractions.push({ idx, amount: amt });
+  });
+  const totalGross = _roundMoney(rows.reduce((sum, r) => sum + r.gross, 0));
+  const totalSub = _roundMoney(subtractions.reduce((sum, s) => sum + s.amount, 0));
+  return { jobId, rows, subtractions, totalGross, totalSub, totalNet: totalGross, unassignedSub: 0, autoSub: true };
+}
+function _hydratePartialRows(ctx) {
+  if (!ctx) return null;
+  const rows = (ctx.rows || []).map(r => ({
+    ...r,
+    gross: _roundMoney(r.gross || 0),
+    alloc: _roundMoney(Math.max(0, Number(r.alloc || 0))),
+    included: !!r.included,
+    assignedSub: 0,
+    net: _roundMoney(r.gross || 0)
+  }));
+  let remSub = ctx.autoSub ? _roundMoney(ctx.totalSub || 0) : 0;
+  rows.forEach(r => {
+    if (r.itemType !== 'milestones' || remSub <= 0) return;
+    const assign = _roundMoney(Math.min(remSub, r.gross));
+    r.assignedSub = assign;
+    r.net = _roundMoney(r.gross - assign);
+    remSub = _roundMoney(remSub - assign);
+  });
+  rows.forEach(r => {
+    if (r.itemType !== 'milestones') r.net = r.gross;
+    if (r.alloc > r.net) r.alloc = r.net;
+  });
+  const totalNet = _roundMoney(rows.reduce((sum, r) => sum + r.net, 0));
+  return { ...ctx, rows, totalNet, unassignedSub: remSub };
+}
+function _applyPartialPreset(ctx, preset) {
+  if (!ctx || !preset) return ctx;
+  const byKey = preset.presetByKey || {};
+  const rows = (ctx.rows || []).map(r => {
+    const p = byKey[r.key] || {};
+    return { ...r, included: !!p.included, alloc: _roundMoney(Math.max(0, Number(p.alloc || 0))) };
+  });
+  return { ...ctx, rows, autoSub: preset.autoSub !== false };
+}
+function openPartialCollect(jobId, preset = null) {
+  if (!currentUser?.isAdmin) return;
+  const ctx = _buildPartialCollectCtx(jobId);
+  if (!ctx || !ctx.rows.length) {
+    showAlert('No pending milestones or additions to collect.');
+    return;
+  }
+  partialCollectCtx = _hydratePartialRows(_applyPartialPreset(ctx, preset));
+  document.getElementById('pc_mode').value = preset?.mode || 'dollar';
+  document.getElementById('pc_total').value = preset?.mode === 'dollar' ? (preset?.paymentTotal || '') : '';
+  document.getElementById('pc_percent').value = preset?.mode === 'percent' ? (preset?.partialPercent || '') : '';
+  document.getElementById('pc_date').value = preset?.date || today();
+  document.getElementById('pc_note').value = preset?.note || '';
+  _setPartialAutoSubUI();
+  renderPartialCollectRows();
+  document.getElementById('partialCollectModal').classList.remove('hidden');
+}
+function _renderIncludeToggle(rowIdx) {
+  const track = document.getElementById(`pc_inc_track_${rowIdx}`);
+  const thumb = document.getElementById(`pc_inc_thumb_${rowIdx}`);
+  const txt = document.getElementById(`pc_inc_txt_${rowIdx}`);
+  const row = partialCollectCtx?.rows?.[rowIdx];
+  if (!track || !thumb || !txt || !row) return;
+  const on = !!row.included;
+  track.style.background = on ? 'var(--accent)' : 'var(--border2)';
+  thumb.style.transform = on ? 'translateX(18px)' : 'translateX(0)';
+  txt.textContent = on ? 'Included' : 'Excluded';
+}
+function renderPartialCollectRows() {
+  if (!partialCollectCtx) return;
+  partialCollectCtx = _hydratePartialRows(partialCollectCtx);
+  _setPartialAutoSubUI();
+  const mode = document.getElementById('pc_mode')?.value || 'dollar';
+  const listEl = document.getElementById('pc_list');
+  const infoEl = document.getElementById('pc_subInfo');
+  if (infoEl) {
+    infoEl.innerHTML = `
+      <span>Pending milestones/additions: <strong>${fmt(partialCollectCtx.totalGross)}</strong></span>
+      <span>Pending subtractions: <strong style="color:var(--red)">-${fmt(partialCollectCtx.totalSub)}</strong></span>
+      <span>Net due base: <strong style="color:var(--accent)">${fmt(partialCollectCtx.totalNet)}</strong></span>
+      ${partialCollectCtx.autoSub && partialCollectCtx.unassignedSub > 0.01 ? `<span style="color:var(--red)">Unassigned subtraction overflow: ${fmt(partialCollectCtx.unassignedSub)}</span>` : ''}`;
+  }
+  const rowsHtml = partialCollectCtx.rows.map((r, i) => {
+    const typeLabel = r.itemType === 'milestones' ? 'Milestone' : 'Addition';
+    const milestoneSub = r.itemType === 'milestones' && partialCollectCtx.autoSub && r.assignedSub > 0
+      ? ` · after ${fmt(r.assignedSub)} subtractions`
+      : '';
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:16px;font-weight:500">${esc(r.label)}</div>
+        <div style="font-family:var(--mono);font-size:12px">${typeLabel} · due ${fmt(r.net)}${milestoneSub}</div>
+      </div>
+      <div class="pc-dollar-controls" style="display:${mode==='dollar'?'flex':'none'};align-items:center;gap:8px;flex-shrink:0">
+        <button class="btn btn-ghost btn-sm" onclick="partialCollectMax(${i})">Max</button>
+        <input class="form-input pc-alloc-input" id="pc_alloc_${i}" type="number" step="0.01" placeholder="0.00" value="${r.alloc > 0 ? r.alloc.toFixed(2) : ''}" style="max-width:110px" oninput="setPartialAlloc(${i}, this.value)" />
+      </div>
+      <div class="pc-percent-controls" style="display:${mode==='percent'?'flex':'none'};align-items:center;gap:8px;flex-shrink:0">
+        <div style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none" onclick="togglePartialInclude(${i})">
+          <span id="pc_inc_txt_${i}" style="display:inline-block;min-width:70px;text-align:right;font-family:var(--mono);font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.08em">${r.included ? 'Included' : 'Excluded'}</span>
+          <span id="pc_inc_track_${i}" style="display:inline-flex;align-items:center;width:40px;height:22px;border-radius:11px;background:${r.included ? 'var(--accent)' : 'var(--border2)'};transition:background 0.2s;cursor:pointer;flex-shrink:0;padding:2px;box-sizing:border-box">
+            <span id="pc_inc_thumb_${i}" style="width:18px;height:18px;border-radius:50%;background:#fff;transition:transform 0.2s;display:block;transform:${r.included ? 'translateX(18px)' : 'translateX(0)'}"></span>
+          </span>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  listEl.innerHTML = rowsHtml || '<div style="color:var(--text3);font-size:16px;padding:8px 0">No pending items.</div>';
+  updatePartialCollectTotals();
+}
+function setPartialAlloc(rowIdx, value) {
+  if (!partialCollectCtx?.rows?.[rowIdx]) return;
+  const v = _roundMoney(Math.max(0, parseFloat(value) || 0));
+  partialCollectCtx.rows[rowIdx].alloc = v;
+  updatePartialCollectTotals();
+}
+function togglePartialInclude(rowIdx) {
+  if (!partialCollectCtx?.rows?.[rowIdx]) return;
+  partialCollectCtx.rows[rowIdx].included = !partialCollectCtx.rows[rowIdx].included;
+  _renderIncludeToggle(rowIdx);
+  updatePartialCollectTotals();
+}
+function onPartialModeChange() {
+  renderPartialCollectRows();
+}
+function togglePartialAutoSubtractions() {
+  if (!partialCollectCtx) return;
+  partialCollectCtx.autoSub = !partialCollectCtx.autoSub;
+  renderPartialCollectRows();
+}
+function partialCollectMax(rowIdx) {
+  if (!partialCollectCtx?.rows?.[rowIdx]) return;
+  partialCollectCtx = _hydratePartialRows(partialCollectCtx);
+  const total = parseFloat(document.getElementById('pc_total')?.value) || 0;
+  const row = partialCollectCtx.rows[rowIdx];
+  let other = 0;
+  partialCollectCtx.rows.forEach((r, i) => { if (i !== rowIdx) other += Number(r.alloc || 0); });
+  const cap = Math.max(0, _roundMoney(total - other));
+  const target = Math.max(0, Math.min(row.net, cap));
+  row.alloc = _roundMoney(target);
+  const el = document.getElementById(`pc_alloc_${rowIdx}`);
+  if (el) el.value = row.alloc > 0 ? row.alloc.toFixed(2) : '';
+  updatePartialCollectTotals();
+}
+function _getPartialCollectPlan() {
+  if (!partialCollectCtx) return null;
+  partialCollectCtx = _hydratePartialRows(partialCollectCtx);
+  const mode = document.getElementById('pc_mode')?.value || 'dollar';
+  const allocs = [];
+  let paymentTotal = 0;
+  let allocatedNet = 0;
+  let selectedNetBase = 0;
+  if (mode === 'dollar') {
+    paymentTotal = _roundMoney(parseFloat(document.getElementById('pc_total')?.value) || 0);
+    partialCollectCtx.rows.forEach((r, i) => {
+      const net = _roundMoney(Math.max(0, Math.min(r.net, Number(r.alloc || 0))));
+      if (net <= 0) return;
+      const milestoneSub = partialCollectCtx.autoSub && r.itemType === 'milestones' ? _roundMoney(r.assignedSub || 0) : 0;
+      const gross = _roundMoney(Math.min(r.gross, net + milestoneSub));
+      const subCollect = _roundMoney(Math.max(0, gross - net));
+      allocs.push({ rowIdx: i, net, gross, subCollect });
+      allocatedNet += net;
+    });
+  } else {
+    const pct = Math.max(0, Math.min(100, parseFloat(document.getElementById('pc_percent')?.value) || 0));
+    partialCollectCtx.rows.forEach((r, i) => {
+      if (!r.included) return;
+      selectedNetBase += r.net;
+      const ratio = pct / 100;
+      const net = _roundMoney(r.net * ratio);
+      const milestoneSub = partialCollectCtx.autoSub && r.itemType === 'milestones' ? _roundMoney(r.assignedSub || 0) : 0;
+      const gross = _roundMoney(Math.min(r.gross, net + milestoneSub));
+      if (net <= 0 && gross <= 0) return;
+      const subCollect = _roundMoney(Math.max(0, gross - net));
+      allocs.push({ rowIdx: i, net, gross, subCollect });
+      allocatedNet += net;
+    });
+    paymentTotal = _roundMoney(selectedNetBase * (pct / 100));
+  }
+  const grossTotal = _roundMoney(allocs.reduce((sum, a) => sum + a.gross, 0));
+  const subCollectedTotal = partialCollectCtx?.autoSub
+    ? _roundMoney(Math.min(
+        partialCollectCtx.totalSub || 0,
+        allocs.reduce((sum, a) => sum + (a.subCollect || 0), 0)
+      ))
+    : 0;
+  return {
+    mode,
+    paymentTotal,
+    allocatedNet: _roundMoney(allocatedNet),
+    remaining: _roundMoney(paymentTotal - allocatedNet),
+    selectedNetBase: _roundMoney(selectedNetBase),
+    allocs,
+    grossTotal,
+    subCollectedTotal
+  };
+}
+function updatePartialCollectTotals() {
+  const plan = _getPartialCollectPlan();
+  const mode = document.getElementById('pc_mode')?.value || 'dollar';
+  const totalsEl = document.getElementById('pc_totals');
+  const dollarWrap = document.getElementById('pc_dollar_wrap');
+  const percentWrap = document.getElementById('pc_percent_wrap');
+  if (dollarWrap) dollarWrap.style.display = mode === 'dollar' ? '' : 'none';
+  if (percentWrap) percentWrap.style.display = mode === 'percent' ? '' : 'none';
+  document.querySelectorAll('.pc-dollar-controls').forEach(el => { el.style.display = mode === 'dollar' ? 'flex' : 'none'; });
+  document.querySelectorAll('.pc-percent-controls').forEach(el => { el.style.display = mode === 'percent' ? 'flex' : 'none'; });
+  if (!totalsEl || !plan) return;
+  if (mode === 'dollar') {
+    const remColor = Math.abs(plan.remaining) < 0.01 ? 'var(--green)' : plan.remaining < 0 ? 'var(--red)' : 'var(--accent)';
+    totalsEl.innerHTML = `
+      <span>Payment <strong>${fmt(plan.paymentTotal)}</strong></span>
+      <span>Allocated <strong style="color:var(--green)">${fmt(plan.allocatedNet)}</strong></span>
+      <span>Remaining <strong style="color:${remColor}">${fmt(plan.remaining)}</strong></span>
+      ${partialCollectCtx?.autoSub ? `<span>Subtractions consumed in this payment <strong style="color:var(--red)">-${fmt(plan.subCollectedTotal)}</strong></span>` : ''}`;
+  } else {
+    const pct = Math.max(0, Math.min(100, parseFloat(document.getElementById('pc_percent')?.value) || 0));
+    totalsEl.innerHTML = `
+      <span>Selected Net Base <strong>${fmt(plan.selectedNetBase)}</strong></span>
+      <span>Collect % <strong>${pct.toFixed(2)}%</strong></span>
+      <span>Total Payment Amount <strong style="color:var(--green)">${fmt(plan.paymentTotal)}</strong></span>
+      ${partialCollectCtx?.autoSub ? `<span>Subtractions consumed in this payment <strong style="color:var(--red)">-${fmt(plan.subCollectedTotal)}</strong></span>` : ''}`;
+  }
+}
+function _distributeSubtractionCollection(subRows, targetAmount) {
+  const out = [];
+  let rem = _roundMoney(targetAmount);
+  for (let i = 0; i < subRows.length && rem > 0.0001; i++) {
+    const avail = _roundMoney(subRows[i].amount || 0);
+    if (avail <= 0) continue;
+    const take = _roundMoney(Math.min(avail, rem));
+    if (take > 0) out.push({ idx: subRows[i].idx, amount: take });
+    rem = _roundMoney(rem - take);
+  }
+  return out;
+}
+function _applyPartialToAmountList(list, idx, collectAmt, meta = {}) {
+  const item = list?.[idx];
+  if (!item) return;
+  const total = _roundMoney(item.amount || 0);
+  const take = _roundMoney(Math.max(0, Math.min(total, collectAmt)));
+  if (take <= 0) return;
+  if (take >= total - 0.0001) {
+    item.status = 'collected';
+    item.partialState = '';
+    if (meta.appliedByPartial) item.appliedByPartial = true;
+    if (meta.partialMode) {
+      item.partialMode = meta.partialMode;
+      item.partialPercent = meta.partialPercent || 0;
+      item.partialDate = meta.partialDate || item.partialDate || '';
+    }
+    return;
+  }
+  const baseGroup = item.partialGroupId || item.id || uid();
+  const parentAmount = item.partialParentAmount ?? total;
+  const parentLabel = item.partialParentLabel || item.label || '';
+  const remainingAmt = _roundMoney(total - take);
+  const remaining = {
+    ...item,
+    amount: remainingAmt,
+    status: 'pending',
+    partialState: 'remaining',
+    partialGroupId: baseGroup,
+    partialParentAmount: parentAmount,
+    partialParentLabel: parentLabel,
+    partialMode: meta.partialMode || item.partialMode || '',
+    partialPercent: meta.partialPercent || item.partialPercent || 0,
+    partialDate: meta.partialDate || item.partialDate || '',
+    appliedByPartial: !!meta.appliedByPartial
+  };
+  const collected = {
+    ...item,
+    id: uid(),
+    amount: take,
+    status: 'collected',
+    partialState: 'paid',
+    partialGroupId: baseGroup,
+    partialParentAmount: parentAmount,
+    partialParentLabel: parentLabel,
+    partialMode: meta.partialMode || item.partialMode || '',
+    partialPercent: meta.partialPercent || item.partialPercent || 0,
+    partialDate: meta.partialDate || item.partialDate || '',
+    appliedByPartial: !!meta.appliedByPartial
+  };
+  _clearSquareFields(remaining);
+  _clearSquareFields(collected);
+  list.splice(idx, 1, collected, remaining);
+}
+function _applyPartialToMilestones(job, idx, collectAmt, meta = {}) {
+  const list = job?.milestones || [];
+  const item = list[idx];
+  if (!item) return;
+  const quote = Number(job.quote || 0);
+  if (quote <= 0) return;
+  const total = _roundMoney(((item.pct || 0) / 100) * quote);
+  const take = _roundMoney(Math.max(0, Math.min(total, collectAmt)));
+  if (take <= 0) return;
+  if (take >= total - 0.0001) {
+    item.status = 'collected';
+    item.partialState = '';
+    if (!item.id) item.id = uid();
+    if (meta.partialMode) {
+      item.partialMode = meta.partialMode;
+      item.partialPercent = meta.partialPercent || 0;
+      item.partialDate = meta.partialDate || item.partialDate || '';
+    }
+    return;
+  }
+  const takePct = _roundPct((take / quote) * 100);
+  const remPct = _roundPct((item.pct || 0) - takePct);
+  if (takePct <= 0 || remPct <= 0) {
+    item.status = 'collected';
+    item.partialState = '';
+    if (!item.id) item.id = uid();
+    return;
+  }
+  const baseId = item.partialGroupId || item.id || uid();
+  const parentLabel = item.partialParentLabel || item.label || '';
+  const parentPct = item.partialParentPct ?? (item.pct || 0);
+  const remaining = {
+    ...item,
+    id: item.id || uid(),
+    pct: remPct,
+    status: 'pending',
+    partialState: 'remaining',
+    partialGroupId: baseId,
+    partialParentLabel: parentLabel,
+    partialParentPct: parentPct,
+    partialMode: meta.partialMode || item.partialMode || '',
+    partialPercent: meta.partialPercent || item.partialPercent || 0,
+    partialDate: meta.partialDate || item.partialDate || ''
+  };
+  const collected = {
+    ...item,
+    id: uid(),
+    pct: takePct,
+    status: 'collected',
+    partialState: 'paid',
+    partialGroupId: baseId,
+    partialParentLabel: parentLabel,
+    partialParentPct: parentPct,
+    partialMode: meta.partialMode || item.partialMode || '',
+    partialPercent: meta.partialPercent || item.partialPercent || 0,
+    partialDate: meta.partialDate || item.partialDate || ''
+  };
+  _clearSquareFields(remaining);
+  _clearSquareFields(collected);
+  list.splice(idx, 1, collected, remaining);
+}
+function savePartialCollect() {
+  if (!partialCollectCtx) return;
+  const plan = _getPartialCollectPlan();
+  if (!plan) return;
+  const mode = plan.mode;
+  if (mode === 'dollar' && plan.paymentTotal <= 0) { showAlert('Please enter a payment amount.'); return; }
+  if (mode === 'percent') {
+    const pct = Math.max(0, Math.min(100, parseFloat(document.getElementById('pc_percent')?.value) || 0));
+    if (pct <= 0) { showAlert('Please enter a percentage greater than 0.'); return; }
+  }
+  if (!plan.allocs.length) { showAlert('Please allocate/include at least one line item.'); return; }
+  const job = state.jobs.find(j => j.id === partialCollectCtx.jobId);
+  if (!job) return;
+  const date = document.getElementById('pc_date')?.value || today();
+  const note = (document.getElementById('pc_note')?.value || '').trim();
+  const partialPercent = mode === 'percent'
+    ? Math.max(0, Math.min(100, parseFloat(document.getElementById('pc_percent')?.value) || 0))
+    : 0;
+  const persist = () => {
+    const before = {
+      milestones: JSON.parse(JSON.stringify(job.milestones || [])),
+      addOns: JSON.parse(JSON.stringify(job.addOns || [])),
+      subtractions: JSON.parse(JSON.stringify(job.subtractions || []))
+    };
+    const byType = { milestones: [], addOns: [] };
+    plan.allocs.forEach(a => {
+      const row = partialCollectCtx.rows[a.rowIdx];
+      if (!row) return;
+      byType[row.itemType].push({ idx: row.idx, gross: a.gross });
+    });
+    byType.milestones.sort((a,b) => b.idx - a.idx).forEach(a =>
+      _applyPartialToMilestones(job, a.idx, a.gross, { partialMode: mode, partialPercent, partialDate: date })
+    );
+    byType.addOns.sort((a,b) => b.idx - a.idx).forEach(a =>
+      _applyPartialToAmountList(job.addOns, a.idx, a.gross, { partialMode: mode, partialPercent, partialDate: date })
+    );
+    if (partialCollectCtx.autoSub && plan.subCollectedTotal > 0.0001) {
+      const subAlloc = _distributeSubtractionCollection(partialCollectCtx.subtractions, plan.subCollectedTotal);
+      subAlloc.sort((a,b) => b.idx - a.idx).forEach(a =>
+        _applyPartialToAmountList(job.subtractions, a.idx, a.amount, { appliedByPartial: true })
+      );
+    }
+    if (!job.partialCollections) job.partialCollections = [];
+    const presetByKey = {};
+    partialCollectCtx.rows.forEach(r => {
+      presetByKey[r.key] = { included: !!r.included, alloc: Number(r.alloc || 0) };
+    });
+    job.partialCollections.push({
+      id: uid(),
+      date,
+      note,
+      mode,
+      partialPercent,
+      paymentTotal: plan.paymentTotal,
+      autoSub: !!partialCollectCtx.autoSub,
+      presetByKey,
+      snapshotBefore: before,
+      createdAt: new Date().toISOString()
+    });
+    if (!job.jobNotes) job.jobNotes = [];
+    const summary = note || `Partial collection logged: ${fmt(plan.paymentTotal)} on ${date}.`;
+    job.jobNotes.push({ id: uid(), text: summary, date, authorId: currentUser?.id || '', authorName: currentUser?.name || 'Admin' });
+    save(); renderJobs(); closeModal('partialCollectModal');
+    partialCollectCtx = null;
+  };
+  if (mode === 'dollar' && Math.abs(plan.remaining) > 0.01) {
+    showConfirm(`${fmt(Math.abs(plan.remaining))} is ${plan.remaining > 0 ? 'unallocated' : 'over-allocated'}. Save anyway?`, persist);
+    return;
+  }
+  persist();
+}
+
+function deletePartialCollection(jobId, partialId) {
+  const job = state.jobs.find(j => j.id === jobId);
+  if (!job) return;
+  const arr = job.partialCollections || [];
+  const idx = arr.findIndex(p => p.id === partialId);
+  if (idx < 0) return;
+  if (idx !== arr.length - 1) {
+    showAlert('Only the most recent partial payment can be deleted (to protect later calculations).');
+    return;
+  }
+  const entry = arr[idx];
+  showConfirm('Delete this partial payment and restore the prior line items?', () => {
+    const snap = entry.snapshotBefore || {};
+    job.milestones = JSON.parse(JSON.stringify(snap.milestones || []));
+    job.addOns = JSON.parse(JSON.stringify(snap.addOns || []));
+    job.subtractions = JSON.parse(JSON.stringify(snap.subtractions || []));
+    job.partialCollections = arr.filter(p => p.id !== partialId);
+    save(); renderJobs();
+  }, { title:'Delete Partial Payment', okLabel:'Delete', danger:true });
+}
+
+function editPartialCollection(jobId, partialId) {
+  const job = state.jobs.find(j => j.id === jobId);
+  if (!job) return;
+  const arr = job.partialCollections || [];
+  const idx = arr.findIndex(p => p.id === partialId);
+  if (idx < 0) return;
+  if (idx !== arr.length - 1) {
+    showAlert('Only the most recent partial payment can be edited (to protect later calculations).');
+    return;
+  }
+  const entry = arr[idx];
+  const snap = entry.snapshotBefore || {};
+  job.milestones = JSON.parse(JSON.stringify(snap.milestones || []));
+  job.addOns = JSON.parse(JSON.stringify(snap.addOns || []));
+  job.subtractions = JSON.parse(JSON.stringify(snap.subtractions || []));
+  job.partialCollections = arr.filter(p => p.id !== partialId);
+  save();
+  openPartialCollect(jobId, {
+    mode: entry.mode || 'dollar',
+    partialPercent: Number(entry.partialPercent || 0),
+    paymentTotal: Number(entry.paymentTotal || 0),
+    date: entry.date || today(),
+    note: entry.note || '',
+    autoSub: entry.autoSub !== false,
+    presetByKey: entry.presetByKey || {}
+  });
+}
+
+
+function rebuildLegacyPartial(jobId) {
+  const job = state.jobs.find(j => j.id === jobId);
+  if (!job) return;
+  showConfirm('Rebuild legacy partial into a clean baseline so you can re-run partial collection?', () => {
+    const collapseAmountList = (arr) => {
+      const out = [];
+      const byLabel = new Map();
+      (arr || []).forEach(item => {
+        if (!item?.partialState) { out.push({ ...item, appliedByPartial: false }); return; }
+        const key = String(item.partialParentLabel || item.label || 'Item');
+        if (!byLabel.has(key)) byLabel.set(key, { ...item, id: uid(), label: key, amount: 0, status: 'pending', partialState: '', appliedByPartial: false, partialGroupId: '', partialParentAmount: 0, partialParentLabel: '' });
+        const g = byLabel.get(key);
+        g.amount = _roundMoney((g.amount || 0) + (item.amount || 0));
+      });
+      byLabel.forEach(v => out.push(v));
+      return out;
+    };
+    const collapseMilestones = () => {
+      const out = [];
+      const byLabel = new Map();
+      (job.milestones || []).forEach(item => {
+        if (!item?.partialState) { out.push({ ...item, partialGroupId: '', partialParentLabel: '', partialParentPct: 0, partialMode: '', partialPercent: 0 }); return; }
+        const key = String(item.partialParentLabel || item.label || 'Milestone');
+        if (!byLabel.has(key)) byLabel.set(key, { ...item, id: uid(), label: key, pct: 0, status: 'pending', partialState: '', partialGroupId: '', partialParentLabel: '', partialParentPct: 0, partialMode: '', partialPercent: 0 });
+        const g = byLabel.get(key);
+        g.pct = _roundPct((g.pct || 0) + (item.pct || 0));
+      });
+      byLabel.forEach(v => out.push(v));
+      return out;
+    };
+    job.milestones = collapseMilestones();
+    job.addOns = collapseAmountList(job.addOns || []);
+    job.subtractions = collapseAmountList(job.subtractions || []).map(s => ({ ...s, status: 'pending' }));
+    job.partialCollections = [];
+    save(); renderJobs();
+  }, { title:'Rebuild Legacy Partial', okLabel:'Rebuild', danger:true });
+}
 function toggleRepayment(id) {
   const j = state.jobs.find(j=>j.id===id);
   if (!j) return;
@@ -1650,8 +2409,15 @@ function cycleStatus(jobId, itemType, idx) {
   const job = state.jobs.find(j=>j.id===jobId);
   if (!job||!job[itemType]||!job[itemType][idx]) return;
   const item = job[itemType][idx];
+  if (itemType === 'subtractions' && item.appliedByPartial) {
+    showAlert('This subtraction was applied by a partial payment and is locked from manual status changes.');
+    return;
+  }
   if (item.status === 'collected') {
-    showConfirm('Mark this as Pending? This will remove it from collected revenue.', () => {
+    const msg = itemType === 'subtractions'
+      ? 'Mark this subtraction as Pending? This will remove it from applied adjustments.'
+      : 'Mark this as Pending? This will remove it from collected revenue.';
+    showConfirm(msg, () => {
       const cycle = { pending:'invoiced', invoiced:'collected', collected:'pending' };
       item.status = cycle[item.status||'pending'];
       save(); renderJobs();
@@ -1673,7 +2439,13 @@ function deleteJob(id) {
 }
 function removeItem(jobId, key, idx) {
   const j = state.jobs.find(j=>j.id===jobId);
-  if (j&&j[key]) { j[key].splice(idx,1); save(); renderJobs(); }
+  if (!j || !j[key]) return;
+  const item = j[key][idx];
+  if (key === 'subtractions' && item?.appliedByPartial) {
+    showAlert('This subtraction was applied by a partial payment and cannot be deleted.');
+    return;
+  }
+  j[key].splice(idx,1); save(); renderJobs();
 }
 
 // ─── NOTES ────────────────────────────────────────────────────────────────────
@@ -1864,6 +2636,30 @@ function setMilestoneMode(mode) {
     }
   }
 }
+function setJobFinancialEditLock(locked) {
+  const note = document.getElementById('jobFinancialLockNote');
+  if (note) note.style.display = locked ? '' : 'none';
+
+  const ids = ['f_itemized', 'f_quote', 'quoteAddItemBtn', 'ms_btn_single', 'ms_btn_default', 'ms_btn_custom', 'milestoneAddBtn'];
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = !!locked;
+  });
+
+  const lockRegion = document.getElementById('jobFinancialLockRegion');
+  if (lockRegion) {
+    lockRegion.style.opacity = locked ? '0.5' : '1';
+    lockRegion.style.filter = locked ? 'grayscale(0.2)' : 'none';
+  }
+
+  document.querySelectorAll('#quoteItemList input, #quoteItemList button').forEach(el => {
+    el.disabled = !!locked;
+  });
+  document.querySelectorAll('#milestoneList input, #milestoneList button').forEach(el => {
+    el.disabled = !!locked;
+  });
+}
+
 function openNewJobModal() {
   editingJobId = null;
   document.getElementById('jobModalTitle').textContent = 'New Job';
@@ -1877,6 +2673,7 @@ function openNewJobModal() {
   toggleItemizedQuote();
   setMilestoneMode('single');
   populateEmpDropdown('f_emp', 'f_emp_wrap', null);
+  setJobFinancialEditLock(false);
   document.getElementById('jobModal').classList.remove('hidden');
 }
 function editJob(id) {
@@ -1911,6 +2708,7 @@ function editJob(id) {
     (job.milestones||[]).forEach(m => addMilestoneField(m.label, m.pct));
   }
   populateEmpDropdown('f_emp', 'f_emp_wrap', job.employeeId);
+  setJobFinancialEditLock(hasPartialFinancialState(job));
   document.getElementById('jobModal').classList.remove('hidden');
 }
 let dmCount = 0;
@@ -1977,6 +2775,21 @@ function updateQuoteItemTotal() {
   const el = document.getElementById('quoteItemTotal');
   if (el) el.textContent = '$' + total.toFixed(2);
 }
+function hasPartialFinancialState(job) {
+  if (!job) return false;
+  if ((job.partialCollections || []).length) return true;
+  if ((job.milestones || []).some(m => m?.partialState || m?.partialGroupId || m?.partialMode || m?.partialDate)) return true;
+  if ((job.addOns || []).some(a => a?.partialState || a?.partialGroupId || a?.partialMode || a?.partialDate)) return true;
+  if ((job.subtractions || []).some(s => s?.partialState || s?.appliedByPartial)) return true;
+  return false;
+}
+function financialSignatureFromMilestones(list) {
+  return JSON.stringify((list || []).map(m => ({ label: String(m?.label || ''), pct: Number(m?.pct || 0) })));
+}
+function financialSignatureFromQuoteItems(list) {
+  return JSON.stringify((list || []).map(q => ({ label: String(q?.label || ''), amount: _roundMoney(Number(q?.amount || 0)) })));
+}
+
 function saveJob() {
   const name        = document.getElementById('f_name').value.trim();
   const contactName = document.getElementById('f_contact').value.trim();
@@ -2020,17 +2833,35 @@ function saveJob() {
   if (editingJobId) {
     const job = state.jobs.find(j=>j.id===editingJobId);
     if (job) {
-      job.name=name; job.contactName=contactName; job.quote=quote; job.date=date; job.isItemized=isItemized; job.quoteItems=quoteItems;
+      const partialLocked = hasPartialFinancialState(job);
+      if (partialLocked) {
+        const milestoneChanged = financialSignatureFromMilestones(milestones) !== financialSignatureFromMilestones(job.milestones || []);
+        const quoteChanged = _roundMoney(Number(quote || 0)) !== _roundMoney(Number(job.quote || 0));
+        const itemizedChanged = !!isItemized !== !!job.isItemized;
+        const quoteItemsChanged = financialSignatureFromQuoteItems(quoteItems) !== financialSignatureFromQuoteItems(job.quoteItems || []);
+        if (milestoneChanged || quoteChanged || itemizedChanged || quoteItemsChanged) {
+          showAlert('This job has partial-payment history. Quote and milestone edits are locked here to protect split calculations. Use Revenue > Partial Payments (Edit/Delete) first.');
+          return;
+        }
+      }
+      job.name = name;
+      job.contactName = contactName;
+      job.date = date;
       if (employeeId) job.employeeId = employeeId;
-      milestones.forEach((m,i)=>{ if(job.milestones[i]) m.status=job.milestones[i].status||'pending'; });
-      job.milestones=milestones;
+      if (!partialLocked) {
+        job.quote = quote;
+        job.isItemized = isItemized;
+        job.quoteItems = quoteItems;
+        milestones.forEach((m,i)=>{ if(job.milestones[i]) m.status=job.milestones[i].status||'pending'; });
+        job.milestones = milestones;
+      }
     }
   } else {
     const newId = uid();
     expandedJobs.add(newId);
     saveExpandedState();
     state.jobs.push({ id:newId, name, contactName, quote, date, isItemized, quoteItems, status:'active',
-      milestones, addOns:[], subtractions:[], materials:[], advances:[], fees:[], jobNotes:[], hours:[], repaymentMode:false,
+      milestones, addOns:[], subtractions:[], materials:[], advances:[], fees:[], jobNotes:[], hours:[], partialCollections:[], repaymentMode:false,
       employeeId: employeeId || '' });
   }
   save(); renderJobs(); closeModal('jobModal');
@@ -2105,12 +2936,27 @@ function openAddItem(jobId, type, itemId = null) {
   if (isEdit) {
     const arr = type==='addon' ? job?.addOns : type==='subtraction' ? job?.subtractions : type==='material' ? job?.materials : job?.advances;
     const item = arr?.find(x => x.id === itemId);
+    if (type === 'subtraction' && item?.appliedByPartial) {
+      showAlert('This subtraction was applied by a partial payment and is locked.');
+      return;
+    }
     if (item) {
       document.getElementById('ai_label').value = item.label || '';
       document.getElementById('ai_amount').value = item.amount || '';
       if (type==='addon'||type==='subtraction'||type==='advance') document.getElementById('ai_date').value = item.date || '';
       if (type==='material') document.getElementById('ai_who').value = item.who || 'owner';
       if (type==='advance') document.getElementById('ai_paytype').value = item.payType || '';
+      if (type === 'addon' && item.partialGroupId) {
+        const parentAmt = item.partialParentAmount || item.amount || 0;
+        const partLbl = item.partialState === 'remaining' ? 'Partial Left' : 'Partial Paid';
+        const el = document.createElement('div');
+        el.style.cssText = 'margin-top:10px;padding:10px 12px;border:1px solid var(--border2);border-radius:3px;background:var(--bg3);font-family:var(--mono);font-size:12px;color:var(--text2)';
+        el.innerHTML = `
+          <div style="margin-bottom:4px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3)">Split Breakdown</div>
+          <div>${partLbl}: <strong>${fmt(item.amount || 0)}</strong></div>
+          <div>Original addition: <strong>${fmt(parentAmt)}</strong></div>`;
+        document.getElementById('addItemForm').appendChild(el);
+      }
       if (type==='subtraction') {
         const sel = document.getElementById('ai_source');
         if (sel) {
@@ -2163,6 +3009,7 @@ function saveItem() {
     const sourceItemId = (!isManual && sourceEl?.value) ? sourceEl.value : null;
     if (itemId) {
       const item = job.subtractions.find(x=>x.id===itemId);
+      if (item?.appliedByPartial) { showAlert('This subtraction was applied by a partial payment and cannot be edited.'); return; }
       if (item) { item.label=label; item.amount=amount; item.date=date; item.sourceItemId=sourceItemId; }
     } else {
       job.subtractions.push({ id:uid(), label, amount, date, status:'pending', sourceItemId });
@@ -4013,3 +4860,14 @@ document.addEventListener('keydown', e => {
     redoAction();
   }
 });
+
+
+
+
+
+
+
+
+
+
+
