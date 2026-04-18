@@ -704,7 +704,7 @@
   <div class="modal settings-modal">
     <div class="settings-modal-header">
       <div class="modal-title">Settings</div>
-      <span style="font-family:var(--mono);font-size:12px;color:var(--text3);cursor:pointer;text-decoration:underline dotted" onclick="openChangelog()">v1.18</span>
+      <span style="font-family:var(--mono);font-size:12px;color:var(--text3);cursor:pointer;text-decoration:underline dotted" onclick="openChangelog()">v1.19</span>
     </div>
     <div class="settings-body">
       <div class="settings-nav-wrap">
@@ -1039,7 +1039,17 @@
     <div class="modal-title">Version History</div>
     <div style="font-family:var(--mono);font-size:13px;line-height:1.7;color:var(--text2)">
       <div style="margin-bottom:14px">
-        <div style="color:var(--accent);font-size:14px;margin-bottom:4px">v1.18 — Mar 2026</div>
+        <div style="color:var(--accent);font-size:14px;margin-bottom:4px">v1.19 — Apr 2026</div>
+        <div>· Partial Payments workflow (dollar + percentage based)</div>
+        <div>· Revenue + button moved to card header for faster access</div>
+        <div>· Split display cleanup: parent rows keep original value, child rows show Partial Paid / Partial Left</div>
+        <div>· Split hints now show partial percent and date (example: 90% partial - 04/10/2026)</div>
+        <div>· Subtractions applied via partial payments now lock and show as Applied</div>
+        <div>· Partial payment history now supports latest-only Edit/Delete with safety guardrails</div>
+        <div>· Edit Job now locks quote + payment structure once partial payments exist</div>
+      </div>
+      <div style="margin-bottom:14px">
+        <div style="color:var(--text3);font-size:14px;margin-bottom:4px">v1.18 — Mar 2026</div>
         <div>· Mobile-first settings modal — horizontal scrollable tab bar with scroll indicators</div>
         <div>· Settings footer static on all tabs (Sign Out · Close · Save always visible)</div>
         <div>· Employee rows simplified — badge below name, Reset PIN moved to Edit modal</div>
@@ -1381,6 +1391,7 @@
 <div id="undoToast">↩ Undo applied</div>
 </body>
 </html>
+
 
 
 
