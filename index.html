@@ -57,6 +57,14 @@
   .summary-value.orange { color: var(--accent); }
   .summary-value.red { color: var(--red); }
   .summary-sub { font-size: 15px; color: var(--text3); margin-top: 4px; font-family: var(--mono); }
+  .owed-breakdown { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .owed-breakdown-row { display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: 6px; }
+  .owed-breakdown-label { font-family: var(--mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text3); }
+  .owed-breakdown-amount { font-family: var(--mono); font-size: 15px; color: var(--text2); text-align: right; justify-self: end; min-width: 76px; }
+  .owed-toggle { display: inline-flex; align-items: center; width: 30px; height: 16px; border: 0; border-radius: 999px; background: var(--border2); padding: 2px; cursor: pointer; transition: background 0.15s ease; justify-self: end; }
+  .owed-toggle.on { background: var(--accent); }
+  .owed-toggle-thumb { width: 12px; height: 12px; border-radius: 50%; background: #fff; transform: translateX(0); transition: transform 0.15s ease; }
+  .owed-toggle.on .owed-toggle-thumb { transform: translateX(14px); }
 
   .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
   .section-title { font-family: var(--mono); font-size: 15px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--text3); }

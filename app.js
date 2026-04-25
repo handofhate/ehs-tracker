@@ -48,6 +48,16 @@ let calMonth = new Date().getMonth(); // 0-indexed
 let schedView = 'list'; // 'list' | 'month'
 let selectedCalDay = null;
 let selectedDayFilter = null; // mobile day-drill-down
+const OWED_INCLUDE_DEFAULTS = { jobs: true, homewatch: true, potential: true };
+
+function normalizeOwedInclude(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  return {
+    jobs: src.jobs !== undefined ? !!src.jobs : OWED_INCLUDE_DEFAULTS.jobs,
+    homewatch: src.homewatch !== undefined ? !!src.homewatch : OWED_INCLUDE_DEFAULTS.homewatch,
+    potential: src.potential !== undefined ? !!src.potential : OWED_INCLUDE_DEFAULTS.potential
+  };
+}
 
 // ─── PERSIST ─────────────────────────────────────────────────────────────────
 function migrateState(s) {
@@ -63,6 +73,7 @@ function migrateState(s) {
   if (!s.settings.square || typeof s.settings.square !== 'object') s.settings.square = {};
   if (s.settings.square.functionBaseUrl === undefined) s.settings.square.functionBaseUrl = '';
   if (s.settings.square.highValueConfirmAmount === undefined) s.settings.square.highValueConfirmAmount = 1000;
+  s.settings.owedSummaryInclude = normalizeOwedInclude(s.settings.owedSummaryInclude);
   if (!s.debtPayments) s.debtPayments = [];
   (s.debtPayments).forEach(p => {
     if (p.linkedJobId === undefined) p.linkedJobId = null;
@@ -932,13 +943,52 @@ function renderSummary() {
   const activeHW  = (state.homewatch||[]).filter(hw=>hw.status!=='paused');
   const pausedHW  = (state.homewatch||[]).filter(hw=>hw.status==='paused');
   const employees = state.users.filter(u => !u.isAdmin);
+  const include = normalizeOwedInclude(state.settings?.owedSummaryInclude);
   const empCardsHtml = employees.map(emp => {
     const empJobs = state.jobs.filter(j => j.employeeId === emp.id && j.status !== 'complete');
-    const empHW   = (state.homewatch||[]).filter(hw => hw.employeeId === emp.id);
-    const jobBal  = empJobs.reduce((s,j) => s + calcJob(j).empBalance, 0);
-    const hwBal   = empHW.reduce((s,hw) => s + calcHW(hw).empBalance, 0);
-    const total   = jobBal + hwBal;
-    return `<div class="summary-card"><div class="summary-label">Owed to ${esc(emp.name)}</div><div class="summary-value ${total < 0 ? 'red' : 'orange'}">${fmt(Math.max(0, total))}</div><div class="summary-sub">jobs ${fmt(jobBal)} + HW ${fmt(hwBal)}</div></div>`;
+    const empHWAll = (state.homewatch||[]).filter(hw => hw.employeeId === emp.id);
+    const empHWActive = empHWAll.filter(hw => hw.status !== 'paused');
+    const jobBal = empJobs.reduce((s,j) => s + calcJob(j).empBalance, 0);
+    const hwBal = empHWAll.reduce((s,hw) => s + calcHW(hw).empBalance, 0);
+    // Potential row is incremental only so it can be safely combined with current owed rows.
+    const potentialBal = empJobs.reduce((s,j) => {
+      const c = calcJob(j);
+      return s + (c.potentialEmpBalance - c.empBalance);
+    }, 0) + empHWActive.reduce((s,hw) => {
+      const c = calcHW(hw);
+      return s + (c.potentialEmpBalance - c.empBalance);
+    }, 0);
+    const total =
+      (include.jobs ? jobBal : 0) +
+      (include.homewatch ? hwBal : 0) +
+      (include.potential ? potentialBal : 0);
+    return `<div class="summary-card">
+      <div class="summary-label">Owed to ${esc(emp.name)}</div>
+      <div class="summary-value ${total < 0 ? 'red' : 'orange'}">${fmt(total)}</div>
+      <div class="owed-breakdown">
+        <div class="owed-breakdown-row">
+          <span class="owed-breakdown-label">Jobs</span>
+          <span class="owed-breakdown-amount">${fmt(jobBal)}</span>
+          <button type="button" class="owed-toggle${include.jobs ? ' on' : ''}" onclick="event.stopPropagation();toggleSummaryOwedInclude('jobs')" aria-pressed="${include.jobs ? 'true' : 'false'}" title="Include Jobs in total">
+            <span class="owed-toggle-thumb"></span>
+          </button>
+        </div>
+        <div class="owed-breakdown-row">
+          <span class="owed-breakdown-label">HomeWatch</span>
+          <span class="owed-breakdown-amount">${fmt(hwBal)}</span>
+          <button type="button" class="owed-toggle${include.homewatch ? ' on' : ''}" onclick="event.stopPropagation();toggleSummaryOwedInclude('homewatch')" aria-pressed="${include.homewatch ? 'true' : 'false'}" title="Include HomeWatch in total">
+            <span class="owed-toggle-thumb"></span>
+          </button>
+        </div>
+        <div class="owed-breakdown-row">
+          <span class="owed-breakdown-label">Potential</span>
+          <span class="owed-breakdown-amount">${fmt(potentialBal)}</span>
+          <button type="button" class="owed-toggle${include.potential ? ' on' : ''}" onclick="event.stopPropagation();toggleSummaryOwedInclude('potential')" aria-pressed="${include.potential ? 'true' : 'false'}" title="Include Potential in total">
+            <span class="owed-toggle-thumb"></span>
+          </button>
+        </div>
+      </div>
+    </div>`;
   }).join('');
   document.getElementById('summaryCards').innerHTML = `
     <div class="summary-card" onclick="goToTab('active')" style="cursor:pointer"><div class="summary-label">Active Jobs</div><div class="summary-value">${active.length}</div></div>
@@ -947,6 +997,18 @@ function renderSummary() {
     <div class="summary-card"><div class="summary-label">Collected</div><div class="summary-value green">${fmt(tCollected)}</div><div class="summary-sub">${fmt(tPending)} pending</div></div>
     <div class="summary-card"><div class="summary-label">Your Profit (active)</div><div class="summary-value green">${fmt(tOwner)}</div><div class="summary-sub">from collected revenue</div></div>
     ${empCardsHtml}`;
+}
+
+function toggleSummaryOwedInclude(category) {
+  if (!['jobs', 'homewatch', 'potential'].includes(category)) return;
+  const include = normalizeOwedInclude(state.settings?.owedSummaryInclude);
+  include[category] = !include[category];
+  if (category === 'potential' && include.potential && !include.jobs) {
+    include.jobs = true;
+  }
+  state.settings.owedSummaryInclude = include;
+  save();
+  renderSummary();
 }
 
 function renderEmpSummary() {
