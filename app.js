@@ -1006,6 +1006,9 @@ function toggleSummaryOwedInclude(category) {
   if (category === 'potential' && include.potential && !include.jobs) {
     include.jobs = true;
   }
+  if (category === 'jobs' && !include.jobs && include.potential) {
+    include.potential = false;
+  }
   state.settings.owedSummaryInclude = include;
   save();
   renderSummary();
