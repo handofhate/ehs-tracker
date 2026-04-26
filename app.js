@@ -24,6 +24,7 @@ let state = {
     square: { functionBaseUrl: '', highValueConfirmAmount: 1000 }
   },
   debtPayments: [],
+  splitPayments: [],
   jobs: [],
   users: [],
   appointments: [],
@@ -31,11 +32,12 @@ let state = {
 };
 let editingJobId = null;
 let addItemContext = null;
+let payOutCtx = { employeeId: '', includePotential: false };
 let expandedJobs = new Set(); // local only — never saved to Firestore
 let expandedHW   = new Set(); // local only — never saved to Firestore
-const expandedClients = new Set();
+let expandedClients = new Set();
 let notesCtx = null; // { type: 'job'|'hw', id }
-let empSummaryTimeframe = localStorage.getItem('empSummaryTF') || '30'; // days, or 'all'
+let empSummaryTimeframe = '30'; // days, or 'all' (user-scoped local preference)
 let hoursJobId = null;
 let editNoteCtx = null;
 let isSaving = false;
@@ -59,6 +61,54 @@ function normalizeOwedInclude(raw) {
   };
 }
 
+function _uiUserId() { return currentUser?.id || 'default'; }
+function _uiKey(name) { return `${name}_${_uiUserId()}`; }
+function loadUserUiState() {
+  try {
+    const tf = localStorage.getItem(_uiKey('empSummaryTF'));
+    empSummaryTimeframe = tf || '30';
+  } catch(e) { empSummaryTimeframe = '30'; }
+  try {
+    const sched = JSON.parse(localStorage.getItem(_uiKey('schedUI')) || '{}');
+    schedView = (sched.view === 'month' || sched.view === 'list') ? sched.view : 'list';
+    if (typeof sched.calYear === 'number') calYear = sched.calYear;
+    if (typeof sched.calMonth === 'number' && sched.calMonth >= 0 && sched.calMonth <= 11) calMonth = sched.calMonth;
+    selectedCalDay = sched.selectedCalDay || null;
+    selectedDayFilter = sched.selectedDayFilter || null;
+  } catch(e) {
+    schedView = 'list';
+    calYear = new Date().getFullYear();
+    calMonth = new Date().getMonth();
+    selectedCalDay = null;
+    selectedDayFilter = null;
+  }
+  try {
+    expandedClients = new Set(JSON.parse(localStorage.getItem(_uiKey('expClients')) || '[]'));
+  } catch(e) { expandedClients = new Set(); }
+}
+function saveEmpSummaryTimeframe() {
+  try { localStorage.setItem(_uiKey('empSummaryTF'), empSummaryTimeframe); } catch(e) {}
+}
+function setEmpSummaryTimeframe(value) {
+  empSummaryTimeframe = value || '30';
+  saveEmpSummaryTimeframe();
+  renderEmpSummary();
+}
+function saveScheduleUiState() {
+  try {
+    localStorage.setItem(_uiKey('schedUI'), JSON.stringify({
+      view: schedView,
+      calYear,
+      calMonth,
+      selectedCalDay: selectedCalDay || '',
+      selectedDayFilter: selectedDayFilter || ''
+    }));
+  } catch(e) {}
+}
+function saveExpandedClientsState() {
+  try { localStorage.setItem(_uiKey('expClients'), JSON.stringify([...expandedClients])); } catch(e) {}
+}
+
 // ─── PERSIST ─────────────────────────────────────────────────────────────────
 function migrateState(s) {
   if (!s.settings.empName) s.settings.empName = 'Employee';
@@ -75,13 +125,27 @@ function migrateState(s) {
   if (s.settings.square.highValueConfirmAmount === undefined) s.settings.square.highValueConfirmAmount = 1000;
   s.settings.owedSummaryInclude = normalizeOwedInclude(s.settings.owedSummaryInclude);
   if (!s.debtPayments) s.debtPayments = [];
+  if (!s.splitPayments) s.splitPayments = [];
+  (s.splitPayments || []).forEach(p => {
+    if (!p.id) p.id = uid();
+    if (p.date === undefined) p.date = today();
+    if (p.label === undefined) p.label = 'Split payment';
+    if (p.total === undefined) p.total = 0;
+    if (p.mode === undefined) p.mode = 'split';
+    if (p.employeeId === undefined) p.employeeId = '';
+    if (!Array.isArray(p.allocations)) p.allocations = [];
+    if (p.createdAt === undefined) p.createdAt = '';
+  });
   (s.debtPayments).forEach(p => {
     if (p.linkedJobId === undefined) p.linkedJobId = null;
     if (p.linkedHWId  === undefined) p.linkedHWId  = null;
   });
   if (!s.users) s.users = [];
   if (!s.appointments) s.appointments = [];
-  (s.appointments||[]).forEach(a => { if (a.contactName === undefined) a.contactName = ''; });
+  (s.appointments||[]).forEach(a => {
+    if (a.contactName === undefined) a.contactName = '';
+    if (a.endTime === undefined) a.endTime = '';
+  });
   if (!s.clients) s.clients = [];
   (s.clients || []).forEach(c => {
     if (typeof c.clientNotes === 'string') {
@@ -101,7 +165,10 @@ function migrateState(s) {
   }
   // Seed empShare on existing non-admin users from legacy global setting
   const legacyEmpShare = s.settings.empShare ?? 0.66;
-  (s.users).forEach(u => { if (!u.isAdmin && u.empShare === undefined) u.empShare = legacyEmpShare; });
+  (s.users).forEach(u => {
+    if (!u.isAdmin && u.empShare === undefined) u.empShare = legacyEmpShare;
+    if (!u.clientPrefs || typeof u.clientPrefs !== 'object') u.clientPrefs = {};
+  });
   const defaultEmp = (s.users).find(u => !u.isAdmin);
   if (!s.settings.debtEmployeeId && defaultEmp) s.settings.debtEmployeeId = defaultEmp.id;
   if (!s.homewatch) s.homewatch = [];
@@ -117,6 +184,12 @@ function migrateState(s) {
       if (!p.reconcileStatus) p.reconcileStatus = 'none';
     });
     if (!hw.employeeId && defaultEmp) hw.employeeId = defaultEmp.id;
+    (hw.advances || []).forEach(a => {
+      if (a.splitEventId === undefined) a.splitEventId = '';
+      if (a.payType === undefined) a.payType = '';
+      if (a.label === undefined) a.label = '';
+      if (a.date === undefined) a.date = '';
+    });
   });
   (s.jobs || []).forEach(job => {
     delete job._expanded; // moved to local localStorage — not stored in Firestore
@@ -131,6 +204,13 @@ function migrateState(s) {
     }
     delete job.notes;
     if (!job.hours) job.hours = [];
+    if (!job.advances) job.advances = [];
+    (job.advances || []).forEach(a => {
+      if (a.splitEventId === undefined) a.splitEventId = '';
+      if (a.payType === undefined) a.payType = '';
+      if (a.label === undefined) a.label = '';
+      if (a.date === undefined) a.date = '';
+    });
     (job.milestones || []).forEach(m => {
       if (m.status === undefined) { m.status = m.collected ? 'collected' : 'pending'; delete m.collected; }
       if (!m.billingState) m.billingState = 'none';
@@ -652,7 +732,7 @@ function hwCard(hw) {
   const paused = hw.status === 'paused';
   const hwEmpName = currentUser?.isAdmin ? (getEmp(hw.employeeId)?.name || '') : '';
   return `
-    <div class="job-card${isExp?' expanded':''}${paused?' job-complete':''}" onclick="toggleCardMobile(event, 'hw', '${hw.id}')">
+    <div class="job-card${isExp?' expanded':''}${paused?' job-complete':''}" id="hw_${hw.id}" onclick="toggleCardMobile(event, 'hw', '${hw.id}')">
       <div class="job-header hw-header">
         <div class="job-header-main" onclick="toggleHeaderDesktop(event, 'hw', '${hw.id}')">
           <div class="job-name" style="display:flex;align-items:center;gap:8px">
@@ -773,6 +853,9 @@ function saveHW() {
     if (hw) { hw.name=name; hw.startDate=startDate; hw.monthlyRate=monthlyRate; if (hwEmployeeId) hw.employeeId = hwEmployeeId; }
   } else {
     const hw = { id:uid(), name, startDate, monthlyRate, status:'active', payments:[], hwNotes:[], advances:[], employeeId: hwEmployeeId || '' };
+    expandedHW.clear();
+    expandedHW.add(hw.id);
+    saveExpandedState();
     state.homewatch.push(hw);
   }
   const isNewHW = !editingHWId;
@@ -788,7 +871,11 @@ function deleteHW(hwId) {
   });
 }
 function toggleHW(hwId) {
-  if (expandedHW.has(hwId)) expandedHW.delete(hwId); else expandedHW.add(hwId);
+  if (expandedHW.has(hwId)) expandedHW.delete(hwId);
+  else {
+    expandedHW.clear();
+    expandedHW.add(hwId);
+  }
   saveExpandedState();
   renderHomewatch();
 }
@@ -1017,9 +1104,7 @@ function toggleSummaryOwedInclude(category) {
 function renderEmpSummary() {
   const el = document.getElementById('empSummaryCards');
   if (!el || !currentUser || currentUser.isAdmin) return;
-  const { feeRate } = state.settings;
   const myId     = currentUser.id;
-  const empShare = getEmp(myId)?.empShare ?? 0.66;
   const active   = state.jobs.filter(j => j.status !== 'complete' && j.employeeId === myId);
   const activeHW = (state.homewatch||[]).filter(hw => hw.status !== 'paused' && hw.employeeId === myId);
   const pausedHW = (state.homewatch||[]).filter(hw => hw.status === 'paused' && hw.employeeId === myId);
@@ -1030,15 +1115,16 @@ function renderEmpSummary() {
   active.forEach(j => { tOwed += calcJob(j).empBalance; });
   allHW.forEach(hw => { tOwed += calcHW(hw).empBalance; });
 
-  // Potential pay (owed now + employee share of all still-pending work on active items)
+  // Potential pay mirrors core calc functions:
+  // start from current owed, then add only the active-items delta to potential balances.
   let tPotential = tOwed;
   active.forEach(j => {
     const c = calcJob(j);
-    tPotential += c.pendingGross * (1 - feeRate) * empShare;
+    tPotential += (c.potentialEmpBalance - c.empBalance);
   });
   activeHW.forEach(hw => {
     const c = calcHW(hw);
-    tPotential += c.pendingGross * (1 - feeRate) * empShare;
+    tPotential += (c.potentialEmpBalance - c.empBalance);
   });
 
   // Recent pay (advances paid to employee within selected timeframe)
@@ -1067,7 +1153,7 @@ function renderEmpSummary() {
     <div class="summary-card" onclick="goToTab('homewatch')" style="cursor:pointer"><div class="summary-label">HomeWatch</div><div class="summary-value">${activeHW.length}</div><div class="summary-sub">${pausedHW.length > 0 ? `${pausedHW.length} paused` : 'none paused'}</div></div>
     <div class="summary-card">
       <div class="summary-label" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">Recent Pay
-        <select onchange="empSummaryTimeframe=this.value;localStorage.setItem('empSummaryTF',this.value);renderEmpSummary()" style="font-size:12px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:1px 4px">${tfOpts}</select>
+        <select onchange="setEmpSummaryTimeframe(this.value)" style="font-size:12px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:1px 4px">${tfOpts}</select>
       </div>
       <div class="summary-value green">${fmt(tRecentPay)}</div>
       <div class="summary-sub">advances received</div>
@@ -1179,9 +1265,10 @@ function badgeHtml(status, jobId, itemType, idx) {
 
 function payTypeBadgeHtml(payType, jobId, idx) {
   const cfg = {
-    '':       { cls:'badge-pending',   label:'— Pay'      },
-    'advance': { cls:'badge-invoiced',  label:'◑ Advance'  },
-    'final':   { cls:'badge-collected', label:'✓ Final Pay'}
+    '':         { cls:'badge-pending',   label:'Pay' },
+    'advance':  { cls:'badge-invoiced',  label:'Advance' },
+    'final':    { cls:'badge-collected', label:'Final Pay' },
+    'adjustment': { cls:'badge-pending', label:'Adjustment' }
   };
   const { cls, label } = cfg[payType] || cfg[''];
   const admin = currentUser?.isAdmin;
@@ -1215,7 +1302,7 @@ function toggleHeaderRow(event, type, id) {
 function cyclePayType(jobId, idx) {
   const job = state.jobs.find(j=>j.id===jobId);
   if (!job||!job.advances||job.advances[idx]===undefined) return;
-  const cycle = {'':'advance','advance':'final','final':''};
+  const cycle = {'':'advance','advance':'final','final':'adjustment','adjustment':''};
   job.advances[idx].payType = cycle[job.advances[idx].payType||''];
   save(); renderJobs();
 }
@@ -1751,14 +1838,334 @@ function deleteDebtPayment(id) {
   });
 }
 
+function _collectAdvanceRows() {
+  const out = [];
+  (state.jobs || []).forEach(j => {
+    (j.advances || []).forEach(a => {
+      out.push({
+        sourceKind: 'job',
+        sourceId: j.id,
+        sourceName: j.name || 'Job',
+        employeeId: j.employeeId || '',
+        advance: a || {}
+      });
+    });
+  });
+  (state.homewatch || []).forEach(hw => {
+    (hw.advances || []).forEach(a => {
+      out.push({
+        sourceKind: 'hw',
+        sourceId: hw.id,
+        sourceName: hw.name || 'HomeWatch',
+        employeeId: hw.employeeId || '',
+        advance: a || {}
+      });
+    });
+  });
+  return out;
+}
+function _buildLedgerFromStoredEvents() {
+  const rows = [];
+  const byEventId = {};
+  (state.splitPayments || []).forEach(e => { if (e?.id) byEventId[e.id] = e; });
+  (state.splitPayments || []).forEach(e => {
+    rows.push({
+      id: `stored:${e.id}`,
+      source: 'stored',
+      date: e.date || '',
+      label: e.label || 'Split payment',
+      mode: e.mode || 'split',
+      employeeId: e.employeeId || '',
+      total: Number(e.total || 0),
+      allocations: (e.allocations || []).map(a => ({
+        sourceKind: a.sourceKind || '',
+        sourceId: a.sourceId || '',
+        sourceName: a.sourceName || '',
+        amount: Number(a.amount || 0),
+        payType: a.payType || ''
+      }))
+    });
+  });
+  return { rows, byEventId };
+}
+function _buildLedgerFromLegacy(byEventId = {}) {
+  const groups = {};
+  _collectAdvanceRows().forEach(({ sourceKind, sourceId, sourceName, employeeId, advance }) => {
+    const splitEventId = (advance.splitEventId || '').trim();
+    if (splitEventId && byEventId[splitEventId]) return;
+    const amount = Number(advance.amount || 0);
+    if (Math.abs(amount) <= 0.005) return;
+    const label = (advance.label || '').trim();
+    const date = (advance.date || '').trim();
+    if (!label) return;
+    const key = `${date}||${label}`;
+    if (!groups[key]) groups[key] = { date, label, allocations: [], employeeIds: new Set() };
+    groups[key].allocations.push({ sourceKind, sourceId, sourceName, amount, payType: advance.payType || '' });
+    if (employeeId) groups[key].employeeIds.add(employeeId);
+  });
+  const out = [];
+  Object.keys(groups).forEach(key => {
+    const g = groups[key];
+    const isLikelySplit = g.allocations.length > 1 || /^(split payment|pay out)/i.test(g.label);
+    if (!isLikelySplit) return;
+    const total = g.allocations.reduce((s, a) => s + Number(a.amount || 0), 0);
+    const mode = /\(potential\)/i.test(g.label) ? 'potential' : 'split';
+    const employeeId = g.employeeIds.size === 1 ? [...g.employeeIds][0] : '';
+    out.push({
+      id: `legacy:${key}`,
+      source: 'legacy',
+      date: g.date,
+      label: g.label,
+      mode,
+      employeeId,
+      total,
+      allocations: g.allocations
+    });
+  });
+  return out;
+}
+function _getSplitLedgerEntries() {
+  const { rows: storedRows, byEventId } = _buildLedgerFromStoredEvents();
+  const legacyRows = _buildLedgerFromLegacy(byEventId);
+  const all = [...storedRows, ...legacyRows];
+  all.sort((a, b) => {
+    const da = a.date || '';
+    const db = b.date || '';
+    if (da === db) return (a.label || '').localeCompare(b.label || '');
+    return db.localeCompare(da);
+  });
+  return all;
+}
+function openSplitLedger() {
+  renderSplitLedger();
+  document.getElementById('splitLedgerModal').classList.remove('hidden');
+}
+function _scrollLedgerTargetIntoView(el) {
+  if (!el) return;
+  const headerOffset = window.innerWidth <= 600 ? 76 : 92;
+  const top = el.getBoundingClientRect().top + window.scrollY - headerOffset;
+  window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+  el.classList.add('active');
+  setTimeout(() => el.classList.remove('active'), 1200);
+}
+function goToLedgerSource(sourceKind, sourceId) {
+  if (!sourceId) return;
+  closeModal('splitLedgerModal');
+  if (sourceKind === 'hw') {
+    expandedHW.clear();
+    expandedHW.add(sourceId);
+    saveExpandedState();
+    goToTab('homewatch');
+    setTimeout(() => {
+      renderHomewatch();
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        _scrollLedgerTargetIntoView(document.getElementById(`hw_${sourceId}`));
+      }));
+    }, 40);
+    return;
+  }
+  expandedJobs.clear();
+  expandedJobs.add(sourceId);
+  saveExpandedState();
+  goToTab('all');
+  setTimeout(() => {
+    renderJobs();
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const target = document.querySelector(`#tab-all #job_${sourceId}`) || document.getElementById(`job_${sourceId}`);
+      _scrollLedgerTargetIntoView(target);
+    }));
+  }, 40);
+}
+function renderSplitLedger() {
+  const wrap = document.getElementById('splitLedgerList');
+  if (!wrap) return;
+  const rows = _getSplitLedgerEntries();
+  if (!rows.length) {
+    wrap.innerHTML = '<div style="color:var(--text3);font-size:15px;padding:12px 0">No split pay / payout events yet.</div>';
+    return;
+  }
+  wrap.innerHTML = rows.map(r => {
+    const empName = r.employeeId ? (getEmp(r.employeeId)?.name || '') : '';
+    const modeLabel = r.mode === 'potential' ? 'Potential' : 'Split';
+    const allocHtml = (r.allocations || []).map(a => `
+      <button type="button" style="width:100%;background:none;border:none;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);cursor:pointer;color:inherit;text-align:left" data-kind="${a.sourceKind || ''}" data-id="${a.sourceId || ''}" onclick="goToLedgerSource(this.dataset.kind, this.dataset.id)" title="Open ${esc(a.sourceName || (a.sourceKind === 'hw' ? 'HomeWatch' : 'Job'))}">
+        <span style="min-width:0">${esc(a.sourceName || (a.sourceKind === 'hw' ? 'HomeWatch' : 'Job'))}</span>
+        <span style="font-family:var(--mono);white-space:nowrap;color:${Number(a.amount || 0) < 0 ? 'var(--red)' : 'var(--green)'}">${fmt(a.amount || 0)}</span>
+      </button>`).join('');
+    return `<div style="border:1px solid var(--border2);border-radius:3px;padding:10px 12px;margin-bottom:10px;background:var(--bg3)">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px">
+        <div style="min-width:0">
+          <div style="font-size:15px">${esc(r.label || 'Split payment')}</div>
+          <div style="font-family:var(--mono);font-size:12px;color:var(--text3)">${fmtDate(r.date)}${empName ? ` · ${esc(empName)}` : ''} · ${modeLabel}${r.source === 'legacy' ? ' · legacy' : ''}</div>
+        </div>
+        <div style="font-family:var(--mono);font-size:15px;color:${Number(r.total || 0) < 0 ? 'var(--red)' : 'var(--green)'};white-space:nowrap">${fmt(r.total || 0)}</div>
+      </div>
+      <div style="border-top:1px dashed var(--border);padding-top:6px">${allocHtml}</div>
+    </div>`;
+  }).join('');
+}
+
 // ─── SPLIT PAY ────────────────────────────────────────────────────────────────
-function openSplitPay() {
+function _setTrackUI(trackEl, thumbEl, on) {
+  if (trackEl) {
+    trackEl.dataset.on = on ? 'true' : 'false';
+    trackEl.style.background = on ? 'var(--accent)' : 'var(--border2)';
+  }
+  if (thumbEl) thumbEl.style.transform = on ? 'translateX(18px)' : 'translateX(0)';
+}
+function _buildPayOutRows(employeeId) {
+  if (!employeeId) return [];
+  const rows = [];
+  state.jobs.filter(j => j.status !== 'complete' && j.employeeId === employeeId).forEach(j => {
+    const c = calcJob(j);
+    rows.push({
+      id: `sp_job_${j.id}`,
+      label: j.name || 'Job',
+      kind: 'job',
+      owedNow: Number(c.empBalance || 0),
+      potential: Number(c.potentialEmpBalance || 0)
+    });
+  });
+  (state.homewatch || []).filter(hw => hw.status !== 'paused' && hw.employeeId === employeeId).forEach(hw => {
+    const c = calcHW(hw);
+    rows.push({
+      id: `sp_hw_${hw.id}`,
+      label: hw.name || 'HomeWatch',
+      kind: 'hw',
+      owedNow: Number(c.empBalance || 0),
+      potential: Number(c.potentialEmpBalance || 0)
+    });
+  });
+  return rows;
+}
+function _calcPayOutPlan(employeeId, includePotential) {
+  const rows = _buildPayOutRows(employeeId).map(r => {
+    const owedPayable = Math.max(0, Number(r.owedNow || 0));
+    const target = includePotential
+      ? Number(r.potential || 0)
+      : owedPayable;
+    return { ...r, owedPayable, target };
+  });
+  const owedTotal = rows.reduce((s, r) => s + r.owedPayable, 0);
+  const targetTotal = rows.reduce((s, r) => s + r.target, 0);
+  return {
+    rows,
+    owedTotal,
+    targetTotal,
+    potentialAddOn: targetTotal - owedTotal
+  };
+}
+function openPayOut() {
+  if (!currentUser?.isAdmin) return;
+  const employees = state.users.filter(u => !u.isAdmin);
+  if (!employees.length) { showAlert('No employees available for payout.'); return; }
+  const select = document.getElementById('po_employee');
+  if (!select) return;
+  if (!payOutCtx.employeeId || !employees.some(e => e.id === payOutCtx.employeeId)) {
+    payOutCtx.employeeId = employees[0].id;
+  }
+  select.innerHTML = employees.map(e => `<option value="${e.id}"${e.id === payOutCtx.employeeId ? ' selected' : ''}>${esc(e.name || 'Employee')}</option>`).join('');
+  document.getElementById('po_date').value = today();
+  renderPayOut();
+  document.getElementById('payOutModal').classList.remove('hidden');
+}
+function togglePayOutPotential() {
+  payOutCtx.includePotential = !payOutCtx.includePotential;
+  renderPayOut();
+}
+function renderPayOut() {
+  const select = document.getElementById('po_employee');
+  if (!select) return;
+  payOutCtx.employeeId = select.value || payOutCtx.employeeId || '';
+  const includePotential = !!payOutCtx.includePotential;
+  _setTrackUI(
+    document.getElementById('po_potentialTrack'),
+    document.getElementById('po_potentialThumb'),
+    includePotential
+  );
+  const lbl = document.getElementById('po_potentialLabel');
+  if (lbl) lbl.textContent = includePotential ? 'On' : 'Off';
+  const plan = _calcPayOutPlan(payOutCtx.employeeId, includePotential);
+  const totalsEl = document.getElementById('po_totals');
+  if (totalsEl) {
+    totalsEl.innerHTML = `
+      <span>Current Owed (payable) <strong>${fmt(plan.owedTotal)}</strong></span>
+      <span>Potential Add-on <strong>${fmt(plan.potentialAddOn)}</strong></span>
+      <span>Pay Out Amount <strong style="color:var(--green)">${fmt(plan.targetTotal)}</strong></span>`;
+  }
+  const rowsEl = document.getElementById('po_rows');
+  const hintEl = document.getElementById('po_hint');
+  if (hintEl) {
+    hintEl.textContent = includePotential
+      ? 'Potential mode includes negative rows so payout fully reconciles balances.'
+      : 'Current-owed mode ignores negative rows so prepaid jobs do not reduce payout.';
+  }
+  if (rowsEl) {
+    const shown = plan.rows.filter(r => includePotential ? Math.abs(r.target) > 0.005 : r.target > 0.005);
+    rowsEl.innerHTML = shown.length
+      ? shown.map(r => `
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
+            <div style="min-width:0">
+              <div style="font-size:15px">${esc(r.label)}</div>
+              <div style="font-family:var(--mono);font-size:12px;color:var(--text3)">
+                owed ${fmt(r.owedNow)}${includePotential ? ` · potential ${fmt(r.potential)}` : ''}
+              </div>
+            </div>
+            <div style="font-family:var(--mono);font-size:14px;color:${r.target < -0.005 ? 'var(--red)' : 'var(--green)'};white-space:nowrap">${fmt(r.target)}</div>
+          </div>`).join('')
+      : '<div style="color:var(--text3);font-size:15px;padding:12px 0">No positive payout rows for this selection.</div>';
+  }
+}
+function applyPayOutToSplitPay() {
+  const includePotential = !!payOutCtx.includePotential;
+  const plan = _calcPayOutPlan(payOutCtx.employeeId, includePotential);
+  if (plan.targetTotal <= 0.005) {
+    showAlert('Nothing to pay out for this selection.');
+    return;
+  }
+  const emp = getEmp(payOutCtx.employeeId);
+  const allocById = {};
+  plan.rows.forEach(r => {
+    if (includePotential) {
+      if (Math.abs(r.target) > 0.005) allocById[r.id] = r.target;
+      return;
+    }
+    if (r.target > 0.005) allocById[r.id] = r.target;
+  });
+  openSplitPay({
+    trackAdvances: includePotential,
+    total: plan.targetTotal,
+    date: document.getElementById('po_date')?.value || today(),
+    label: `Pay Out${emp?.name ? ` - ${emp.name}` : ''}${includePotential ? ' (potential)' : ''}`,
+    allocById
+  });
+  closeModal('payOutModal');
+}
+function openSplitPay(preset = null) {
   document.getElementById('sp_total').value = '';
   document.getElementById('sp_date').value  = today();
   document.getElementById('sp_label').value = '';
   const track = document.getElementById('sp_toggleTrack');
   if (track) track.dataset.on = 'false';
+  if (preset?.trackAdvances && track) track.dataset.on = 'true';
   renderSplitPayAlloc();
+  if (preset) {
+    if (preset.total !== undefined) document.getElementById('sp_total').value = Number(preset.total || 0).toFixed(2);
+    if (preset.date) document.getElementById('sp_date').value = preset.date;
+    if (preset.label !== undefined) document.getElementById('sp_label').value = preset.label || '';
+    const allocById = preset.allocById || {};
+    document.querySelectorAll('.sp-alloc-input').forEach(el => {
+      const amt = Number(allocById[el.id] || 0);
+      el.value = Math.abs(amt) > 0.005 ? amt.toFixed(2) : '';
+      const typeEl = document.getElementById(el.id + '_type');
+      if (typeEl) {
+        if (preset.trackAdvances && amt < -0.005) typeEl.value = 'adjustment';
+        else if (preset.trackAdvances && amt > 0.005) typeEl.value = 'advance';
+        else typeEl.value = '';
+      }
+    });
+    updateSplitTotals();
+  }
   document.getElementById('splitPayModal').classList.remove('hidden');
 }
 function toggleSplitAdvances() {
@@ -1776,7 +2183,7 @@ function renderSplitPayAlloc() {
   if (track) track.style.background = allowAdvances ? 'var(--accent)' : 'var(--border2)';
   if (thumb) thumb.style.transform = allowAdvances ? 'translateX(18px)' : 'translateX(0)';
   const row = (id, name, bal, potentialBal) => {
-    const owedColor = Math.round(bal * 100) > 0 ? 'var(--accent)' : 'var(--text3)';
+    const owedColor = bal > 0.005 ? 'var(--accent)' : bal < -0.005 ? 'var(--red)' : 'var(--text3)';
     const advance = potentialBal - bal;
     const advanceStr = allowAdvances && advance > 0.005
       ? ` &nbsp;<span style="color:var(--text3)">+${fmt(advance)} potential</span>` : '';
@@ -1789,6 +2196,7 @@ function renderSplitPayAlloc() {
         <option value="">General</option>
         <option value="advance">Advance</option>
         <option value="final">Final Pay</option>
+        <option value="adjustment">Adjustment</option>
       </select>
       <button class="btn btn-ghost btn-sm" id="${id}_maxBtn" data-step="0" onclick="maxAlloc('${id}',${bal},${potentialBal},${allowAdvances})" style="flex-shrink:0">Max</button>
       <input class="form-input sp-alloc-input" type="number" step="0.01" placeholder="0.00"
@@ -1816,18 +2224,23 @@ function maxAlloc(inputId, bal, potentialBal, allowAdvances) {
     if (el.id !== inputId) otherAllocated += parseFloat(el.value) || 0;
   });
   const cap = total > 0 ? total - otherAllocated : Infinity;
+  const capTarget = (target) => {
+    if (!isFinite(cap)) return target;
+    if (target > cap) return cap;
+    return target;
+  };
   let target;
-  if (!allowAdvances || potentialBal <= bal + 0.005) {
-    target = Math.max(0, Math.min(bal, cap));
+  if (!allowAdvances || Math.abs(potentialBal - bal) <= 0.005) {
+    target = capTarget(bal);
     if (btn) btn.dataset.step = '0';
   } else if (step === 0) {
-    target = Math.max(0, Math.min(bal, cap));
+    target = capTarget(bal);
     if (btn) btn.dataset.step = '1';
   } else {
-    target = Math.max(0, Math.min(potentialBal, cap));
+    target = capTarget(potentialBal);
     if (btn) btn.dataset.step = '0';
   }
-  document.getElementById(inputId).value = target > 0 ? target.toFixed(2) : '';
+  document.getElementById(inputId).value = Math.abs(target) > 0.005 ? target.toFixed(2) : '';
   updateSplitTotals();
 }
 function updateSplitTotals() {
@@ -1837,7 +2250,7 @@ function updateSplitTotals() {
     const amt = parseFloat(el.value) || 0;
     allocated += amt;
     const typeEl = document.getElementById(el.id + '_type');
-    if (typeEl) typeEl.style.display = amt > 0 ? '' : 'none';
+    if (typeEl) typeEl.style.display = Math.abs(amt) > 0.005 ? '' : 'none';
   });
   const remaining = total - allocated;
   const remColor  = Math.abs(remaining) < 0.01 ? 'var(--green)' : remaining < 0 ? 'var(--red)' : 'var(--accent)';
@@ -1856,28 +2269,49 @@ async function saveSplitPay() {
   const jobEntries = [], hwEntries = [];
   document.querySelectorAll('.sp-alloc-input').forEach(el => {
     const amt = parseFloat(el.value) || 0;
-    if (amt <= 0) return;
+    if (Math.abs(amt) <= 0.005) return;
     allocated += amt;
-    const payType = (document.getElementById(el.id + '_type') || {}).value || '';
+    const selectedType = (document.getElementById(el.id + '_type') || {}).value || '';
+    const payType = selectedType || (amt < -0.005 ? 'adjustment' : '');
     if (el.id.startsWith('sp_job_')) jobEntries.push({ jobId: el.id.slice('sp_job_'.length), amount: amt, payType });
     if (el.id.startsWith('sp_hw_'))  hwEntries.push({  hwId:  el.id.slice('sp_hw_'.length),  amount: amt, payType });
   });
   if (!jobEntries.length && !hwEntries.length) { showAlert('Please allocate at least one amount.'); return; }
   const remaining = total - allocated;
   const doSave = async () => {
+    const splitEventId = uid();
+    const trackAdvances = (document.getElementById('sp_toggleTrack')?.dataset.on === 'true');
+    const eventLabel = label || 'Split payment';
+    const allocations = [];
+    const employeeIds = new Set();
     jobEntries.forEach(({ jobId, amount, payType }) => {
       const job = state.jobs.find(j => j.id === jobId);
       if (job) {
         if (!job.advances) job.advances = [];
-        job.advances.push({ id: uid(), label: label || 'Split payment', amount, date, payType });
+        job.advances.push({ id: uid(), label: eventLabel, amount, date, payType, splitEventId });
+        allocations.push({ sourceKind: 'job', sourceId: job.id, sourceName: job.name || 'Job', amount, payType: payType || '' });
+        if (job.employeeId) employeeIds.add(job.employeeId);
       }
     });
     hwEntries.forEach(({ hwId, amount, payType }) => {
       const hw = (state.homewatch || []).find(h => h.id === hwId);
       if (hw) {
         if (!hw.advances) hw.advances = [];
-        hw.advances.push({ id: uid(), label: label || 'Split payment', amount, date, payType });
+        hw.advances.push({ id: uid(), label: eventLabel, amount, date, payType, splitEventId });
+        allocations.push({ sourceKind: 'hw', sourceId: hw.id, sourceName: hw.name || 'HomeWatch', amount, payType: payType || '' });
+        if (hw.employeeId) employeeIds.add(hw.employeeId);
       }
+    });
+    if (!state.splitPayments) state.splitPayments = [];
+    state.splitPayments.push({
+      id: splitEventId,
+      date: date || today(),
+      label: eventLabel,
+      total,
+      mode: trackAdvances ? 'potential' : 'split',
+      employeeId: employeeIds.size === 1 ? [...employeeIds][0] : '',
+      allocations,
+      createdAt: new Date().toISOString()
     });
     await save(); renderAll(); closeModal('splitPayModal');
   };
@@ -2466,7 +2900,11 @@ function toggleRepayment(id) {
   save(); renderJobs();
 }
 function toggleJob(id) {
-  if (expandedJobs.has(id)) expandedJobs.delete(id); else expandedJobs.add(id);
+  if (expandedJobs.has(id)) expandedJobs.delete(id);
+  else {
+    expandedJobs.clear();
+    expandedJobs.add(id);
+  }
   saveExpandedState();
   renderJobs();
 }
@@ -2923,6 +3361,7 @@ function saveJob() {
     }
   } else {
     const newId = uid();
+    expandedJobs.clear();
     expandedJobs.add(newId);
     saveExpandedState();
     state.jobs.push({ id:newId, name, contactName, quote, date, isItemized, quoteItems, status:'active',
@@ -2993,6 +3432,7 @@ function openAddItem(jobId, type, itemId = null) {
             <option value="">General</option>
             <option value="advance">Advance</option>
             <option value="final">Final Pay</option>
+            <option value="adjustment">Adjustment</option>
           </select>
         </div>
       </div>`;
@@ -3220,6 +3660,14 @@ function settingsTab(name, btn) {
   if (name === 'clients') _populateClientColSettings();
   if (name === 'square') refreshSquareAlerts();
 }
+function mySettingsTab(name, btn) {
+  document.querySelectorAll('#mySettingsModal .settings-nav-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#mySettingsModal .settings-panel').forEach(p => p.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  const panel = document.getElementById('mstab-' + name);
+  if (panel) panel.classList.add('active');
+  if (name === 'clients') _populateMyClientPrefs();
+}
 function _populateClientColSettings() {
   const expandCols = state.settings.clientExpandCols || CLIENT_COLS.map(c=>c.key);
   const quickCols  = state.settings.clientQuickCols  || [];
@@ -3250,6 +3698,36 @@ function toggleClientQuickCol(key, on) {
   if (on) { if (!cols.includes(key)) cols.push(key); }
   else { cols = cols.filter(k=>k!==key); }
   state.settings.clientQuickCols = cols;
+  save();
+}
+function _populateMyClientPrefs() {
+  const expandKeys = _clientExpandColsForView();
+  const quickKeys = _clientQuickColsForView();
+  const renderList = (containerId, activeKeys, toggleFn) => {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    el.innerHTML = CLIENT_COLS.map(col => `
+      <label style="display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12px;cursor:pointer">
+        <input type="checkbox" ${activeKeys.includes(col.key) ? 'checked' : ''} style="accent-color:var(--accent)"
+          onchange="${toggleFn}('${col.key}',this.checked)" />
+        ${col.label}
+      </label>`).join('');
+  };
+  renderList('ms_expandColsList', expandKeys, 'toggleMyClientExpandCol');
+  renderList('ms_quickColsList', quickKeys, 'toggleMyClientQuickCol');
+}
+function toggleMyClientExpandCol(key, on) {
+  let cols = [..._clientExpandColsForView()];
+  if (on) { if (!cols.includes(key)) cols.push(key); }
+  else { cols = cols.filter(k => k !== key); }
+  _writeClientPref('clientExpandCols', cols);
+  save(); renderClients();
+}
+function toggleMyClientQuickCol(key, on) {
+  let cols = [..._clientQuickColsForView()];
+  if (on) { if (!cols.includes(key)) cols.push(key); }
+  else { cols = cols.filter(k => k !== key); }
+  _writeClientPref('clientQuickCols', cols);
   save();
 }
 function openSettings() {
@@ -3349,11 +3827,20 @@ async function runSquareReconcileNow() {
 }
 function openMySettings() {
   document.getElementById('ms_whoami').textContent = currentUser?.name || '';
+  const splitEl = document.getElementById('ms_split');
+  const emp = getEmp(currentUser?.id);
+  if (splitEl) splitEl.textContent = `${Math.round((emp?.empShare ?? 0.66) * 100)}% split`;
+  _populateMyClientPrefs();
+  const firstTabBtn = document.querySelector('#mySettingsModal .settings-nav-btn');
+  if (firstTabBtn) mySettingsTab('user', firstTabBtn);
   document.getElementById('mySettingsModal').classList.remove('hidden');
+  requestAnimationFrame(_initSettingsNavScroll);
 }
 
 // ─── TABS & MODALS ────────────────────────────────────────────────────────────
 function switchTab(name, el) {
+  closeMobileMenu();
+  closeDesktopMenu();
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
@@ -3363,6 +3850,49 @@ function switchTab(name, el) {
   if (name === 'clients') renderClients();
 }
 function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+
+function openDesktopMenu() {
+  if (window.innerWidth <= 600) return;
+  document.querySelector('.header-actions')?.classList.add('desktop-open');
+}
+function closeDesktopMenu() {
+  document.querySelector('.header-actions')?.classList.remove('desktop-open');
+}
+function toggleDesktopMenu() {
+  const actions = document.querySelector('.header-actions');
+  if (!actions || window.innerWidth <= 600) return;
+  if (actions.classList.contains('desktop-open')) closeDesktopMenu();
+  else openDesktopMenu();
+}
+function openMobileMenu() {
+  if (window.innerWidth > 600) return;
+  document.querySelector('.header-actions')?.classList.add('open');
+  document.getElementById('mobileMenuBackdrop')?.classList.add('open');
+  const btn = document.getElementById('mobileMenuBtn');
+  if (btn) {
+    btn.classList.add('open');
+    btn.textContent = '✕';
+    btn.setAttribute('aria-label', 'Close menu');
+    btn.setAttribute('aria-expanded', 'true');
+  }
+}
+function closeMobileMenu() {
+  document.querySelector('.header-actions')?.classList.remove('open');
+  document.getElementById('mobileMenuBackdrop')?.classList.remove('open');
+  const btn = document.getElementById('mobileMenuBtn');
+  if (btn) {
+    btn.classList.remove('open');
+    btn.textContent = '☰';
+    btn.setAttribute('aria-label', 'Open menu');
+    btn.setAttribute('aria-expanded', 'false');
+  }
+}
+function toggleMobileMenu() {
+  const actions = document.querySelector('.header-actions');
+  if (!actions) return;
+  if (actions.classList.contains('open')) closeMobileMenu();
+  else openMobileMenu();
+}
 
 function showConfirm(msg, onOk, { title='Confirm', okLabel='Confirm', danger=true } = {}) {
   document.getElementById('confirmModalTitle').textContent = title;
@@ -3471,6 +4001,10 @@ function loadExpandedState() {
   try {
     const uid = currentUser?.id || 'default';
     expandedJobs = new Set(JSON.parse(localStorage.getItem(`exp_${uid}`)   || '[]'));
+    if (expandedJobs.size > 1) {
+      const latest = Array.from(expandedJobs).slice(-1);
+      expandedJobs = new Set(latest);
+    }
     expandedHW   = new Set(JSON.parse(localStorage.getItem(`expHW_${uid}`) || '[]'));
   } catch(e) { expandedJobs = new Set(); expandedHW = new Set(); }
 }
@@ -3484,6 +4018,7 @@ function saveExpandedState() {
 function applyUserView() {
   const isAdmin = currentUser && currentUser.isAdmin;
   loadExpandedState();
+  loadUserUiState();
   requestAnimationFrame(_initTabsScroll);
   // Header elements
   const lbl = document.getElementById('headerUserLabel');
@@ -3497,6 +4032,8 @@ function applyUserView() {
   // Header buttons: simple display toggle — applyAdminClasses() never touches these
   document.querySelectorAll('.header-admin').forEach(el => { el.style.display = isAdmin ? '' : 'none'; });
   document.querySelectorAll('.header-emp').forEach(el => { el.style.display = isAdmin ? 'none' : ''; });
+  const menuDivider = document.getElementById('headerMenuDivider');
+  if (menuDivider) menuDivider.style.display = isAdmin ? '' : 'none';
 
   // All tabs visible for everyone; debt/summary panels are admin-only
   document.getElementById('summaryCards').style.display    = isAdmin ? '' : 'none';
@@ -3675,6 +4212,7 @@ function hwCalEntries(year, month) {
 }
 
 function goToHW(hwId) {
+  expandedHW.clear();
   expandedHW.add(hwId);
   saveExpandedState();
   const hwTab = document.querySelector('.tab[onclick*="homewatch"]');
@@ -3704,6 +4242,7 @@ function renderSchedule() {
 function setSchedView(v) {
   if (v !== 'list' || !selectedDayFilter) selectedDayFilter = null;
   schedView = v;
+  saveScheduleUiState();
   const appts = (state.appointments || []).slice().sort((a,b) => (a.date+a.time).localeCompare(b.date+b.time));
   document.querySelectorAll('.sched-view-btn').forEach(b => b.classList.toggle('active', b.textContent.toLowerCase() === v));
   renderSchedView(appts);
@@ -3719,6 +4258,26 @@ function renderSchedView(appts) {
 function renderListView(appts) {
   const todayStr = today();
   const todayDate = new Date(todayStr + 'T00:00:00');
+  const dayHeader = (dateStr) => {
+    const d = new Date(`${dateStr}T00:00:00`);
+    const day = Number.isNaN(d.getTime())
+      ? ''
+      : d.toLocaleDateString('en-US', { weekday: 'long' });
+    return `<div style="margin-top:14px;margin-bottom:8px;font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--text3)">${day ? `${day} · ` : ''}${fmtDate(dateStr)}</div>`;
+  };
+  const renderGroupedByDate = (items, isPast) => {
+    let html = '';
+    let lastDate = '';
+    items.forEach(a => {
+      const dateKey = a.date || '';
+      if (dateKey !== lastDate) {
+        html += dayHeader(dateKey);
+        lastDate = dateKey;
+      }
+      html += apptCard(a, isPast);
+    });
+    return html;
+  };
 
   // Merge HW recurring entries for a 5-month window (1 past + current + 3 ahead)
   const allAppts = [...appts];
@@ -3734,7 +4293,6 @@ function renderListView(appts) {
       <div style="flex:1;min-width:0">
         <div class="appt-name" style="display:flex;align-items:center;gap:6px">${esc(a.clientName)}${a.clientName && clientByName(a.clientName) ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 7px;flex-shrink:0" onclick="event.stopPropagation();openClientQuick('${esc(a.clientName)}')" title="View Client">👤</button>` : ''}</div>
         <div class="appt-meta">
-          <span>📅 ${fmtDate(a.date)}</span>
           <span style="color:var(--purple)">HomeWatch${a.paused?' · Paused':''}</span>
           <span>${fmt(a.monthlyRate)}/mo</span>
         </div>
@@ -3746,8 +4304,7 @@ function renderListView(appts) {
         <div class="appt-name" style="display:flex;align-items:center;gap:6px">${esc(a.clientName||'')}${a.clientName && clientByName(a.clientName) ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 7px;flex-shrink:0" onclick="event.stopPropagation();openClientQuick('${esc(a.clientName)}')" title="View Client">👤</button>` : ''}</div>
         ${a.contactName ? `<div style="font-size:13px;color:var(--blue);margin-top:2px;font-family:var(--mono);display:flex;align-items:center;gap:6px">via ${esc(a.contactName)}${clientByName(a.contactName) ? ` <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 7px" onclick="event.stopPropagation();openClientQuick('${esc(a.contactName)}')" title="View Client">👤</button>` : ''}</div>` : ''}
         <div class="appt-meta">
-          <span>📅 ${a.endDate ? `${fmtDate(a.date)} – ${fmtDate(a.endDate)}` : fmtDate(a.date)}</span>
-          ${a.time?`<span>🕐 ${fmtTime(a.time)}</span>`:''}
+          ${fmtTimeRange(a.time, a.endTime)?`<span>🕐 ${fmtTimeRange(a.time, a.endTime)}</span>`:''}
           ${a.address?`<span>📍 ${esc(a.address)}</span>`:''}
         </div>
         ${a.notes?`<div class="appt-notes">${esc(a.notes)}</div>`:''}
@@ -3772,8 +4329,8 @@ function renderListView(appts) {
   const upcoming = allAppts.filter(a => (a.endDate || a.date) >= todayStr);
   const past     = allAppts.filter(a => (a.endDate || a.date) < todayStr).reverse();
 
-  const upcomingHtml = upcoming.length ? upcoming.map(a => apptCard(a, false)).join('') : '';
-  const pastHtml     = past.length     ? past.map(a => apptCard(a, true)).join('')     : '';
+  const upcomingHtml = upcoming.length ? renderGroupedByDate(upcoming, false) : '';
+  const pastHtml     = past.length     ? renderGroupedByDate(past, true)     : '';
 
   return `
     ${upcomingHtml || '<div class="no-appts">📅 No upcoming appointments.<br>Tap + Appointment to add one.</div>'}
@@ -3858,7 +4415,7 @@ function renderMonthView(appts) {
               <div class="appt-name">${esc(a.clientName||'')}</div>
               <div class="appt-meta">
                 ${a.endDate?`<span>📅 ${fmtDate(a.date)} – ${fmtDate(a.endDate)}</span>`:''}
-                ${a.time?`<span>🕐 ${fmtTime(a.time)}</span>`:''}
+                ${fmtTimeRange(a.time, a.endTime)?`<span>🕐 ${fmtTimeRange(a.time, a.endTime)}</span>`:''}
                 ${a.address?`<span>📍 ${esc(a.address)}</span>`:''}
               </div>
               ${a.notes?`<div class="appt-notes">${esc(a.notes)}</div>`:''}
@@ -3892,12 +4449,14 @@ function selectCalDay(dateStr) {
     selectedCalDay = dateStr;
     schedView = 'list';
     selectedDayFilter = dateStr;
+    saveScheduleUiState();
     document.querySelectorAll('.sched-view-btn').forEach(b => b.classList.toggle('active', b.textContent.toLowerCase() === 'list'));
     const appts = (state.appointments||[]).slice().sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));
     renderSchedView(appts);
     return;
   }
   selectedCalDay = selectedCalDay === dateStr ? null : dateStr;
+  saveScheduleUiState();
   const appts = (state.appointments||[]).slice().sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));
   renderSchedView(appts);
 }
@@ -3907,6 +4466,7 @@ function changeMonth(dir) {
   if (calMonth > 11) { calMonth = 0; calYear++; }
   if (calMonth < 0)  { calMonth = 11; calYear--; }
   selectedCalDay = null;
+  saveScheduleUiState();
   const appts = (state.appointments||[]).slice().sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));
   renderSchedView(appts);
 }
@@ -3917,6 +4477,12 @@ function fmtTime(t) {
   const ampm = h >= 12 ? 'PM' : 'AM';
   const hr = h % 12 || 12;
   return `${hr}:${String(m).padStart(2,'0')} ${ampm}`;
+}
+function fmtTimeRange(start, end) {
+  const s = fmtTime(start);
+  const e = fmtTime(end);
+  if (s && e) return `${s} - ${e}`;
+  return s || '';
 }
 
 // ─── APPOINTMENT CRUD ─────────────────────────────────────────────────────────
@@ -3940,27 +4506,59 @@ function openAppt(id) {
   document.getElementById('ap_contact').value = appt ? (appt.contactName||'') : '';
   document.getElementById('ap_date').value     = appt ? (appt.date||'') : today();
   document.getElementById('ap_time').value     = appt ? (appt.time||'') : '';
+  document.getElementById('ap_endTime').value  = appt ? (appt.endTime||'') : '';
+  document.getElementById('ap_endTime').dataset.manual = appt && appt.endTime ? 'true' : 'false';
   document.getElementById('ap_endDate').value  = appt ? (appt.endDate||'') : '';
   document.getElementById('ap_address').value  = appt ? (appt.address||'') : '';
   document.getElementById('ap_notes').value    = appt ? (appt.notes||'') : '';
   document.getElementById('ap_allDay').checked = appt ? !!appt.allDay : false;
   toggleApptAllDay();
+  if (!appt) onApptStartTimeChange();
   document.getElementById('apptModal').classList.remove('hidden');
+}
+
+function _addOneHourTimeStr(t) {
+  const [hh, mm] = String(t || '').split(':').map(Number);
+  if (Number.isNaN(hh) || Number.isNaN(mm)) return '';
+  const mins = (hh * 60 + mm + 60) % (24 * 60);
+  const h2 = Math.floor(mins / 60);
+  const m2 = mins % 60;
+  return `${String(h2).padStart(2,'0')}:${String(m2).padStart(2,'0')}`;
+}
+function markApptEndTimeManual() {
+  const endEl = document.getElementById('ap_endTime');
+  if (!endEl) return;
+  endEl.dataset.manual = endEl.value ? 'true' : 'false';
+}
+function onApptStartTimeChange() {
+  const allDay = document.getElementById('ap_allDay')?.checked;
+  const startEl = document.getElementById('ap_time');
+  const endEl = document.getElementById('ap_endTime');
+  if (!startEl || !endEl || allDay) return;
+  if (!startEl.value) return;
+  if (endEl.dataset.manual === 'true' && endEl.value) return;
+  endEl.value = _addOneHourTimeStr(startEl.value);
+  endEl.dataset.manual = 'false';
 }
 
 function toggleApptAllDay() {
   const allDay = document.getElementById('ap_allDay').checked;
+  const timeRow = document.getElementById('ap_timeRow');
   const timeEl = document.getElementById('ap_time');
+  const endTimeEl = document.getElementById('ap_endTime');
   const endEl  = document.getElementById('ap_endDate');
   const label  = document.getElementById('ap_timeLabel');
-  timeEl.style.display  = allDay ? 'none' : '';
+  if (timeRow) timeRow.style.display = allDay ? 'none' : 'grid';
   endEl.style.display   = allDay ? '' : 'none';
   label.textContent     = allDay ? 'End date' : 'Time';
   if (allDay) {
     timeEl.value = '';
+    endTimeEl.value = '';
+    endTimeEl.dataset.manual = 'false';
     if (!endEl.value) endEl.value = document.getElementById('ap_date').value || '';
   } else {
     endEl.value = '';
+    onApptStartTimeChange();
   }
 }
 function openApptOnDate(dateStr) {
@@ -3974,15 +4572,26 @@ async function saveAppt() {
   if (!clientName) { showAlert('Please enter a client name.'); return; }
   if (!date)       { showAlert('Please select a date.'); return; }
   const allDay = document.getElementById('ap_allDay').checked;
+  const startTime = document.getElementById('ap_time').value;
+  const endTime = document.getElementById('ap_endTime').value;
   const rawEnd = document.getElementById('ap_endDate').value;
   const endDate = (allDay && rawEnd && rawEnd > date) ? rawEnd : null;
+  if (!allDay && endTime && !startTime) {
+    showAlert('Please set a start time when using an end time.');
+    return;
+  }
+  if (!allDay && startTime && endTime && endTime <= startTime) {
+    showAlert('End time must be later than start time.');
+    return;
+  }
   const appt = {
     clientName,
     contactName: document.getElementById('ap_contact').value.trim(),
     date,
     allDay,
     endDate:  endDate || null,
-    time:     allDay ? '' : document.getElementById('ap_time').value,
+    time:     allDay ? '' : startTime,
+    endTime:  allDay ? '' : endTime,
     address:  document.getElementById('ap_address').value.trim(),
     notes:    document.getElementById('ap_notes').value.trim(),
     createdBy: currentUser ? currentUser.id : ''
@@ -4064,6 +4673,45 @@ const CLIENT_FIELD_LABELS = { firstName:'First Name', surname:'Last Name', compa
 let clientConflictQueue = [];
 let viewingClientId = null;
 let pendingNewClientName = null;
+
+function _getCurrentUserRecord() {
+  const id = currentUser?.id;
+  if (!id) return null;
+  return (state.users || []).find(u => u.id === id) || null;
+}
+function _sanitizeClientKeys(keys) {
+  if (!Array.isArray(keys)) return null;
+  const allowed = new Set(CLIENT_COLS.map(c => c.key));
+  return keys.filter(k => allowed.has(k));
+}
+function _readClientPref(prefKey, fallback) {
+  if (!currentUser || currentUser.isAdmin) return fallback;
+  const user = _getCurrentUserRecord();
+  const raw = user?.clientPrefs?.[prefKey];
+  const clean = _sanitizeClientKeys(raw);
+  return clean === null ? fallback : clean;
+}
+function _writeClientPref(prefKey, keys) {
+  const user = _getCurrentUserRecord();
+  if (!user || user.isAdmin) return;
+  if (!user.clientPrefs || typeof user.clientPrefs !== 'object') user.clientPrefs = {};
+  user.clientPrefs[prefKey] = _sanitizeClientKeys(keys) || [];
+  currentUser = user;
+}
+function _clientColumnsForView() {
+  const base = state.settings.clientColumns && state.settings.clientColumns.length
+    ? state.settings.clientColumns
+    : CLIENT_DEFAULT_COLS;
+  return _readClientPref('clientColumns', base);
+}
+function _clientExpandColsForView() {
+  const base = state.settings.clientExpandCols || CLIENT_COLS.map(c=>c.key);
+  return _readClientPref('clientExpandCols', base);
+}
+function _clientQuickColsForView() {
+  const base = state.settings.clientQuickCols || [];
+  return _readClientPref('clientQuickCols', base);
+}
 
 function parseCSVRobust(text) {
   text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -4209,7 +4857,7 @@ function toggleColPanel() {
   const panel = document.getElementById('colTogglePanel');
   const open = panel.style.display !== 'none' && panel.style.display !== '';
   if (open) { panel.style.display = 'none'; return; }
-  const visible = state.settings.clientColumns || CLIENT_DEFAULT_COLS;
+  const visible = _clientColumnsForView();
   panel.innerHTML = CLIENT_COLS.map(col => `
     <label>
       <input type="checkbox" ${visible.includes(col.key)?'checked':''} onchange="toggleClientCol('${col.key}',this.checked)" style="accent-color:var(--accent);cursor:pointer" />
@@ -4227,10 +4875,11 @@ document.addEventListener('click', e => {
 });
 
 function toggleClientCol(key, on) {
-  let cols = [...(state.settings.clientColumns || CLIENT_DEFAULT_COLS)];
+  let cols = [..._clientColumnsForView()];
   if (on) { if (!cols.includes(key)) cols.push(key); }
   else { cols = cols.filter(k => k !== key); }
-  state.settings.clientColumns = cols;
+  if (currentUser?.isAdmin) state.settings.clientColumns = cols;
+  else _writeClientPref('clientColumns', cols);
   save(); renderClients();
 }
 
@@ -4249,9 +4898,10 @@ function renderClients() {
     ? clients.filter(c => [c.firstName, c.surname, c.company, c.email, c.phone, c.city].some(v => v && v.toLowerCase().includes(search)))
     : clients;
   const cols = (() => {
-    const visible = state.settings.clientColumns && state.settings.clientColumns.length ? state.settings.clientColumns : CLIENT_DEFAULT_COLS;
+    const visible = _clientColumnsForView();
     return CLIENT_COLS.filter(c => visible.includes(c.key));
   })();
+  const expandColsSetting = _clientExpandColsForView();
   document.getElementById('clientCount').textContent = `${clients.length} Client${clients.length!==1?'s':''}`;
   const lastImport = state.settings.clientsLastImport;
   document.getElementById('clientsLastImport').textContent = lastImport ? `Last import: ${fmtDate(lastImport)}` : '';
@@ -4286,7 +4936,7 @@ function renderClients() {
             const isExpanded = expandedClients.has(c.id);
             const expandCols = (() => {
               if (window.innerWidth <= 600) return CLIENT_COLS;
-              const ec = state.settings.clientExpandCols;
+              const ec = expandColsSetting;
               if (!ec || !ec.length) return CLIENT_COLS;
               return CLIENT_COLS.filter(col => ec.includes(col.key));
             })();
@@ -4349,6 +4999,7 @@ function toggleClientExpand(id) {
   const wasExpanded = expandedClients.has(id);
   expandedClients.clear();
   if (!wasExpanded) expandedClients.add(id);
+  saveExpandedClientsState();
   renderClients();
 }
 
@@ -4777,7 +5428,7 @@ function openClientQuick(name) {
     c.lifetimeSpend ? `$${parseFloat(c.lifetimeSpend).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})} lifetime` : '',
   ].filter(Boolean).join(' · ');
   const quickCols = (() => {
-    const qc = state.settings.clientQuickCols;
+    const qc = _clientQuickColsForView();
     if (!qc || !qc.length) return CLIENT_COLS;
     return CLIENT_COLS.filter(col => qc.includes(col.key));
   })();
@@ -4808,6 +5459,7 @@ function cqShowInClients() {
   if (tab) switchTab('clients', tab);
   if (_cqClientId) {
     expandedClients.add(_cqClientId);
+    saveExpandedClientsState();
     setTimeout(() => {
       renderClients();
       const row = document.getElementById(`crow_${_cqClientId}`);
@@ -4866,25 +5518,36 @@ firebase.auth().signInAnonymously().catch(e => {
 });
 
 function goToTab(name) {
+  closeMobileMenu();
+  closeDesktopMenu();
   const btn = document.querySelector(`.tabs .tab[onclick*="'${name}'"]`);
   if (btn) switchTab(name, btn);
+}
+function goHeaderHome() {
+  expandedJobs.clear();
+  expandedHW.clear();
+  saveExpandedState();
+  goToTab('active');
+  renderJobs();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 // ─── TABS SCROLL INDICATOR ────────────────────────────────────────────────────
 function _initSettingsNavScroll() {
-  const nav = document.querySelector('.settings-nav');
-  const wrap = document.querySelector('.settings-nav-wrap');
-  if (!nav || !wrap) return;
-  function update() {
-    const atStart = nav.scrollLeft <= 2;
-    const atEnd = nav.scrollLeft + nav.clientWidth >= nav.scrollWidth - 2;
-    wrap.classList.toggle('snav-has-left', !atStart);
-    wrap.classList.toggle('snav-has-right', !atEnd);
-  }
-  nav.removeEventListener('scroll', nav._snavHandler);
-  nav._snavHandler = update;
-  nav.addEventListener('scroll', update, { passive: true });
-  requestAnimationFrame(update);
+  document.querySelectorAll('.settings-nav-wrap').forEach(wrap => {
+    const nav = wrap.querySelector('.settings-nav');
+    if (!nav) return;
+    function update() {
+      const atStart = nav.scrollLeft <= 2;
+      const atEnd = nav.scrollLeft + nav.clientWidth >= nav.scrollWidth - 2;
+      wrap.classList.toggle('snav-has-left', !atStart);
+      wrap.classList.toggle('snav-has-right', !atEnd);
+    }
+    nav.removeEventListener('scroll', nav._snavHandler);
+    nav._snavHandler = update;
+    nav.addEventListener('scroll', update, { passive: true });
+    requestAnimationFrame(update);
+  });
 }
 
 function _initTabsScroll() {
@@ -4912,6 +5575,36 @@ function _initTabsScroll() {
   document.querySelectorAll('.modal-overlay').forEach(el =>
     observer.observe(el, { attributes: true, attributeFilter: ['class'] })
   );
+})();
+
+// Header actions behavior (desktop dropdown + mobile drawer)
+(function() {
+  const actions = document.querySelector('.header-actions');
+  if (!actions) return;
+  actions.addEventListener('click', (e) => {
+    const target = e.target.closest('button, a');
+    if (!target) return;
+    if (window.innerWidth > 600) {
+      if (target.id === 'desktopMenuBtn') return;
+      closeDesktopMenu();
+      return;
+    }
+    closeMobileMenu();
+  });
+  document.addEventListener('click', (e) => {
+    if (window.innerWidth <= 600) return;
+    if (!actions.contains(e.target)) closeDesktopMenu();
+  });
+  window.addEventListener('resize', () => {
+    if (window.innerWidth > 600) closeMobileMenu();
+    if (window.innerWidth <= 600) closeDesktopMenu();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeMobileMenu();
+      closeDesktopMenu();
+    }
+  });
 })();
 
 document.addEventListener('keydown', e => {

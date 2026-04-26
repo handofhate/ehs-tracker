@@ -33,8 +33,32 @@
 
   .header { background: var(--bg2); border-bottom: 2px solid var(--accent); padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
   .header-title { font-family: var(--mono); font-size: 22px; font-weight: 600; letter-spacing: 0.05em; color: var(--accent); }
+  .header-title.tap-home { cursor: pointer; }
   .header-title span { color: var(--text2); font-weight: 400; }
-  .header-actions { display: flex; gap: 10px; align-items: center; }
+  .header-actions { display: flex; gap: 10px; align-items: center; position: relative; }
+  .desktop-menu-trigger { display: inline-flex; align-items: center; gap: 6px; }
+  .desktop-menu-panel {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    min-width: 240px;
+    background: var(--bg2);
+    border: 1px solid var(--border2);
+    border-radius: 6px;
+    padding: 10px;
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+    box-shadow: 0 12px 30px rgba(0,0,0,0.45);
+    z-index: 180;
+  }
+  .header-actions.desktop-open .desktop-menu-panel { display: flex; }
+  .desktop-menu-panel > * { width: 100%; text-align: left; }
+  .desktop-menu-inline-two { display: flex; gap: 8px; }
+  .desktop-menu-inline-two > .btn { flex: 1 1 0; min-width: 0; }
+  .desktop-menu-divider { height: 2px; background: var(--accent); margin: 16px 0; border: 0; }
+  .mobile-menu-btn { display: none; }
+  .mobile-menu-backdrop { display: none; }
 
   .btn { font-family: var(--mono); font-size: 16px; font-weight: 500; letter-spacing: 0.05em; padding: 8px 16px; border: none; cursor: pointer; border-radius: 3px; transition: all 0.15s; text-transform: uppercase; }
   .btn-primary { background: var(--accent); color: #0f1117; }
@@ -163,7 +187,8 @@
   .settings-modal-header { padding: 22px 24px 14px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); flex-shrink: 0; }
   .settings-modal-header .modal-title { margin: 0; }
   .settings-body { display: flex; flex: 1; min-height: 0; overflow: hidden; }
-  .settings-nav { display: flex; flex-direction: column; width: 136px; border-right: 1px solid var(--border); flex-shrink: 0; padding: 6px 0; overflow-y: auto; }
+  .settings-nav-wrap { position: relative; align-self: stretch; border-right: 1px solid var(--border); }
+  .settings-nav { display: flex; flex-direction: column; width: 136px; border-right: none; flex-shrink: 0; padding: 6px 0; overflow-y: auto; }
   .settings-nav-btn { padding: 10px 14px; font-family: var(--mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text3); cursor: pointer; background: none; border: none; text-align: left; width: 100%; transition: color 0.15s; }
   .settings-nav-btn:hover { color: var(--text2); }
   .settings-nav-btn.active { color: var(--accent); box-shadow: inset 2px 0 0 var(--accent); }
@@ -177,7 +202,6 @@
 
   .tabs-wrap { position: relative; overflow: hidden; }
   .tabs-arr { display: none; }
-  .settings-nav-wrap { position: relative; }
   .settings-nav-arr { display: none; }
   .tabs { display: flex; gap: 0; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
   .tab { font-family: var(--mono); font-size: 15px; text-transform: uppercase; letter-spacing: 0.08em; padding: 10px 18px; cursor: pointer; color: var(--text3); border-bottom: 2px solid transparent; transition: all 0.15s; margin-bottom: -1px; }
@@ -239,19 +263,50 @@
   }
 
   @media (max-width: 600px) {
-    /* Header — stacked on mobile */
-    .header { padding: 10px 12px; flex-direction: column; align-items: center; gap: 8px; }
+    /* Header + mobile slideout menu */
+    .header { padding: 10px 12px; flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; }
     .header-title { font-size: 18px; }
-    .header-actions { gap: 4px; justify-content: center; flex-wrap: nowrap; width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
-    .header-actions::-webkit-scrollbar { display: none; }
-    .header-actions > * { flex: 0 0 auto; }
-    .header-actions .btn-ghost.btn-sm { padding: 4px 7px; font-size: 11px; white-space: nowrap; }
-    .header-actions .btn-primary { padding: 4px 8px; font-size: 11px; white-space: nowrap; }
-    #undoBtn, #redoBtn { font-size: 0 !important; min-width: 28px; padding: 4px 6px !important; }
-    #undoBtn::before { content: '↩'; font-size: 14px; line-height: 1; }
-    #redoBtn::before { content: '↻'; font-size: 14px; line-height: 1; }
+    .mobile-menu-btn { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0; font-size: 20px; line-height: 1; background: transparent; color: var(--text2); border: 1px solid var(--border2); border-radius: 3px; cursor: pointer; }
+    .mobile-menu-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .mobile-menu-btn.open { border-color: var(--accent); color: var(--accent); background: rgba(245,166,35,0.08); }
+    .mobile-menu-backdrop { display: block; position: fixed; inset: 0; background: rgba(0,0,0,0.45); opacity: 0; pointer-events: none; transition: opacity 0.18s ease; z-index: 99; }
+    .mobile-menu-backdrop.open { opacity: 1; pointer-events: auto; }
+    .header-actions {
+      position: fixed;
+      top: 56px;
+      right: 0;
+      height: calc(100vh - 56px);
+      width: min(82vw, 320px);
+      max-width: 320px;
+      background: var(--bg2);
+      border-left: 1px solid var(--border2);
+      box-shadow: -10px 0 28px rgba(0,0,0,0.45);
+      padding: 18px 14px;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+      overflow-y: auto;
+      transform: translateX(100%);
+      transition: transform 0.2s ease;
+      z-index: 140;
+    }
+    .header-actions.open { transform: translateX(0); }
+    .desktop-menu-trigger { display: none !important; }
+    .desktop-menu-panel { position: static; min-width: 0; background: transparent; border: none; box-shadow: none; padding: 0; display: flex !important; gap: 8px; flex: 1; }
+    .desktop-menu-panel > * { width: 100%; }
+    .header-actions .btn-ghost.btn-sm,
+    .header-actions .btn-primary { padding: 14px 14px; font-size: 20px; white-space: nowrap; text-align: left; }
+    #newJobBtn { order: 1; }
+    #payOutBtn { order: 2; }
+    #splitPayBtn { order: 3; }
+    #splitLedgerBtn { order: 4; }
+    #undoRedoRow { order: 5; }
+    #settingsBtn, #settingsEmpBtn, #signOutBtn { order: 50; }
+    .desktop-menu-divider { order: 49; margin: 18px 0 14px; }
+    .desktop-menu-divider { display: none !important; }
+    #settingsBtn, #settingsEmpBtn { margin-top: auto; }
     /* On mobile, hide sign out and user label — sign out is in Settings modal */
-    #signOutBtn { display: none !important; }
     #headerUserLabel { display: none !important; }
 
     /* Main padding */
@@ -386,7 +441,7 @@
     .settings-modal { width: 100%; height: 85vh; }
     .settings-modal-header { padding: 16px 16px 12px; }
     .settings-body { flex-direction: column; }
-    .settings-nav-wrap { flex-shrink: 0; overflow: hidden; border-bottom: 1px solid var(--border); }
+    .settings-nav-wrap { flex-shrink: 0; overflow: hidden; border-bottom: 1px solid var(--border); border-right: none; align-self: auto; }
     .settings-nav { flex-direction: row; width: 100%; border-right: none; border-bottom: none; padding: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; flex-shrink: 0; }
     .settings-nav::-webkit-scrollbar { display: none; }
     .settings-nav-btn { padding: 9px 13px; white-space: nowrap; width: auto; flex-shrink: 0; font-size: 11px; text-align: center; }
@@ -559,17 +614,25 @@
 </div>
 
 <div class="header">
-  <div class="header-title">JOB<span>/</span>TRACKER</div>
+  <div class="header-title tap-home" onclick="goHeaderHome()">JOB<span>/</span>TRACKER</div>
+  <button class="mobile-menu-btn" id="mobileMenuBtn" onclick="toggleMobileMenu()" aria-label="Open menu">☰</button>
   <div class="header-actions">
-    <span id="headerUserLabel" style="font-family:var(--mono);font-size:12px;color:var(--text3);display:none"></span>
-    <button class="btn btn-ghost btn-sm" id="signOutBtn" onclick="signOut()" style="display:none">⎋ Sign Out</button>
+    <button class="btn btn-ghost btn-sm desktop-menu-trigger" id="desktopMenuBtn" onclick="toggleDesktopMenu()" aria-label="Open actions menu">☰ Menu</button>
+    <div class="desktop-menu-panel" id="desktopMenuPanel">
+      <button class="btn btn-primary header-admin" id="newJobBtn" onclick="openNewJobModal()">+ New Job</button>
+      <button class="btn btn-ghost btn-sm header-admin" id="payOutBtn" onclick="openPayOut()">$ Pay Out</button>
+      <button class="btn btn-ghost btn-sm header-admin" id="splitPayBtn" onclick="openSplitPay()">÷ Split Pay</button>
+      <button class="btn btn-ghost btn-sm header-admin" id="splitLedgerBtn" onclick="openSplitLedger()">≡ Ledger</button>
+      <div class="desktop-menu-inline-two header-admin" id="undoRedoRow">
+        <button class="btn btn-ghost btn-sm" id="undoBtn" onclick="undoAction()" style="opacity:0.35" title="Nothing to undo">↩ Undo</button>
+        <button class="btn btn-ghost btn-sm" id="redoBtn" onclick="redoAction()" style="opacity:0.35" title="Nothing to redo">↻ Redo</button>
+      </div>
+      <div class="desktop-menu-divider" id="headerMenuDivider"></div>
+      <button class="btn btn-ghost btn-sm header-admin" id="settingsBtn" onclick="openSettings()">⚙ Settings</button>
+      <button class="btn btn-ghost btn-sm header-emp" id="settingsEmpBtn" onclick="openMySettings()" style="display:none">⚙ Settings</button>
+      <button class="btn btn-ghost btn-sm" id="signOutBtn" onclick="signOut()" style="display:none">⎋ Sign Out</button>
+    </div>
     <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)" />
-    <button class="btn btn-ghost btn-sm header-emp" onclick="openMySettings()" style="display:none">⚙ Settings</button>
-    <button class="btn btn-ghost btn-sm header-admin" onclick="openSettings()">⚙ Settings</button>
-    <button class="btn btn-ghost btn-sm header-admin" id="splitPayBtn" onclick="openSplitPay()">÷ Split Pay</button>
-    <button class="btn btn-ghost btn-sm header-admin" id="undoBtn" onclick="undoAction()" style="opacity:0.35" title="Nothing to undo">↩ Undo</button>
-    <button class="btn btn-ghost btn-sm header-admin" id="redoBtn" onclick="redoAction()" style="opacity:0.35" title="Nothing to redo">↻ Redo</button>
-    <button class="btn btn-primary header-admin" onclick="openNewJobModal()">+ New Job</button>
   </div>
 </div>
 
@@ -695,6 +758,7 @@
     </div>
   </div>
 </div>
+<div class="mobile-menu-backdrop" id="mobileMenuBackdrop" onclick="closeMobileMenu()"></div>
 <!-- ADD ITEM MODAL -->
 <div id="addItemModal" class="modal-overlay hidden">
   <div class="modal">
@@ -712,7 +776,7 @@
   <div class="modal settings-modal">
     <div class="settings-modal-header">
       <div class="modal-title">Settings</div>
-      <span style="font-family:var(--mono);font-size:12px;color:var(--text3);cursor:pointer;text-decoration:underline dotted" onclick="openChangelog()">v1.19</span>
+      <span style="font-family:var(--mono);font-size:12px;color:var(--text3);cursor:pointer;text-decoration:underline dotted" onclick="openChangelog()">v1.20</span>
     </div>
     <div class="settings-body">
       <div class="settings-nav-wrap">
@@ -997,7 +1061,10 @@
             All day
           </label>
         </div>
-        <input class="form-input" id="ap_time" type="time" autocomplete="off" />
+        <div id="ap_timeRow" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <input class="form-input" id="ap_time" type="time" autocomplete="off" onchange="onApptStartTimeChange()" />
+          <input class="form-input" id="ap_endTime" type="time" autocomplete="off" onchange="markApptEndTimeManual()" />
+        </div>
         <input class="form-input" id="ap_endDate" type="date" autocomplete="off" style="display:none" />
       </div>
     </div>
@@ -1047,7 +1114,16 @@
     <div class="modal-title">Version History</div>
     <div style="font-family:var(--mono);font-size:13px;line-height:1.7;color:var(--text2)">
       <div style="margin-bottom:14px">
-        <div style="color:var(--accent);font-size:14px;margin-bottom:4px">v1.19 — Apr 2026</div>
+        <div style="color:var(--accent);font-size:14px;margin-bottom:4px">v1.20 � Apr 2026</div>
+        <div>� New Pay Out workflow with employee picker and Include Potential Pay toggle</div>
+        <div>� Split Pay and Pay Out ledger modal with jump-to-job/homewatch links</div>
+        <div>� Desktop header actions moved into a cleaner menu; mobile slideout menu added</div>
+        <div>� Employee settings redesigned with USER / CLIENTS tabs and split percentage badge</div>
+        <div>� User-scoped UI preferences for summary timeframe, schedule view state, and client row expansion</div>
+        <div>� Schedule list now groups by day/date headers; timed appointments support start + finish times</div>
+      </div>
+      <div style="margin-bottom:14px">
+        <div style="color:var(--text3);font-size:14px;margin-bottom:4px">v1.19 — Apr 2026</div>
         <div>· Partial Payments workflow (dollar + percentage based)</div>
         <div>· Revenue + button moved to card header for faster access</div>
         <div>· Split display cleanup: parent rows keep original value, child rows show Partial Paid / Partial Left</div>
@@ -1234,6 +1310,51 @@
     </div>
   </div>
 </div>
+<!-- SPLIT LEDGER MODAL -->
+<div id="splitLedgerModal" class="modal-overlay hidden">
+  <div class="modal modal-wide">
+    <div class="modal-title">Split Pay / Pay Out Ledger</div>
+    <div class="form-hint" style="margin-top:-12px;margin-bottom:10px">Shows combined transactions in one place, including reconstructed legacy groups.</div>
+    <div id="splitLedgerList" style="max-height:420px;overflow-y:auto"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('splitLedgerModal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- PAY OUT MODAL -->
+<div id="payOutModal" class="modal-overlay hidden">
+  <div class="modal modal-wide">
+    <div class="modal-title">Employee Pay Out</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Employee</label>
+        <select class="form-input" id="po_employee" onchange="renderPayOut()"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Date</label>
+        <input class="form-input" id="po_date" type="date" />
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px;margin-bottom:10px">
+      <div class="form-label" style="margin:0">Include Potential Pay</div>
+      <div style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none" onclick="togglePayOutPotential()">
+        <span style="font-family:var(--mono);font-size:14px;color:var(--text3);text-transform:uppercase;letter-spacing:0.1em" id="po_potentialLabel">Off</span>
+        <span id="po_potentialTrack" data-on="false" style="display:inline-flex;align-items:center;width:40px;height:22px;border-radius:11px;background:var(--border2);transition:background 0.2s;cursor:pointer;flex-shrink:0;padding:2px;box-sizing:border-box">
+          <span id="po_potentialThumb" style="width:18px;height:18px;border-radius:50%;background:#fff;transition:transform 0.2s;display:block"></span>
+        </span>
+      </div>
+    </div>
+    <div id="po_totals" style="background:var(--bg3);border:1px solid var(--border2);border-radius:3px;padding:12px 16px;font-family:var(--mono);font-size:14px;display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-bottom:10px"></div>
+    <div id="po_rows" style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:3px;padding:0 12px"></div>
+    <div class="form-hint" id="po_hint" style="margin-top:8px">Current-owed mode ignores negative rows so prepaid jobs do not reduce payout.</div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('payOutModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="applyPayOutToSplitPay()">Use in Split Pay</button>
+    </div>
+  </div>
+</div>
+
 <!-- SPLIT PAY MODAL -->
 <div id="splitPayModal" class="modal-overlay hidden">
   <div class="modal modal-wide">
@@ -1338,15 +1459,41 @@
 
 <!-- EMPLOYEE SETTINGS MODAL -->
 <div id="mySettingsModal" class="modal-overlay hidden">
-  <div class="modal settings-modal" style="max-width:400px">
+  <div class="modal settings-modal" style="max-width:760px">
     <div class="settings-modal-header">
       <div class="modal-title">Settings</div>
     </div>
-    <div style="padding:20px 24px;flex:1;overflow-y:auto">
-      <div class="form-group">
-        <label class="form-label">Signed in as</label>
-        <div style="font-family:var(--mono);font-size:17px;color:var(--text);margin-bottom:12px" id="ms_whoami"></div>
-        <button class="btn btn-ghost btn-sm" onclick="closeModal('mySettingsModal');openChangePin()">🔑 Change My PIN</button>
+    <div class="settings-body">
+      <div class="settings-nav-wrap">
+        <span class="settings-nav-arr settings-nav-arr-l">‹</span>
+        <nav class="settings-nav">
+          <button class="settings-nav-btn active" onclick="mySettingsTab('user',this)">User</button>
+          <button class="settings-nav-btn" onclick="mySettingsTab('clients',this)">Clients</button>
+        </nav>
+        <span class="settings-nav-arr settings-nav-arr-r">›</span>
+      </div>
+      <div style="flex:1;overflow:hidden;display:flex;flex-direction:column">
+        <div id="mstab-user" class="settings-panel active">
+          <div class="user-row" style="padding-top:0">
+            <div>
+              <div class="user-row-name" style="font-size:16px" id="ms_whoami"></div>
+              <span class="user-row-badge emp" id="ms_split">66% split</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-ghost btn-sm" onclick="closeModal('mySettingsModal');openChangePin()">🔑 Change My PIN</button>
+            </div>
+          </div>
+        </div>
+        <div id="mstab-clients" class="settings-panel">
+          <div class="form-group">
+            <label class="form-label">Expanded Row Fields</label>
+            <div id="ms_expandColsList" style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px"></div>
+          </div>
+          <div class="form-group" style="margin-top:16px;border-top:1px solid var(--border);padding-top:16px">
+            <label class="form-label">Quick View Fields</label>
+            <div id="ms_quickColsList" style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px"></div>
+          </div>
+        </div>
       </div>
     </div>
     <div class="settings-modal-footer">
@@ -1399,6 +1546,7 @@
 <div id="undoToast">↩ Undo applied</div>
 </body>
 </html>
+
 
 
 
