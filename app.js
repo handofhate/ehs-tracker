@@ -1,4 +1,4 @@
-// ─── FIREBASE ─────────────────────────────────────────────────────────────────
+﻿// â”€â”€â”€ FIREBASE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const firebaseConfig = {
   apiKey: "AIzaSyCZyxBVvINYbPeWSDkNPZsxnw9f_6uGEV4",
   authDomain: "ehs-tracker-7d6ed.firebaseapp.com",
@@ -11,7 +11,7 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const DOC = db.collection('jobtracker').doc('state');
 
-// ─── STATE ────────────────────────────────────────────────────────────────────
+// â”€â”€â”€ STATE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 let state = {
   settings: {
     empName: 'Employee',
@@ -32,9 +32,9 @@ let state = {
 };
 let editingJobId = null;
 let addItemContext = null;
-let payOutCtx = { employeeId: '', includePotential: false };
-let expandedJobs = new Set(); // local only — never saved to Firestore
-let expandedHW   = new Set(); // local only — never saved to Firestore
+let payOutCtx = { employeeId: '', mode: 'pay_now' };
+let expandedJobs = new Set(); // local only - never saved to Firestore
+let expandedHW   = new Set(); // local only - never saved to Firestore
 let expandedClients = new Set();
 let notesCtx = null; // { type: 'job'|'hw', id }
 let empSummaryTimeframe = '30'; // days, or 'all' (user-scoped local preference)
@@ -109,7 +109,7 @@ function saveExpandedClientsState() {
   try { localStorage.setItem(_uiKey('expClients'), JSON.stringify([...expandedClients])); } catch(e) {}
 }
 
-// ─── PERSIST ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€ PERSIST â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function migrateState(s) {
   if (!s.settings.empName) s.settings.empName = 'Employee';
   if (s.settings.historicalAdj !== undefined && s.settings.debtOriginal === undefined) {
@@ -192,8 +192,10 @@ function migrateState(s) {
     });
   });
   (s.jobs || []).forEach(job => {
-    delete job._expanded; // moved to local localStorage — not stored in Firestore
+    delete job._expanded; // moved to local localStorage - not stored in Firestore
     if (!job.employeeId && defaultEmp) job.employeeId = defaultEmp.id;
+    if (job.jobType !== 'hourly' && job.jobType !== 'quoted') job.jobType = 'quoted';
+    if (job.hourlyRate === undefined) job.hourlyRate = 0;
     if (job.repaymentMode === undefined) job.repaymentMode = false;
     if (job.contactName === undefined) job.contactName = '';
     if (!job.jobNotes) {
@@ -237,6 +239,24 @@ function migrateState(s) {
       if (a.partialMode === undefined) a.partialMode = '';
       if (a.partialPercent === undefined) a.partialPercent = 0;
       if (a.partialDate === undefined) a.partialDate = '';
+      if (a.isHours === undefined) a.isHours = false;
+      if (a.hours === undefined) a.hours = 0;
+      if (a.rate === undefined) a.rate = 0;
+    });
+    if (!job.revenueItems) job.revenueItems = [];
+    (job.revenueItems || []).forEach(r => {
+      if (r.status === undefined) { r.status = 'pending'; }
+      if (r.date === undefined) r.date = '';
+      if (!r.billingState) r.billingState = 'none';
+      if (!r.squarePaymentIds) r.squarePaymentIds = [];
+      if (!r.reconcileStatus) r.reconcileStatus = 'none';
+      if (r.partialState === undefined) r.partialState = '';
+      if (r.partialGroupId === undefined) r.partialGroupId = '';
+      if (r.partialParentAmount === undefined) r.partialParentAmount = 0;
+      if (r.partialParentLabel === undefined) r.partialParentLabel = '';
+      if (r.partialMode === undefined) r.partialMode = '';
+      if (r.partialPercent === undefined) r.partialPercent = 0;
+      if (r.partialDate === undefined) r.partialDate = '';
     });
     if (!job.subtractions) job.subtractions = [];
     (job.subtractions || []).forEach(a => {
@@ -269,9 +289,13 @@ function migrateState(s) {
       if (!p.snapshotBefore || typeof p.snapshotBefore !== 'object') {
         p.snapshotBefore = {
           milestones: JSON.parse(JSON.stringify(job.milestones || [])),
+          revenueItems: JSON.parse(JSON.stringify(job.revenueItems || [])),
           addOns: JSON.parse(JSON.stringify(job.addOns || [])),
           subtractions: JSON.parse(JSON.stringify(job.subtractions || []))
         };
+      }
+      if (!Array.isArray(p.snapshotBefore.revenueItems)) {
+        p.snapshotBefore.revenueItems = JSON.parse(JSON.stringify(job.revenueItems || []));
       }
       if (p.createdAt === undefined) p.createdAt = '';
     });
@@ -303,7 +327,7 @@ async function save() {
     _lastSavedState = JSON.parse(JSON.stringify(state));
   } catch(e) {
     console.error('Save failed:', e);
-    showAlert('Save failed — check your connection.');
+    showAlert('Save failed - check your connection.');
   } finally {
     isSaving = false;
   }
@@ -317,15 +341,15 @@ async function undoAction() {
   _lastSavedState = JSON.parse(JSON.stringify(prev));
   _updateUndoBtn();
   _updateRedoBtn();
-  _showUndoToast('↩ ' + description);
+  _showUndoToast('Undo: ' + description);
   isSaving = true;
   try {
     await DOC.set(prev);
-    // Apply directly — don't rely on onSnapshot (it fires before set() resolves and gets suppressed by isSaving)
+    // Apply directly - do not rely on onSnapshot (it fires before set() resolves and gets suppressed by isSaving)
     _applyRestoredState(prev);
   } catch(e) {
     console.error('Undo failed:', e);
-    showAlert('Undo failed — check your connection.');
+    showAlert('Undo failed - check your connection.');
     undoStack.push(prev);
     redoStack.pop();
     _lastSavedState = JSON.parse(JSON.stringify(state));
@@ -344,14 +368,14 @@ async function redoAction() {
   _lastSavedState = JSON.parse(JSON.stringify(next));
   _updateUndoBtn();
   _updateRedoBtn();
-  _showUndoToast('↻ ' + description);
+  _showUndoToast('Redo: ' + description);
   isSaving = true;
   try {
     await DOC.set(next);
     _applyRestoredState(next);
   } catch(e) {
     console.error('Redo failed:', e);
-    showAlert('Redo failed — check your connection.');
+    showAlert('Redo failed - check your connection.');
     redoStack.push(next);
     undoStack.pop();
     _lastSavedState = JSON.parse(JSON.stringify(state));
@@ -387,7 +411,7 @@ function _updateRedoBtn() {
 function _showUndoToast(msg) {
   const t = document.getElementById('undoToast');
   if (!t) return;
-  t.textContent = msg || '↩ Undo applied';
+  t.textContent = msg || 'Undo applied';
   t.classList.remove('show');
   // Force reflow so re-triggering the animation works
   void t.offsetWidth;
@@ -489,7 +513,7 @@ function load() {
         save();
       }
     } else if (legacy) {
-      // First time using Firebase — migrate local data up
+      // First time using Firebase - migrate local data up
       try {
         state = migrateState(JSON.parse(legacy));
         syncHomewatchAutoInvoices();
@@ -506,7 +530,7 @@ function load() {
       <div style="font-family:var(--mono);font-size:13px;color:var(--text3);margin-top:8px">${esc(e.message)}</div>`;
   });
 
-  // Real-time listener — keeps all open tabs/devices in sync
+  // Real-time listener - keeps all open tabs/devices in sync
   DOC.onSnapshot(doc => {
     if (doc.exists && !isSaving) {
       _lastSavedState = JSON.parse(JSON.stringify(doc.data()));
@@ -527,7 +551,8 @@ function uid() { return crypto.randomUUID(); }
 function today() { return new Date().toISOString().slice(0,10); }
 function fmt(n) {
   if (n === null || n === undefined || isNaN(n)) return '$0.00';
-  if (Object.is(n, -0) || (n < 0 && n > -0.005)) n = 0;
+  n = _roundMoney(n);
+  if (Object.is(n, -0) || Math.abs(n) < 0.005) n = 0;
   const s = Math.abs(n).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 });
   return (n < 0 ? '-$' : '$') + s;
 }
@@ -544,7 +569,7 @@ function _squareBaseUrl() {
 
 async function callSquareFn(endpoint, payload = {}) {
   const base = _squareBaseUrl();
-  if (!base) throw new Error('Square Functions Base URL is not configured in Settings → Square API.');
+  if (!base) throw new Error('Square Functions Base URL is not configured in Settings to Square API.');
   const u = firebase.auth().currentUser;
   if (!u) throw new Error('Not authenticated.');
   const token = await u.getIdToken();
@@ -564,17 +589,21 @@ async function callSquareFn(endpoint, payload = {}) {
   return json;
 }
 
-// ─── CALCULATIONS ─────────────────────────────────────────────────────────────
+// â”€â”€â”€ CALCULATIONS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function calcSplit(gross, { empShare, feeRate, txnFee = 0, txnCount = 0 }) {
-  const totalFees  = gross * feeRate + txnFee * txnCount;
-  const netRevenue = gross - totalFees;
-  const empOwed    = netRevenue * empShare;
-  const ownerOwed  = netRevenue * (1 - empShare);
+  const normalizedGross = _roundMoney(gross);
+  const totalFees  = _roundMoney(normalizedGross * feeRate + txnFee * txnCount);
+  const netRevenue = _roundMoney(normalizedGross - totalFees);
+  const empOwed    = _roundMoney(netRevenue * empShare);
+  const ownerOwed  = _roundMoney(netRevenue * (1 - empShare));
   return { totalFees, netRevenue, empOwed, ownerOwed };
 }
 
 function getEmp(userId) {
   return state.users.find(u => u.id === userId);
+}
+function _jobType(job) {
+  return job?.jobType === 'hourly' ? 'hourly' : 'quoted';
 }
 
 function calcJob(job) {
@@ -585,18 +614,32 @@ function calcJob(job) {
   const effectiveOwnerShare = job.repaymentMode ? (debtOwnerShare || 0.50) : normalOwnerShare;
   const effectiveEmpShare   = 1 - effectiveOwnerShare;
   const ownerShare = effectiveOwnerShare;
+  const isHourly = _jobType(job) === 'hourly';
+  const revenueItems = isHourly ? (job.revenueItems || []) : [];
+  const revenueTotal = revenueItems.reduce((s, r) => s + (r.amount || 0), 0);
 
   const addOnTotal      = (job.addOns       || []).reduce((s,a) => s + (a.amount||0), 0);
   const subtractionTotal= (job.subtractions || []).reduce((s,a) => s + (a.amount||0), 0);
-  const contractTotal   = (job.quote || 0) + addOnTotal - subtractionTotal;
+  const contractTotal   = (isHourly ? revenueTotal : (job.quote || 0)) + addOnTotal - subtractionTotal;
 
   let collectedGross = 0, estimatedFees = 0, collectedTxns = 0;
-  (job.milestones || []).forEach(m => {
-    if (m.status === 'collected') {
-      const g = (m.pct/100) * (job.quote||0);
-      collectedGross += g; estimatedFees += g * feeRate; collectedTxns++;
-    }
-  });
+  if (isHourly) {
+    revenueItems.forEach(r => {
+      if ((r.status || 'pending') === 'collected') {
+        const g = Number(r.amount || 0);
+        collectedGross += g;
+        estimatedFees += g * feeRate;
+        collectedTxns++;
+      }
+    });
+  } else {
+    (job.milestones || []).forEach(m => {
+      if (m.status === 'collected') {
+        const g = (m.pct/100) * (job.quote||0);
+        collectedGross += g; estimatedFees += g * feeRate; collectedTxns++;
+      }
+    });
+  }
   (job.addOns || []).forEach(a => {
     if (a.status === 'collected') {
       collectedGross += a.amount||0; estimatedFees += (a.amount||0) * feeRate; collectedTxns++;
@@ -613,8 +656,16 @@ function calcJob(job) {
   const netRevenue = collectedGross - totalFees;
 
   let pendingGross = 0, pendingTxns = 0;
-  (job.milestones || []).forEach(m => { if (m.status !== 'collected') pendingGross += (m.pct/100)*(job.quote||0); });
-  (job.milestones || []).forEach(m => { if (m.status !== 'collected') pendingTxns++; });
+  if (isHourly) {
+    revenueItems.forEach(r => {
+      if ((r.status || 'pending') === 'collected') return;
+      pendingGross += Number(r.amount || 0);
+      pendingTxns++;
+    });
+  } else {
+    (job.milestones || []).forEach(m => { if (m.status !== 'collected') pendingGross += (m.pct/100)*(job.quote||0); });
+    (job.milestones || []).forEach(m => { if (m.status !== 'collected') pendingTxns++; });
+  }
   (job.addOns       || []).forEach(a => { if (a.status !== 'collected') { pendingGross += a.amount||0; pendingTxns++; } });
   (job.subtractions || []).forEach(a => { if (a.status !== 'collected') pendingGross -= a.amount||0; });
 
@@ -641,12 +692,12 @@ function calcJob(job) {
   const ownerTotal      = ownerProfit + ownerMats;
   const totalHours      = (job.hours||[]).reduce((s,h)=>s+(h.hours||0),0);
 
-  return { contractTotal, addOnTotal, subtractionTotal, collectedGross, pendingGross,
-    totalFees, netRevenue, totalMats, ownerMats, empMats,
-    profitPool, empProfit, ownerProfit, debtContribution,
-    empTotalOwed, advancesPaid, linkedDebtPaid, empBalance,
-    outstanding, projectedGross, projectedFees, projectedNetRevenue, projectedProfitPool,
-    potentialEmpTotalOwed, potentialEmpBalance, ownerTotal, totalHours };
+  return { contractTotal: _roundMoney(contractTotal), addOnTotal: _roundMoney(addOnTotal), subtractionTotal: _roundMoney(subtractionTotal), collectedGross: _roundMoney(collectedGross), pendingGross: _roundMoney(pendingGross),
+    totalFees: _roundMoney(totalFees), netRevenue: _roundMoney(netRevenue), totalMats: _roundMoney(totalMats), ownerMats: _roundMoney(ownerMats), empMats: _roundMoney(empMats),
+    profitPool: _roundMoney(profitPool), empProfit: _roundMoney(empProfit), ownerProfit: _roundMoney(ownerProfit), debtContribution: _roundMoney(debtContribution),
+    empTotalOwed: _roundMoney(empTotalOwed), advancesPaid: _roundMoney(advancesPaid), linkedDebtPaid: _roundMoney(linkedDebtPaid), empBalance: _roundMoney(empBalance),
+    outstanding: _roundMoney(outstanding), projectedGross: _roundMoney(projectedGross), projectedFees: _roundMoney(projectedFees), projectedNetRevenue: _roundMoney(projectedNetRevenue), projectedProfitPool: _roundMoney(projectedProfitPool),
+    potentialEmpTotalOwed: _roundMoney(potentialEmpTotalOwed), potentialEmpBalance: _roundMoney(potentialEmpBalance), ownerTotal: _roundMoney(ownerTotal), totalHours };
 }
 
 function calcHW(hw) {
@@ -663,7 +714,18 @@ function calcHW(hw) {
   const empBalance     = empOwed - advancesPaid - linkedDebtPaid;
   const { empOwed: potentialEmpOwed } = calcSplit(collectedGross + pendingGross, { empShare, feeRate, txnFee, txnCount: txnCount + (hw.payments||[]).filter(p=>p.status!=='collected').length });
   const potentialEmpBalance = potentialEmpOwed - advancesPaid - linkedDebtPaid;
-  return { collectedGross, pendingGross, totalFees, netRevenue, empOwed, ownerOwed, advancesPaid, linkedDebtPaid, empBalance, potentialEmpBalance };
+  return {
+    collectedGross: _roundMoney(collectedGross),
+    pendingGross: _roundMoney(pendingGross),
+    totalFees: _roundMoney(totalFees),
+    netRevenue: _roundMoney(netRevenue),
+    empOwed: _roundMoney(empOwed),
+    ownerOwed: _roundMoney(ownerOwed),
+    advancesPaid: _roundMoney(advancesPaid),
+    linkedDebtPaid: _roundMoney(linkedDebtPaid),
+    empBalance: _roundMoney(empBalance),
+    potentialEmpBalance: _roundMoney(potentialEmpBalance)
+  };
 }
 
 function getHWBillDateForMonth(hw, year, month) {
@@ -708,7 +770,7 @@ function syncHomewatchAutoInvoices() {
   return changed;
 }
 
-// ─── HOMEWATCH ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ HOMEWATCH â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 let editingHWId  = null;
 let hwPayContext = null;
 let hwPayMode    = 'payment'; // 'payment' | 'advance'
@@ -737,16 +799,16 @@ function hwCard(hw) {
         <div class="job-header-main" onclick="toggleHeaderDesktop(event, 'hw', '${hw.id}')">
           <div class="job-name" style="display:flex;align-items:center;gap:8px">
             ${esc(hw.name)}${paused?' <span style="font-size:13px;color:var(--text3)">(paused)</span>':''}
-            ${clientByName(hw.name) ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 7px;flex-shrink:0" onclick="event.stopPropagation();openClientQuick('${esc(hw.name)}')" title="View in Clients">👤</button>` : ''}
+            ${clientByName(hw.name) ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 7px;flex-shrink:0" onclick="event.stopPropagation();openClientQuick('${esc(hw.name)}')" title="View in Clients">${jobIconSvg('client')}</button>` : ''}
           </div>
-          <div class="job-meta"><span style="font-size:13px;color:var(--text3)">Since ${hw.startDate ? fmtDate(hw.startDate) : '—'} · ${fmt(hw.monthlyRate)}/mo</span>${hwEmpName ? `<span style="font-size:13px;color:var(--text3)"> · </span><span style="color:var(--purple);font-size:13px">${esc(hwEmpName)}</span>` : ''}</div>
+          <div class="job-meta"><span style="font-size:13px;color:var(--text3)">Since ${hw.startDate ? fmtDate(hw.startDate) : '-'} | ${fmt(hw.monthlyRate)}/mo</span>${hwEmpName ? `<span style="font-size:13px;color:var(--text3)"> | </span><span style="color:var(--purple);font-size:13px">${esc(hwEmpName)}</span>` : ''}</div>
         </div>
         <div class="job-header-btns">
           <button class="btn btn-ghost btn-sm job-icon-btn hw-notes-btn${nc>0?' accent':''}" onclick="event.stopPropagation();openNotes('hw','${hw.id}')" title="Notes" aria-label="Notes">${jobIconSvg('notes')}</button>
-          <button class="btn btn-ghost btn-sm admin-only" onclick="event.stopPropagation();toggleHWPause('${hw.id}')" title="${paused?'Resume':'Pause'}">${paused?'▶ Resume':'⏸ Pause'}</button>
-          <button class="btn btn-ghost btn-sm admin-only" onclick="event.stopPropagation();openEditHW('${hw.id}')" title="Edit">Edit</button>
-          <button class="btn btn-danger btn-sm admin-only" onclick="event.stopPropagation();deleteHW('${hw.id}')" title="Delete">DEL</button>
-          <div class="job-chevron" onclick="event.stopPropagation();toggleHW('${hw.id}')">▾</div>
+          <button class="btn btn-ghost btn-sm admin-only" onclick="event.stopPropagation();toggleHWPause('${hw.id}')" title="${paused?'Resume':'Pause'}">${paused?'Resume':'Pause'}</button>
+          <button class="btn btn-ghost btn-sm admin-only job-icon-btn" onclick="event.stopPropagation();openEditHW('${hw.id}')" title="Edit" aria-label="Edit">${jobIconSvg('edit')}</button>
+          <button class="btn btn-danger btn-sm btn-icon-only admin-only" onclick="event.stopPropagation();deleteHW('${hw.id}')" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
+          <div class="job-chevron" onclick="event.stopPropagation();toggleHW('${hw.id}')">v</div>
         </div>
       </div>
       ${isExp ? hwDetail(hw, c) : ''}
@@ -779,9 +841,9 @@ function hwDetail(hw, c) {
           <div class="line-item hw-pay-row" style="gap:8px">
             ${hwPayBadgeHtml(p.status, hw.id, p.id)}
             <div class="hw-pay-right">
-              <span class="hw-pay-meta">${fmtDate(p.date)||p.date||'—'}</span>
+              <span class="hw-pay-meta">${fmtDate(p.date)||p.date||'-'}</span>
               <span class="hw-pay-amount">${fmt(p.amount)}</span>
-              <button class="btn btn-danger btn-sm admin-only" onclick="removeHWPayment('${hw.id}','${p.id}')">DEL</button>
+              <button class="btn btn-danger btn-sm btn-icon-only admin-only" onclick="removeHWPayment('${hw.id}','${p.id}')" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
             </div>
           </div>`).join('')
         : '<div style="color:var(--text3);font-size:15px;padding:4px 0">No payments logged yet.</div>'}
@@ -794,9 +856,9 @@ function hwDetail(hw, c) {
           <div class="line-item admin-only hw-pay-row hw-advance-row" style="gap:8px">
             <span class="hw-pay-spacer"></span>
             <div class="hw-pay-right">
-              <span class="hw-pay-meta">${fmtDate(a.date)||a.date||'—'}</span>
+              <span class="hw-pay-meta">${fmtDate(a.date)||a.date||'-'}</span>
               <span class="hw-pay-amount green">-${fmt(a.amount)}</span>
-              <button class="btn btn-danger btn-sm" onclick="removeHWAdvance('${hw.id}','${a.id}')">DEL</button>
+              <button class="btn btn-danger btn-sm btn-icon-only" onclick="removeHWAdvance('${hw.id}','${a.id}')" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
             </div>
           </div>`).join('')
         : '<div class="admin-only" style="color:var(--text3);font-size:15px;padding:4px 0">No payments made yet.</div>'}
@@ -888,7 +950,7 @@ function toggleHWPause(hwId) {
 function openAddHWPayment(hwId) {
   hwPayContext = hwId; hwPayMode = 'payment';
   const hw = (state.homewatch||[]).find(h=>h.id===hwId);
-  document.getElementById('hwPayModalTitle').textContent = `Log Client Payment — ${hw?.name||''}`;
+  document.getElementById('hwPayModalTitle').textContent = `Log Client Payment - ${hw?.name||''}`;
   document.getElementById('hwp_amount').value = hw?.monthlyRate||'';
   document.getElementById('hwp_date').value   = today();
   document.getElementById('hwPayModal').classList.remove('hidden');
@@ -896,7 +958,7 @@ function openAddHWPayment(hwId) {
 function openAddHWAdvance(hwId) {
   hwPayContext = hwId; hwPayMode = 'advance';
   const hw = (state.homewatch||[]).find(h=>h.id===hwId);
-  document.getElementById('hwPayModalTitle').textContent = `Pay Employee — ${hw?.name||''}`;
+  document.getElementById('hwPayModalTitle').textContent = `Pay Employee - ${hw?.name||''}`;
   document.getElementById('hwp_amount').value = '';
   document.getElementById('hwp_date').value   = today();
   document.getElementById('hwPayModal').classList.remove('hidden');
@@ -943,11 +1005,19 @@ function cycleHWPayStatus(hwId, payId) {
   } else { doIt(); }
 }
 
-// ─── DEBT PANEL ───────────────────────────────────────────────────────────────
+// â”€â”€â”€ DEBT PANEL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function renderDebtPanel() {
+  const debtEl = document.getElementById('debtPanel');
+  if (!debtEl) return;
+  const jobsTabActive = ['tab-active', 'tab-complete', 'tab-all']
+    .some(id => document.getElementById(id)?.classList.contains('active'));
+  if (!jobsTabActive) {
+    debtEl.innerHTML = '';
+    return;
+  }
   const s = state.settings;
   const originalDebt = s.debtOriginal || 0;
-  if (!originalDebt) { document.getElementById('debtPanel').innerHTML = ''; return; }
+  if (!originalDebt) { debtEl.innerHTML = ''; return; }
 
   let jobRepaid = 0;
   state.jobs.forEach(j => { jobRepaid += calcJob(j).debtContribution; });
@@ -965,8 +1035,8 @@ function renderDebtPanel() {
     ? [...state.debtPayments].reverse().map(p => {
         const linkedJob = p.linkedJobId ? state.jobs.find(j => j.id === p.linkedJobId) : null;
         const linkedHW  = p.linkedHWId  ? (state.homewatch||[]).find(h => h.id === p.linkedHWId) : null;
-        const jobTag = linkedJob ? `<span style="font-size:11px;background:rgba(91,141,239,0.15);color:var(--blue);border-radius:2px;padding:1px 6px;font-family:var(--mono);margin-left:6px;white-space:nowrap;display:inline-block">⇒ ${esc(linkedJob.name)}</span>` : '';
-        const hwTag  = linkedHW  ? `<span style="font-size:11px;background:rgba(76,175,130,0.15);color:var(--green);border-radius:2px;padding:1px 6px;font-family:var(--mono);margin-left:6px;white-space:nowrap;display:inline-block">⇒ HW: ${esc(linkedHW.name)}</span>` : '';
+        const jobTag = linkedJob ? `<span style="font-size:11px;background:rgba(91,141,239,0.15);color:var(--blue);border-radius:2px;padding:1px 6px;font-family:var(--mono);margin-left:6px;white-space:nowrap;display:inline-block">to ${esc(linkedJob.name)}</span>` : '';
+        const hwTag  = linkedHW  ? `<span style="font-size:11px;background:rgba(76,175,130,0.15);color:var(--green);border-radius:2px;padding:1px 6px;font-family:var(--mono);margin-left:6px;white-space:nowrap;display:inline-block">to HW: ${esc(linkedHW.name)}</span>` : '';
         return `<div class="line-item line-item-simple" style="padding:6px 0">
           <div class="line-item-label" style="font-size:15px;display:flex;flex-direction:column;gap:3px;align-items:flex-start">
             <span>${esc(p.label||'Manual payment')}<span style="font-size:11px;color:var(--text3);margin-left:8px;font-family:var(--mono)">${fmtDate(p.date)||''}</span></span>
@@ -974,17 +1044,17 @@ function renderDebtPanel() {
           </div>
           <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
             <div class="line-item-value green">+${fmt(p.amount)}</div>
-            <button class="btn btn-danger btn-sm" onclick="deleteDebtPayment('${p.id}')">DEL</button>
+            <button class="btn btn-danger btn-sm btn-icon-only" onclick="deleteDebtPayment('${p.id}')" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
           </div>
         </div>`;
       }).join('')
     : '';
 
-  document.getElementById('debtPanel').innerHTML = `
+  debtEl.innerHTML = `
     <div class="debt-panel${paid?' paid':''}">
       <div class="debt-panel-header">
-        <span class="debt-panel-title">⚖ Fee Debt Repayment — ${en}</span>
-        <span class="debt-panel-status${paid?' paid':''}">${paid ? '✓ PAID OFF' : `${repayPct}/${100-repayPct} split active`}</span>
+        <span class="debt-panel-title">Fee Debt Repayment | ${en}</span>
+        <span class="debt-panel-status${paid?' paid':''}">${paid ? 'PAID OFF' : `${repayPct}/${100-repayPct} split active`}</span>
       </div>
       <div class="debt-stats" style="grid-template-columns:repeat(4,1fr)">
         <div>
@@ -1009,14 +1079,14 @@ function renderDebtPanel() {
       </div>
       <div class="debt-progress-label" style="margin-bottom:${paymentsHtml||!paid?'12px':'0'}">
         <span>${pct.toFixed(1)}% repaid</span>
-        <span>Normal split ${normalPct}/${100-normalPct} · Repayment split ${repayPct}/${100-repayPct}</span>
+        <span>Normal split ${normalPct}/${100-normalPct} | Repayment split ${repayPct}/${100-repayPct}</span>
       </div>
       ${paymentsHtml ? `<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:10px">${paymentsHtml}</div>` : ''}
       <button class="btn btn-ghost btn-sm" onclick="openAddDebtPayment()">+ Manual Payment</button>
     </div>`;
 }
 
-// ─── SUMMARY ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€ SUMMARY â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function renderSummary() {
   renderDebtPanel();
   renderEmpSummary();
@@ -1035,20 +1105,20 @@ function renderSummary() {
     const empJobs = state.jobs.filter(j => j.employeeId === emp.id && j.status !== 'complete');
     const empHWAll = (state.homewatch||[]).filter(hw => hw.employeeId === emp.id);
     const empHWActive = empHWAll.filter(hw => hw.status !== 'paused');
-    const jobBal = empJobs.reduce((s,j) => s + calcJob(j).empBalance, 0);
-    const hwBal = empHWAll.reduce((s,hw) => s + calcHW(hw).empBalance, 0);
+    const jobBal = _roundMoney(empJobs.reduce((s,j) => s + calcJob(j).empBalance, 0));
+    const hwBal = _roundMoney(empHWAll.reduce((s,hw) => s + calcHW(hw).empBalance, 0));
     // Potential row is incremental only so it can be safely combined with current owed rows.
-    const potentialBal = empJobs.reduce((s,j) => {
+    const potentialBal = _roundMoney(empJobs.reduce((s,j) => {
       const c = calcJob(j);
       return s + (c.potentialEmpBalance - c.empBalance);
     }, 0) + empHWActive.reduce((s,hw) => {
       const c = calcHW(hw);
       return s + (c.potentialEmpBalance - c.empBalance);
-    }, 0);
-    const total =
+    }, 0));
+    const total = _roundMoney(
       (include.jobs ? jobBal : 0) +
       (include.homewatch ? hwBal : 0) +
-      (include.potential ? potentialBal : 0);
+      (include.potential ? potentialBal : 0));
     return `<div class="summary-card">
       <div class="summary-label">Owed to ${esc(emp.name)}</div>
       <div class="summary-value ${total < 0 ? 'red' : 'orange'}">${fmt(total)}</div>
@@ -1110,10 +1180,11 @@ function renderEmpSummary() {
   const pausedHW = (state.homewatch||[]).filter(hw => hw.status === 'paused' && hw.employeeId === myId);
   const allHW    = (state.homewatch||[]).filter(hw => hw.employeeId === myId);
 
-  // Currently owed (collected but not yet paid out — includes paused clients with collected invoices)
+  // Currently owed (collected but not yet paid out â€” includes paused clients with collected invoices)
   let tOwed = 0;
   active.forEach(j => { tOwed += calcJob(j).empBalance; });
   allHW.forEach(hw => { tOwed += calcHW(hw).empBalance; });
+  tOwed = _roundMoney(tOwed);
 
   // Potential pay mirrors core calc functions:
   // start from current owed, then add only the active-items delta to potential balances.
@@ -1126,6 +1197,7 @@ function renderEmpSummary() {
     const c = calcHW(hw);
     tPotential += (c.potentialEmpBalance - c.empBalance);
   });
+  tPotential = _roundMoney(tPotential);
 
   // Recent pay (advances paid to employee within selected timeframe)
   let cutoffStr = null;
@@ -1162,7 +1234,7 @@ function renderEmpSummary() {
     <div class="summary-card"><div class="summary-label">Potential Pay</div><div class="summary-value orange">${fmt(Math.max(0,tPotential))}</div><div class="summary-sub">if all active work completes</div></div>`;
 }
 
-// ─── RENDER JOBS ─────────────────────────────────────────────────────────────
+// â”€â”€â”€ RENDER JOBS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function renderJobs() {
   renderSummary();
   const isAdmin = currentUser?.isAdmin;
@@ -1184,12 +1256,19 @@ function emptyState(msg) { return `<div class="empty-state"><div class="empty-st
 
 function jobIconSvg(kind) {
   const icons = {
-    client: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"></circle><path d="M5 19c1.8-3 4.3-4.5 7-4.5s5.2 1.5 7 4.5"></path></svg>',
-    estimate: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5h8l3 3V19a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1Z"></path><path d="M15 4.5V8h3"></path><path d="M9 12h6"></path><path d="M9 16h4"></path></svg>',
-    notes: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h12a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-7l-4 3v-3H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z"></path><path d="M9 9.5h6"></path><path d="M9 12.5h4.5"></path></svg>',
-    hours: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><path d="M12 8v4.5l3 2"></path></svg>',
-    edit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l4.5-1 8.8-8.8a1.8 1.8 0 0 0 0-2.5l-1-1a1.8 1.8 0 0 0-2.5 0L5 15.5 4 20Z"></path><path d="M12.5 7.5l4 4"></path></svg>',
-    smile: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><path d="M9.5 10h.01"></path><path d="M14.5 10h.01"></path><path d="M9 14c.8 1 1.8 1.5 3 1.5s2.2-.5 3-1.5"></path></svg>'
+    client: '<i class="ph ph-user-circle" aria-hidden="true"></i>',
+    estimate: '<i class="ph ph-file-text" aria-hidden="true"></i>',
+    notes: '<i class="ph ph-note-pencil" aria-hidden="true"></i>',
+    hours: '<i class="ph ph-clock" aria-hidden="true"></i>',
+    edit: '<i class="ph ph-pencil-simple" aria-hidden="true"></i>',
+    smile: '<i class="ph ph-smiley" aria-hidden="true"></i>',
+    calendar: '<i class="ph ph-calendar-blank" aria-hidden="true"></i>',
+    location: '<i class="ph ph-map-pin" aria-hidden="true"></i>',
+    time: '<i class="ph ph-clock" aria-hidden="true"></i>',
+    chart: '<i class="ph ph-chart-bar" aria-hidden="true"></i>',
+    trash: '<i class="ph ph-trash" aria-hidden="true"></i>',
+    menu: '<i class="ph ph-list" aria-hidden="true"></i>',
+    close: '<i class="ph ph-x" aria-hidden="true"></i>'
   };
   return icons[kind] || '';
 }
@@ -1248,13 +1327,13 @@ function jobCard(job) {
 
 function badgeHtml(status, jobId, itemType, idx) {
   const cfg = {
-    pending:   { cls:'badge-pending',   label:'○ Pending'  },
-    invoiced:  { cls:'badge-invoiced',  label:'◑ Invoiced' },
-    collected: { cls:'badge-collected', label:'✓ Collected'}
+    pending:   { cls:'badge-pending',   label:'Pending'  },
+    invoiced:  { cls:'badge-invoiced',  label:'Invoiced' },
+    collected: { cls:'badge-collected', label:'Collected'}
   };
   const { cls } = cfg[status] || cfg.pending;
   let label = (cfg[status] || cfg.pending).label;
-  if (itemType === 'subtractions' && status === 'collected') label = '✓ Applied';
+  if (itemType === 'subtractions' && status === 'collected') label = 'Applied';
   const admin = currentUser?.isAdmin;
   const job = state.jobs.find(j => j.id === jobId);
   const item = job?.[itemType]?.[idx];
@@ -1350,20 +1429,31 @@ async function _sendSquareInvoicePayload(payload) {
 
 function _jobInvoiceItems(job) {
   const refs = [], lineItems = [];
-  (job.milestones || []).forEach(m => {
-    if ((m.status || 'pending') === 'collected') return;
-    if (m.squareInvoiceId) return;
-    const amountCents = Math.round(((m.pct || 0) / 100) * (job.quote || 0) * 100);
-    if (!amountCents) return;
-    lineItems.push({ name: `${job.name} — ${m.label || 'Milestone'}`, amountCents });
-    refs.push({ kind:'job', jobId:job.id, itemType:'milestones', itemId:m.id });
-  });
+  if (_jobType(job) === 'hourly') {
+    (job.revenueItems || []).forEach(r => {
+      if ((r.status || 'pending') === 'collected') return;
+      if (r.squareInvoiceId) return;
+      const amountCents = Math.round((r.amount || 0) * 100);
+      if (!amountCents) return;
+      lineItems.push({ name: `${job.name} - ${r.label || 'Revenue'}`, amountCents });
+      refs.push({ kind:'job', jobId:job.id, itemType:'revenueItems', itemId:r.id });
+    });
+  } else {
+    (job.milestones || []).forEach(m => {
+      if ((m.status || 'pending') === 'collected') return;
+      if (m.squareInvoiceId) return;
+      const amountCents = Math.round(((m.pct || 0) / 100) * (job.quote || 0) * 100);
+      if (!amountCents) return;
+      lineItems.push({ name: `${job.name} - ${m.label || 'Milestone'}`, amountCents });
+      refs.push({ kind:'job', jobId:job.id, itemType:'milestones', itemId:m.id });
+    });
+  }
   (job.addOns || []).forEach(a => {
     if ((a.status || 'pending') === 'collected') return;
     if (a.squareInvoiceId) return;
     const amountCents = Math.round((a.amount || 0) * 100);
     if (!amountCents) return;
-    lineItems.push({ name: `${job.name} — ${a.label || 'Addition'}`, amountCents });
+    lineItems.push({ name: `${job.name} - ${a.label || 'Addition'}`, amountCents });
     refs.push({ kind:'job', jobId:job.id, itemType:'addOns', itemId:a.id });
   });
   (job.subtractions || []).forEach(s => {
@@ -1371,7 +1461,7 @@ function _jobInvoiceItems(job) {
     if (s.squareInvoiceId) return;
     const amountCents = -Math.round((s.amount || 0) * 100);
     if (!amountCents) return;
-    lineItems.push({ name: `${job.name} — ${s.label || 'Subtraction'}`, amountCents });
+    lineItems.push({ name: `${job.name} - ${s.label || 'Subtraction'}`, amountCents });
     refs.push({ kind:'job', jobId:job.id, itemType:'subtractions', itemId:s.id });
   });
   return { lineItems, refs };
@@ -1432,7 +1522,7 @@ async function createHWSquareInvoice(hwId, send) {
   const pending = (hw.payments || []).filter(p => (p.status || 'pending') !== 'collected' && !p.squareInvoiceId);
   if (!pending.length) { showAlert('No invoiceable HomeWatch payments found.'); return; }
   const lineItems = pending.map(p => ({
-    name: `${hw.name} — ${fmtDate(p.date) || p.date || 'Service'}`,
+    name: `${hw.name} - ${fmtDate(p.date) || p.date || 'Service'}`,
     amountCents: Math.round((p.amount || 0) * 100)
   })).filter(li => li.amountCents > 0);
   if (!lineItems.length) { showAlert('Invoice total must be greater than $0.00.'); return; }
@@ -1514,19 +1604,22 @@ function jobDetail(job, c) {
     }
     return '';
   };
+  const isHourly = _jobType(job) === 'hourly';
 
   const hasLegacyPartial = !(job.partialCollections || []).length && (
-    (job.milestones || []).some(m => !!m.partialState) ||
+    (isHourly
+      ? (job.revenueItems || []).some(r => !!r.partialState)
+      : (job.milestones || []).some(m => !!m.partialState)) ||
     (job.addOns || []).some(a => !!a.partialState) ||
     (job.subtractions || []).some(s => !!s.partialState)
   );
   const milestoneEntries = (job.milestones || []).map((m, i) => ({ m, i }));
-  const renderedGroups = new Set();
+  const renderedMilestoneGroups = new Set();
   const milestonesHtml = milestoneEntries.map(({ m, i }) => {
     const groupId = m.partialGroupId || '';
-    if (groupId && renderedGroups.has(groupId)) return '';
+    if (groupId && renderedMilestoneGroups.has(groupId)) return '';
     if (groupId) {
-      renderedGroups.add(groupId);
+      renderedMilestoneGroups.add(groupId);
       const group = milestoneEntries.filter(x => x.m.partialGroupId === groupId);
       const parentLabel = group[0]?.m.partialParentLabel || group[0]?.m.label || `Milestone ${i + 1}`;
       const rawParentPct = Number(group[0]?.m.partialParentPct || 0);
@@ -1568,44 +1661,30 @@ function jobDetail(job, c) {
       </div>
     </div>`;
   }).join('');
-
-  const subtractionsHtml = (job.subtractions||[]).map((a,i) => {
-    const st = a.status||'pending';
-    return `<div class="line-item">
-      <div class="line-item-label">${esc(a.label||'Subtraction')}${partialTag(a)}${a.date?`<span style="font-size:14px;color:var(--text3);margin-left:6px">${fmtDate(a.date)}</span>`:''}</div>
-      <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
-        <div class="line-item-value red">-${fmt(a.amount)}</div>
-        ${badgeHtml(st,job.id,'subtractions',i)}
-        <button class="btn btn-ghost btn-sm admin-only" onclick="openAddItem('${job.id}','subtraction','${a.id}')">✏</button>
-        <button class="btn btn-danger btn-sm admin-only" onclick="removeItem('${job.id}','subtractions',${i})">DEL</button>
-      </div>
-    </div>`;
-  }).join('');
-
-  const addOnEntries = (job.addOns || []).map((a, i) => ({ a, i }));
-  const renderedAddOnGroups = new Set();
-  const addOnsHtml = addOnEntries.map(({ a, i }) => {
-    const groupId = a.partialGroupId || '';
-    if (groupId && renderedAddOnGroups.has(groupId)) return '';
+  const revenueEntries = (job.revenueItems || []).map((r, i) => ({ r, i }));
+  const renderedRevenueGroups = new Set();
+  const hourlyRevenueHtml = revenueEntries.map(({ r, i }) => {
+    const groupId = r.partialGroupId || '';
+    if (groupId && renderedRevenueGroups.has(groupId)) return '';
     if (groupId) {
-      renderedAddOnGroups.add(groupId);
-      const group = addOnEntries.filter(x => x.a.partialGroupId === groupId);
-      const parentLabel = group[0]?.a.partialParentLabel || group[0]?.a.label || 'Addition';
-      const rawParentAmt = Number(group[0]?.a.partialParentAmount || 0);
-      const parentAmt = _roundMoney(rawParentAmt > 0 ? rawParentAmt : group.reduce((sum, x) => sum + Number(x.a.amount || 0), 0));
-      const splitHint = partialSplitHint(group[0]?.a);
-      const childrenHtml = group.map(({ a: ga, i: gi }) => {
-        const st = ga.status || 'pending';
-        const childTag = partialTag(ga);
+      renderedRevenueGroups.add(groupId);
+      const group = revenueEntries.filter(x => x.r.partialGroupId === groupId);
+      const parentLabel = group[0]?.r.partialParentLabel || group[0]?.r.label || 'Revenue';
+      const rawParentAmt = Number(group[0]?.r.partialParentAmount || 0);
+      const parentAmt = _roundMoney(rawParentAmt > 0 ? rawParentAmt : group.reduce((sum, x) => sum + Number(x.r.amount || 0), 0));
+      const splitHint = partialSplitHint(group[0]?.r);
+      const childrenHtml = group.map(({ r: gr, i: gi }) => {
+        const st = gr.status || 'pending';
+        const childTag = partialTag(gr);
         return `<div class="line-item" style="padding-left:16px">
           <div class="line-item-label" style="display:flex;align-items:center;gap:6px">
             <span style="color:var(--text3)">&#8627;</span>${childTag || '<span class="tag tag-his">Partial</span>'}
           </div>
           <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
-            <div class="line-item-value ${st==='collected' ? 'green' : 'dim'}">${fmt(ga.amount)}</div>
-            ${badgeHtml(st,job.id,'addOns',gi)}
-            <button class="btn btn-ghost btn-sm admin-only" onclick="openAddItem('${job.id}','addon','${ga.id}')">✏</button>
-            <button class="btn btn-danger btn-sm admin-only" onclick="removeItem('${job.id}','addOns',${gi})">DEL</button>
+            <div class="line-item-value ${st==='collected' ? 'green' : 'dim'}">${fmt(gr.amount)}</div>
+            ${badgeHtml(st,job.id,'revenueItems',gi)}
+            <button class="btn btn-ghost btn-sm admin-only job-icon-btn" onclick="openAddItem('${job.id}','revenue','${gr.id}')" title="Edit" aria-label="Edit">${jobIconSvg('edit')}</button>
+            <button class="btn btn-danger btn-sm btn-icon-only admin-only" onclick="removeItem('${job.id}','revenueItems',${gi})" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
           </div>
         </div>`;
       }).join('');
@@ -1616,25 +1695,97 @@ function jobDetail(job, c) {
         </div>
       </div>${childrenHtml}`;
     }
-    const st = a.status || 'pending';
-    const tag = partialTag(a);
+    const st = r.status || 'pending';
+    const tag = partialTag(r);
     return `<div class="line-item">
       <div class="line-item-label" style="display:flex;flex-direction:column;gap:4px">
-        <span>${esc(a.label || 'Addition')}${a.date ? `<span style="font-size:14px;color:var(--text3);margin-left:6px">${fmtDate(a.date)}</span>` : ''}</span>
+        <span>${esc(r.label || 'Revenue')}${r.date ? `<span style="font-size:14px;color:var(--text3);margin-left:6px">${fmtDate(r.date)}</span>` : ''}</span>
         ${tag ? `<span>${tag}</span>` : ''}
       </div>
       <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
-        <div class="line-item-value ${st==='collected' ? 'green' : 'dim'}">${fmt(a.amount)}</div>
-        ${badgeHtml(st,job.id,'addOns',i)}
-        <button class="btn btn-ghost btn-sm admin-only" onclick="openAddItem('${job.id}','addon','${a.id}')">✏</button>
-        <button class="btn btn-danger btn-sm admin-only" onclick="removeItem('${job.id}','addOns',${i})">DEL</button>
+        <div class="line-item-value ${st==='collected' ? 'green' : 'dim'}">${fmt(r.amount)}</div>
+        ${badgeHtml(st,job.id,'revenueItems',i)}
+        <button class="btn btn-ghost btn-sm admin-only job-icon-btn" onclick="openAddItem('${job.id}','revenue','${r.id}')" title="Edit" aria-label="Edit">${jobIconSvg('edit')}</button>
+        <button class="btn btn-danger btn-sm btn-icon-only admin-only" onclick="removeItem('${job.id}','revenueItems',${i})" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
       </div>
     </div>`;
   }).join('');
 
+  const subtractionsHtml = (job.subtractions||[]).map((a,i) => {
+    const st = a.status||'pending';
+    return `<div class="line-item">
+      <div class="line-item-label">${esc(a.label||'Subtraction')}${partialTag(a)}${a.date?`<span style="font-size:14px;color:var(--text3);margin-left:6px">${fmtDate(a.date)}</span>`:''}</div>
+      <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
+        <div class="line-item-value red">-${fmt(a.amount)}</div>
+        ${badgeHtml(st,job.id,'subtractions',i)}
+        <button class="btn btn-ghost btn-sm admin-only job-icon-btn" onclick="openAddItem('${job.id}','subtraction','${a.id}')" title="Edit" aria-label="Edit">${jobIconSvg('edit')}</button>
+        <button class="btn btn-danger btn-sm btn-icon-only admin-only" onclick="removeItem('${job.id}','subtractions',${i})" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  const addOnEntries = (job.addOns || []).map((a, i) => ({ a, i }));
+  const standardAddOnEntries = addOnEntries.filter(({ a }) => !a.isHours);
+  const hoursAddOnEntries = addOnEntries.filter(({ a }) => !!a.isHours);
+  const renderAddOnRows = (entries, editType) => {
+    const renderedGroups = new Set();
+    return entries.map(({ a, i }) => {
+      const groupId = a.partialGroupId || '';
+      if (groupId && renderedGroups.has(groupId)) return '';
+      if (groupId) {
+        renderedGroups.add(groupId);
+        const group = entries.filter(x => x.a.partialGroupId === groupId);
+        const parentLabel = group[0]?.a.partialParentLabel || group[0]?.a.label || 'Addition';
+        const rawParentAmt = Number(group[0]?.a.partialParentAmount || 0);
+        const parentAmt = _roundMoney(rawParentAmt > 0 ? rawParentAmt : group.reduce((sum, x) => sum + Number(x.a.amount || 0), 0));
+        const splitHint = partialSplitHint(group[0]?.a);
+        const childrenHtml = group.map(({ a: ga, i: gi }) => {
+          const st = ga.status || 'pending';
+          const childTag = partialTag(ga);
+          return `<div class="line-item" style="padding-left:16px">
+            <div class="line-item-label" style="display:flex;align-items:center;gap:6px">
+              <span style="color:var(--text3)">&#8627;</span>${childTag || '<span class="tag tag-his">Partial</span>'}
+            </div>
+            <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
+              <div class="line-item-value ${st==='collected' ? 'green' : 'dim'}">${fmt(ga.amount)}</div>
+              ${badgeHtml(st,job.id,'addOns',gi)}
+              <button class="btn btn-ghost btn-sm admin-only job-icon-btn" onclick="openAddItem('${job.id}','${editType}','${ga.id}')" title="Edit" aria-label="Edit">${jobIconSvg('edit')}</button>
+              <button class="btn btn-danger btn-sm btn-icon-only admin-only" onclick="removeItem('${job.id}','addOns',${gi})" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
+            </div>
+          </div>`;
+        }).join('');
+        return `<div class="line-item">
+          <div class="line-item-label">${esc(parentLabel)}${splitHint}</div>
+          <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
+            <div class="line-item-value dim">${fmt(parentAmt)}</div>
+          </div>
+        </div>${childrenHtml}`;
+      }
+      const st = a.status || 'pending';
+      const tag = partialTag(a);
+      const hoursMeta = a.isHours
+        ? `<span style="font-size:14px;color:var(--text3);margin-left:6px">${(Number(a.hours || 0)).toFixed(2)}h @ ${fmt(a.rate || 0)}</span>`
+        : '';
+      return `<div class="line-item">
+        <div class="line-item-label" style="display:flex;flex-direction:column;gap:4px">
+          <span>${esc(a.label || (a.isHours ? 'Hours' : 'Addition'))}${hoursMeta}${a.date ? `<span style="font-size:14px;color:var(--text3);margin-left:6px">${fmtDate(a.date)}</span>` : ''}</span>
+          ${tag ? `<span>${tag}</span>` : ''}
+        </div>
+        <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
+          <div class="line-item-value ${st==='collected' ? 'green' : 'dim'}">${fmt(a.amount)}</div>
+          ${badgeHtml(st,job.id,'addOns',i)}
+          <button class="btn btn-ghost btn-sm admin-only job-icon-btn" onclick="openAddItem('${job.id}','${editType}','${a.id}')" title="Edit" aria-label="Edit">${jobIconSvg('edit')}</button>
+          <button class="btn btn-danger btn-sm btn-icon-only admin-only" onclick="removeItem('${job.id}','addOns',${i})" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
+        </div>
+      </div>`;
+    }).join('');
+  };
+  const addOnsHtml = renderAddOnRows(standardAddOnEntries, 'addon');
+  const hoursHtml = renderAddOnRows(hoursAddOnEntries, 'hours');
+
   const partialHistoryHtml = (job.partialCollections || []).length
     ? `<div style="margin-top:10px;border-top:1px dashed var(--border);padding-top:10px">
-        <div style="font-family:var(--mono);font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--text3);margin-bottom:6px">Partial Payments</div>
+        <div style="font-family:var(--mono);font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--text3);margin-bottom:6px">Revenue Collections</div>
         ${(job.partialCollections || []).slice().reverse().map((p, revIdx) => {
           const isLatest = revIdx === 0;
           const modeTxt = p.mode === 'percent' ? `${fmtPctDisplay(p.partialPercent || 0)}%` : 'Dollar';
@@ -1644,8 +1795,8 @@ function jobDetail(job, c) {
               <div style="font-size:12px;color:var(--text3)">${fmtDate(p.date) || p.date || ''}${p.note ? ` - ${esc(p.note)}` : ''}</div>
             </div>
             <div class="admin-only" style="display:flex;align-items:center;gap:6px;flex-shrink:0">
-              <button class="btn btn-ghost btn-sm" onclick="editPartialCollection('${job.id}','${p.id}')" ${isLatest ? '' : 'disabled'}>Edit</button>
-              <button class="btn btn-danger btn-sm" onclick="deletePartialCollection('${job.id}','${p.id}')" ${isLatest ? '' : 'disabled'}>DEL</button>
+              <button class="btn btn-ghost btn-sm job-icon-btn" onclick="editPartialCollection('${job.id}','${p.id}')" ${isLatest ? '' : 'disabled'} title="Edit" aria-label="Edit">${jobIconSvg('edit')}</button>
+              <button class="btn btn-danger btn-sm btn-icon-only" onclick="deletePartialCollection('${job.id}','${p.id}')" ${isLatest ? '' : 'disabled'} title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
             </div>
           </div>`;
         }).join('')}
@@ -1662,8 +1813,8 @@ function jobDetail(job, c) {
       <div class="line-item-label">${esc(m.label||'Materials')}<span class="tag ${m.who==='owner'?'tag-mine':'tag-his'}">${m.who==='owner'?'EHS':en}</span></div>
       <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
         <div class="line-item-value red">${fmt(m.amount)}</div>
-        <button class="btn btn-ghost btn-sm admin-only" onclick="openAddItem('${job.id}','material','${m.id}')">✏</button>
-        <button class="btn btn-danger btn-sm admin-only" onclick="removeItem('${job.id}','materials',${i})">DEL</button>
+        <button class="btn btn-ghost btn-sm admin-only job-icon-btn" onclick="openAddItem('${job.id}','material','${m.id}')" title="Edit" aria-label="Edit">${jobIconSvg('edit')}</button>
+        <button class="btn btn-danger btn-sm btn-icon-only admin-only" onclick="removeItem('${job.id}','materials',${i})" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
       </div>
     </div>`).join('');
 
@@ -1673,8 +1824,8 @@ function jobDetail(job, c) {
       <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
         <div class="line-item-value red">${fmt(a.amount)}</div>
         ${payTypeBadgeHtml(a.payType||'', job.id, i)}
-        <button class="btn btn-ghost btn-sm admin-only" onclick="openAddItem('${job.id}','advance','${a.id}')">✏</button>
-        <button class="btn btn-danger btn-sm admin-only" onclick="removeItem('${job.id}','advances',${i})">DEL</button>
+        <button class="btn btn-ghost btn-sm admin-only job-icon-btn" onclick="openAddItem('${job.id}','advance','${a.id}')" title="Edit" aria-label="Edit">${jobIconSvg('edit')}</button>
+        <button class="btn btn-danger btn-sm btn-icon-only admin-only" onclick="removeItem('${job.id}','advances',${i})" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
       </div>
     </div>`).join('');
 
@@ -1687,8 +1838,10 @@ function jobDetail(job, c) {
           <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Revenue</div>
           <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openPartialCollect('${job.id}')">+</button>
         </div>
-        <div class="line-item line-item-simple mobile-base-quote-row"><div class="line-item-label">Base Quote</div><div class="line-item-value">${fmt(job.quote)}</div></div>
-        ${milestonesHtml}
+        ${isHourly
+          ? (hourlyRevenueHtml || '<div style="color:var(--text3);font-size:16px;padding:4px 0">No revenue entries yet.</div>')
+          : `<div class="line-item line-item-simple mobile-base-quote-row"><div class="line-item-label">Base Quote</div><div class="line-item-value">${fmt(job.quote)}</div></div>${milestonesHtml}`
+        }
         ${partialHistoryHtml}
         ${legacyPartialHtml}
       </div>
@@ -1715,11 +1868,30 @@ function jobDetail(job, c) {
       </div>
 
       <div class="detail-section">
-        <div class="detail-section-header" style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
-          <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Additions</div>
-          <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','addon')">+</button>
-        </div>
-        ${addOnsHtml||'<div style="color:var(--text3);font-size:16px;padding:4px 0">None</div>'}
+        ${isHourly ? `
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
+            <div>
+              <div class="detail-section-header" style="display:flex;align-items:center;gap:8px;margin-bottom:6px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+                <div class="detail-section-title" style="margin:0;padding:0;border:none">Additions</div>
+                <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','addon')">+</button>
+              </div>
+              ${addOnsHtml || '<div style="color:var(--text3);font-size:16px;padding:4px 0">None</div>'}
+            </div>
+            <div>
+              <div class="detail-section-header" style="display:flex;align-items:center;gap:8px;margin-bottom:6px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+                <div class="detail-section-title" style="margin:0;padding:0;border:none">Hours</div>
+                <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','hours')">+</button>
+              </div>
+              ${hoursHtml || '<div style="color:var(--text3);font-size:16px;padding:4px 0">None</div>'}
+            </div>
+          </div>
+        ` : `
+          <div class="detail-section-header" style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+            <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Additions</div>
+            <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','addon')">+</button>
+          </div>
+          ${addOnsHtml||'<div style="color:var(--text3);font-size:16px;padding:4px 0">None</div>'}
+        `}
         ${c.addOnTotal>0?`<div class="total-line"><span style="color:var(--text2)">Total</span><span class="line-item-value" style="color:var(--purple)">+${fmt(c.addOnTotal)}</span></div>`:''}
       </div>
 
@@ -1748,13 +1920,13 @@ function jobDetail(job, c) {
     </div>
 
     <div class="settlement-box">
-      <div class="settlement-title">Settlement Breakdown${job.repaymentMode?` <span style="color:var(--red);font-size:14px;margin-left:8px">⚖ REPAYMENT SPLIT ${Math.round((state.settings.debtOwnerShare||0.5)*100)}/${Math.round((1-(state.settings.debtOwnerShare||0.5))*100)}</span>`:''}</div>
+      <div class="settlement-title">Settlement Breakdown${job.repaymentMode?` <span style="color:var(--red);font-size:14px;margin-left:8px">REPAYMENT SPLIT ${Math.round((state.settings.debtOwnerShare||0.5)*100)}/${Math.round((1-(state.settings.debtOwnerShare||0.5))*100)}</span>`:''}</div>
       <div class="settlement-grid" style="${admin?'':'grid-template-columns:1fr'}">
         <div class="admin-only">
           <div class="settlement-col-title">Your ${Math.round((job.repaymentMode?(state.settings.debtOwnerShare||0.5):(1-empShare))*100)}%</div>
           <div class="settlement-big orange">${fmt(c.ownerProfit)}</div>
           <div style="font-size:16px;color:var(--text3);font-family:var(--mono)">profit share</div>
-          ${job.repaymentMode&&c.debtContribution>0?`<div style="font-size:16px;color:var(--red);font-family:var(--mono);margin-top:4px">⚖ ${fmt(c.debtContribution)} → debt</div>`:''}
+          ${job.repaymentMode&&c.debtContribution>0?`<div style="font-size:16px;color:var(--red);font-family:var(--mono);margin-top:4px">${fmt(c.debtContribution)} to debt</div>`:''}
           <div style="font-size:16px;color:var(--text2);font-family:var(--mono);margin-top:4px">+ ${fmt(c.ownerMats)} mats back</div>
           <div style="font-size:17px;color:var(--green);font-family:var(--mono);font-weight:600;margin-top:6px;border-top:1px solid var(--border);padding-top:6px">= ${fmt(c.ownerTotal)} total</div>
         </div>
@@ -1766,8 +1938,8 @@ function jobDetail(job, c) {
             <div style="font-size:16px;color:var(--text2);font-family:var(--mono)">Profit share: ${fmt(c.empProfit)}</div>
             <div style="font-size:16px;color:var(--text2);font-family:var(--mono)">+ Mats back: ${fmt(c.empMats)}</div>
             <div style="font-size:16px;color:var(--text2);font-family:var(--mono);border-top:1px solid var(--border);padding-top:4px;margin-top:4px">= Total owed: ${fmt(c.empTotalOwed)}</div>
-            <div style="font-size:16px;color:var(--text2);font-family:var(--mono)">− Paid out: ${fmt(c.advancesPaid)}</div>
-            ${c.linkedDebtPaid>0?`<div style="font-size:16px;color:var(--red);font-family:var(--mono)">− Debt repayment: ${fmt(c.linkedDebtPaid)}</div>`:''}
+            <div style="font-size:16px;color:var(--text2);font-family:var(--mono)">- Paid out: ${fmt(c.advancesPaid)}</div>
+            ${c.linkedDebtPaid>0?`<div style="font-size:16px;color:var(--red);font-family:var(--mono)">- Debt repayment: ${fmt(c.linkedDebtPaid)}</div>`:''}
           </div>
           <div style="font-size:15px;color:var(--text3);font-family:var(--mono);margin-top:6px">Profit pool: ${fmt(c.profitPool)}</div>
         </div>
@@ -1778,19 +1950,19 @@ function jobDetail(job, c) {
       <div class="job-detail-admin-actions">
         <button class="btn btn-ghost btn-sm" onclick="createJobSquareInvoice('${job.id}', false)">Square Draft</button>
         <button class="btn btn-ghost btn-sm" onclick="createJobSquareInvoice('${job.id}', true)">Square Send</button>
-        <button class="btn btn-ghost btn-sm" onclick="editJob('${job.id}')">Edit</button>
+      <button class="btn btn-ghost btn-sm job-icon-btn" onclick="editJob('${job.id}')" title="Edit job" aria-label="Edit job">${jobIconSvg('edit')}</button>
         <button class="btn btn-${job.status==='complete'?'ghost':'green'} btn-sm" onclick="toggleComplete('${job.id}')">
           ${job.status==='complete'?'Reopen':'Complete'}
         </button>
-        <button class="btn btn-danger btn-sm" onclick="deleteJob('${job.id}')">DEL</button>
+      <button class="btn btn-danger btn-sm btn-icon-only" onclick="deleteJob('${job.id}')" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
         <button class="repay-toggle${job.repaymentMode?' active':''}" onclick="toggleRepayment('${job.id}')" title="Toggle debt repayment split for this job">${job.repaymentMode?'Repaying':'Normal'}</button>
       </div>
     </div>
   </div>`;
 }
 
-// ─── INTERACTIONS ─────────────────────────────────────────────────────────────
-// ─── DEBT PAYMENTS ────────────────────────────────────────────────────────────
+// â”€â”€â”€ INTERACTIONS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€â”€ DEBT PAYMENTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function openAddDebtPayment() {
   document.getElementById('dp_label').value  = '';
   document.getElementById('dp_amount').value = '';
@@ -1808,7 +1980,7 @@ function openAddDebtPayment() {
     return `<option value="hw:${hw.id}">${esc(hw.name)} (owed: ${fmt(bal)})</option>`;
   }).join('');
   document.getElementById('dp_linkSelect').innerHTML =
-    '<option value="">— Select —</option>' +
+    '<option value="">- Select -</option>' +
     (jobOpts ? `<optgroup label="Jobs">${jobOpts}</optgroup>` : '') +
     (hwOpts  ? `<optgroup label="HomeWatch">${hwOpts}</optgroup>`  : '');
   document.getElementById('debtPaymentModal').classList.remove('hidden');
@@ -1996,7 +2168,7 @@ function renderSplitLedger() {
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px">
         <div style="min-width:0">
           <div style="font-size:15px">${esc(r.label || 'Split payment')}</div>
-          <div style="font-family:var(--mono);font-size:12px;color:var(--text3)">${fmtDate(r.date)}${empName ? ` · ${esc(empName)}` : ''} · ${modeLabel}${r.source === 'legacy' ? ' · legacy' : ''}</div>
+          <div style="font-family:var(--mono);font-size:12px;color:var(--text3)">${fmtDate(r.date)}${empName ? ` | ${esc(empName)}` : ''} | ${modeLabel}${r.source === 'legacy' ? ' | legacy' : ''}</div>
         </div>
         <div style="font-family:var(--mono);font-size:15px;color:${Number(r.total || 0) < 0 ? 'var(--red)' : 'var(--green)'};white-space:nowrap">${fmt(r.total || 0)}</div>
       </div>
@@ -2005,14 +2177,7 @@ function renderSplitLedger() {
   }).join('');
 }
 
-// ─── SPLIT PAY ────────────────────────────────────────────────────────────────
-function _setTrackUI(trackEl, thumbEl, on) {
-  if (trackEl) {
-    trackEl.dataset.on = on ? 'true' : 'false';
-    trackEl.style.background = on ? 'var(--accent)' : 'var(--border2)';
-  }
-  if (thumbEl) thumbEl.style.transform = on ? 'translateX(18px)' : 'translateX(0)';
-}
+// â”€â”€â”€ SPLIT PAY â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function _buildPayOutRows(employeeId) {
   if (!employeeId) return [];
   const rows = [];
@@ -2038,22 +2203,30 @@ function _buildPayOutRows(employeeId) {
   });
   return rows;
 }
-function _calcPayOutPlan(employeeId, includePotential) {
+function _calcPayOutPlan(employeeId) {
   const rows = _buildPayOutRows(employeeId).map(r => {
     const owedPayable = Math.max(0, Number(r.owedNow || 0));
-    const target = includePotential
-      ? Number(r.potential || 0)
-      : owedPayable;
-    return { ...r, owedPayable, target };
+    const payToZeroTarget = Number(r.potential || 0);
+    return {
+      ...r,
+      owedPayable: _roundMoney(owedPayable),
+      payNowTarget: _roundMoney(owedPayable),
+      payToZeroTarget: _roundMoney(payToZeroTarget)
+    };
   });
-  const owedTotal = rows.reduce((s, r) => s + r.owedPayable, 0);
-  const targetTotal = rows.reduce((s, r) => s + r.target, 0);
+  const payNowTotal = _roundMoney(rows.reduce((s, r) => s + r.payNowTarget, 0));
+  const payToZeroTotal = _roundMoney(rows.reduce((s, r) => s + r.payToZeroTarget, 0));
   return {
     rows,
-    owedTotal,
-    targetTotal,
-    potentialAddOn: targetTotal - owedTotal
+    payNowTotal,
+    payToZeroTotal,
+    potentialAddOn: _roundMoney(payToZeroTotal - payNowTotal)
   };
+}
+function setPayOutMode(mode) {
+  if (mode !== 'pay_now' && mode !== 'pay_to_zero') return;
+  payOutCtx.mode = mode;
+  renderPayOut();
 }
 function openPayOut() {
   if (!currentUser?.isAdmin) return;
@@ -2064,62 +2237,65 @@ function openPayOut() {
   if (!payOutCtx.employeeId || !employees.some(e => e.id === payOutCtx.employeeId)) {
     payOutCtx.employeeId = employees[0].id;
   }
+  if (payOutCtx.mode !== 'pay_now' && payOutCtx.mode !== 'pay_to_zero') payOutCtx.mode = 'pay_now';
   select.innerHTML = employees.map(e => `<option value="${e.id}"${e.id === payOutCtx.employeeId ? ' selected' : ''}>${esc(e.name || 'Employee')}</option>`).join('');
   document.getElementById('po_date').value = today();
   renderPayOut();
   document.getElementById('payOutModal').classList.remove('hidden');
 }
-function togglePayOutPotential() {
-  payOutCtx.includePotential = !payOutCtx.includePotential;
-  renderPayOut();
-}
 function renderPayOut() {
   const select = document.getElementById('po_employee');
   if (!select) return;
   payOutCtx.employeeId = select.value || payOutCtx.employeeId || '';
-  const includePotential = !!payOutCtx.includePotential;
-  _setTrackUI(
-    document.getElementById('po_potentialTrack'),
-    document.getElementById('po_potentialThumb'),
-    includePotential
-  );
-  const lbl = document.getElementById('po_potentialLabel');
-  if (lbl) lbl.textContent = includePotential ? 'On' : 'Off';
-  const plan = _calcPayOutPlan(payOutCtx.employeeId, includePotential);
+  const mode = payOutCtx.mode === 'pay_to_zero' ? 'pay_to_zero' : 'pay_now';
+  const includePotential = mode === 'pay_to_zero';
+  const plan = _calcPayOutPlan(payOutCtx.employeeId);
+  const selectedTotal = includePotential ? plan.payToZeroTotal : plan.payNowTotal;
+  const payNowBtn = document.getElementById('po_mode_now');
+  const payToZeroBtn = document.getElementById('po_mode_zero');
+  if (payNowBtn) payNowBtn.classList.toggle('active', mode === 'pay_now');
+  if (payToZeroBtn) payToZeroBtn.classList.toggle('active', mode === 'pay_to_zero');
   const totalsEl = document.getElementById('po_totals');
   if (totalsEl) {
     totalsEl.innerHTML = `
-      <span>Current Owed (payable) <strong>${fmt(plan.owedTotal)}</strong></span>
+      <span>Pay Now (completed only) <strong>${fmt(plan.payNowTotal)}</strong></span>
+      <span>Pay To Zero (include potential) <strong>${fmt(plan.payToZeroTotal)}</strong></span>
       <span>Potential Add-on <strong>${fmt(plan.potentialAddOn)}</strong></span>
-      <span>Pay Out Amount <strong style="color:var(--green)">${fmt(plan.targetTotal)}</strong></span>`;
+      <span>Selected Payout <strong style="color:${selectedTotal < -0.005 ? 'var(--red)' : 'var(--green)'}">${fmt(selectedTotal)}</strong></span>`;
   }
   const rowsEl = document.getElementById('po_rows');
   const hintEl = document.getElementById('po_hint');
   if (hintEl) {
     hintEl.textContent = includePotential
-      ? 'Potential mode includes negative rows so payout fully reconciles balances.'
-      : 'Current-owed mode ignores negative rows so prepaid jobs do not reduce payout.';
+      ? 'Pay To Zero includes negative rows so payouts fully reconcile overpaid vs future balances.'
+      : 'Pay Now ignores negative rows so prepaid jobs do not reduce what is paid today.';
+  }
+  const applyBtn = document.getElementById('po_applyBtn');
+  if (applyBtn) {
+    applyBtn.textContent = includePotential ? 'Use Pay To Zero in Split Pay' : 'Use Pay Now in Split Pay';
+    applyBtn.disabled = selectedTotal <= 0.005;
   }
   if (rowsEl) {
-    const shown = plan.rows.filter(r => includePotential ? Math.abs(r.target) > 0.005 : r.target > 0.005);
+    const shown = plan.rows.filter(r => includePotential ? Math.abs(r.payToZeroTarget) > 0.005 : r.payNowTarget > 0.005);
     rowsEl.innerHTML = shown.length
       ? shown.map(r => `
           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
             <div style="min-width:0">
               <div style="font-size:15px">${esc(r.label)}</div>
               <div style="font-family:var(--mono);font-size:12px;color:var(--text3)">
-                owed ${fmt(r.owedNow)}${includePotential ? ` · potential ${fmt(r.potential)}` : ''}
+                owed ${fmt(r.owedNow)}${includePotential ? ` | potential ${fmt(r.potential)}` : ''}
               </div>
             </div>
-            <div style="font-family:var(--mono);font-size:14px;color:${r.target < -0.005 ? 'var(--red)' : 'var(--green)'};white-space:nowrap">${fmt(r.target)}</div>
+            <div style="font-family:var(--mono);font-size:14px;color:${(includePotential ? r.payToZeroTarget : r.payNowTarget) < -0.005 ? 'var(--red)' : 'var(--green)'};white-space:nowrap">${fmt(includePotential ? r.payToZeroTarget : r.payNowTarget)}</div>
           </div>`).join('')
-      : '<div style="color:var(--text3);font-size:15px;padding:12px 0">No positive payout rows for this selection.</div>';
+      : '<div style="color:var(--text3);font-size:15px;padding:12px 0">No payable rows for this payout mode.</div>';
   }
 }
 function applyPayOutToSplitPay() {
-  const includePotential = !!payOutCtx.includePotential;
-  const plan = _calcPayOutPlan(payOutCtx.employeeId, includePotential);
-  if (plan.targetTotal <= 0.005) {
+  const includePotential = payOutCtx.mode === 'pay_to_zero';
+  const plan = _calcPayOutPlan(payOutCtx.employeeId);
+  const targetTotal = includePotential ? plan.payToZeroTotal : plan.payNowTotal;
+  if (targetTotal <= 0.005) {
     showAlert('Nothing to pay out for this selection.');
     return;
   }
@@ -2127,16 +2303,16 @@ function applyPayOutToSplitPay() {
   const allocById = {};
   plan.rows.forEach(r => {
     if (includePotential) {
-      if (Math.abs(r.target) > 0.005) allocById[r.id] = r.target;
+      if (Math.abs(r.payToZeroTarget) > 0.005) allocById[r.id] = r.payToZeroTarget;
       return;
     }
-    if (r.target > 0.005) allocById[r.id] = r.target;
+    if (r.payNowTarget > 0.005) allocById[r.id] = r.payNowTarget;
   });
   openSplitPay({
     trackAdvances: includePotential,
-    total: plan.targetTotal,
+    total: targetTotal,
     date: document.getElementById('po_date')?.value || today(),
-    label: `Pay Out${emp?.name ? ` - ${emp.name}` : ''}${includePotential ? ' (potential)' : ''}`,
+    label: `Pay Out${emp?.name ? ` - ${emp.name}` : ''}${includePotential ? ' (pay to zero)' : ' (pay now)'}`,
     allocById
   });
   closeModal('payOutModal');
@@ -2322,8 +2498,13 @@ async function saveSplitPay() {
   }
 }
 
-// ─── PARTIAL COLLECTION (JOBS) ───────────────────────────────────────────────
-function _roundMoney(n) { return Math.round((Number(n) + Number.EPSILON) * 100) / 100; }
+// â”€â”€â”€ PARTIAL COLLECTION (JOBS) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function _roundMoney(n) {
+  const x = Number(n || 0);
+  if (!Number.isFinite(x)) return 0;
+  const v = Math.sign(x) * Math.round((Math.abs(x) + Number.EPSILON) * 100) / 100;
+  return Object.is(v, -0) ? 0 : v;
+}
 function _roundPct(n) { return Math.round((Number(n) + Number.EPSILON) * 1000000) / 1000000; }
 function _clearSquareFields(item) {
   if (!item || typeof item !== 'object') return;
@@ -2348,23 +2529,43 @@ function _setPartialAutoSubUI() {
 function _buildPartialCollectCtx(jobId) {
   const job = state.jobs.find(j => j.id === jobId);
   if (!job) return null;
+  const isHourly = _jobType(job) === 'hourly';
   const rows = [];
-  (job.milestones || []).forEach((m, idx) => {
-    if ((m.status || 'pending') === 'collected') return;
-    const gross = _roundMoney(((m.pct || 0) / 100) * (job.quote || 0));
-    if (gross <= 0) return;
-    rows.push({
-      key: `milestones:${idx}`,
-      itemType: 'milestones',
-      idx,
-      label: m.label || `Milestone ${idx + 1}`,
-      gross,
-      assignedSub: 0,
-      net: gross,
-      alloc: 0,
-      included: false
+  if (isHourly) {
+    (job.revenueItems || []).forEach((r, idx) => {
+      if ((r.status || 'pending') === 'collected') return;
+      const gross = _roundMoney(r.amount || 0);
+      if (gross <= 0) return;
+      rows.push({
+        key: `revenueItems:${idx}`,
+        itemType: 'revenueItems',
+        idx,
+        label: r.label || `Revenue ${idx + 1}`,
+        gross,
+        assignedSub: 0,
+        net: gross,
+        alloc: 0,
+        included: false
+      });
     });
-  });
+  } else {
+    (job.milestones || []).forEach((m, idx) => {
+      if ((m.status || 'pending') === 'collected') return;
+      const gross = _roundMoney(((m.pct || 0) / 100) * (job.quote || 0));
+      if (gross <= 0) return;
+      rows.push({
+        key: `milestones:${idx}`,
+        itemType: 'milestones',
+        idx,
+        label: m.label || `Milestone ${idx + 1}`,
+        gross,
+        assignedSub: 0,
+        net: gross,
+        alloc: 0,
+        included: false
+      });
+    });
+  }
   (job.addOns || []).forEach((a, idx) => {
     if ((a.status || 'pending') === 'collected') return;
     const gross = _roundMoney(a.amount || 0);
@@ -2390,7 +2591,7 @@ function _buildPartialCollectCtx(jobId) {
   });
   const totalGross = _roundMoney(rows.reduce((sum, r) => sum + r.gross, 0));
   const totalSub = _roundMoney(subtractions.reduce((sum, s) => sum + s.amount, 0));
-  return { jobId, rows, subtractions, totalGross, totalSub, totalNet: totalGross, unassignedSub: 0, autoSub: true };
+  return { jobId, rows, subtractions, totalGross, totalSub, totalNet: totalGross, unassignedSub: 0, autoSub: true, isHourly };
 }
 function _hydratePartialRows(ctx) {
   if (!ctx) return null;
@@ -2404,14 +2605,14 @@ function _hydratePartialRows(ctx) {
   }));
   let remSub = ctx.autoSub ? _roundMoney(ctx.totalSub || 0) : 0;
   rows.forEach(r => {
-    if (r.itemType !== 'milestones' || remSub <= 0) return;
+    if ((r.itemType !== 'milestones' && r.itemType !== 'revenueItems') || remSub <= 0) return;
     const assign = _roundMoney(Math.min(remSub, r.gross));
     r.assignedSub = assign;
     r.net = _roundMoney(r.gross - assign);
     remSub = _roundMoney(remSub - assign);
   });
   rows.forEach(r => {
-    if (r.itemType !== 'milestones') r.net = r.gross;
+    if (r.itemType !== 'milestones' && r.itemType !== 'revenueItems') r.net = r.gross;
     if (r.alloc > r.net) r.alloc = r.net;
   });
   const totalNet = _roundMoney(rows.reduce((sum, r) => sum + r.net, 0));
@@ -2429,8 +2630,7 @@ function _applyPartialPreset(ctx, preset) {
 function openPartialCollect(jobId, preset = null) {
   if (!currentUser?.isAdmin) return;
   const ctx = _buildPartialCollectCtx(jobId);
-  if (!ctx || !ctx.rows.length) {
-    showAlert('No pending milestones or additions to collect.');
+  if (!ctx) {
     return;
   }
   partialCollectCtx = _hydratePartialRows(_applyPartialPreset(ctx, preset));
@@ -2439,6 +2639,14 @@ function openPartialCollect(jobId, preset = null) {
   document.getElementById('pc_percent').value = preset?.mode === 'percent' ? (preset?.partialPercent || '') : '';
   document.getElementById('pc_date').value = preset?.date || today();
   document.getElementById('pc_note').value = preset?.note || '';
+  const modalTitle = document.getElementById('pc_modalTitle');
+  if (modalTitle) modalTitle.textContent = partialCollectCtx.isHourly ? 'Log Revenue Payment' : 'Log Revenue Collection';
+  const listLabel = document.getElementById('pc_listLabel');
+  if (listLabel) listLabel.textContent = partialCollectCtx.isHourly ? 'Pending Revenue Entries + Additions' : 'Pending Milestones + Additions';
+  const autoSubLabel = document.getElementById('pc_autoSubLabel');
+  if (autoSubLabel) autoSubLabel.textContent = partialCollectCtx.isHourly
+    ? 'Apply pending subtractions across remaining revenue entries'
+    : 'Apply pending subtractions across remaining milestones';
   _setPartialAutoSubUI();
   renderPartialCollectRows();
   document.getElementById('partialCollectModal').classList.remove('hidden');
@@ -2462,21 +2670,22 @@ function renderPartialCollectRows() {
   const listEl = document.getElementById('pc_list');
   const infoEl = document.getElementById('pc_subInfo');
   if (infoEl) {
+    const baseLabel = partialCollectCtx.isHourly ? 'Pending revenue/additions' : 'Pending milestones/additions';
     infoEl.innerHTML = `
-      <span>Pending milestones/additions: <strong>${fmt(partialCollectCtx.totalGross)}</strong></span>
+      <span>${baseLabel}: <strong>${fmt(partialCollectCtx.totalGross)}</strong></span>
       <span>Pending subtractions: <strong style="color:var(--red)">-${fmt(partialCollectCtx.totalSub)}</strong></span>
       <span>Net due base: <strong style="color:var(--accent)">${fmt(partialCollectCtx.totalNet)}</strong></span>
       ${partialCollectCtx.autoSub && partialCollectCtx.unassignedSub > 0.01 ? `<span style="color:var(--red)">Unassigned subtraction overflow: ${fmt(partialCollectCtx.unassignedSub)}</span>` : ''}`;
   }
   const rowsHtml = partialCollectCtx.rows.map((r, i) => {
-    const typeLabel = r.itemType === 'milestones' ? 'Milestone' : 'Addition';
-    const milestoneSub = r.itemType === 'milestones' && partialCollectCtx.autoSub && r.assignedSub > 0
-      ? ` · after ${fmt(r.assignedSub)} subtractions`
+    const typeLabel = r.itemType === 'milestones' ? 'Milestone' : r.itemType === 'revenueItems' ? 'Revenue' : 'Addition';
+    const milestoneSub = (r.itemType === 'milestones' || r.itemType === 'revenueItems') && partialCollectCtx.autoSub && r.assignedSub > 0
+      ? ` - after ${fmt(r.assignedSub)} subtractions`
       : '';
     return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
       <div style="flex:1;min-width:0">
         <div style="font-size:16px;font-weight:500">${esc(r.label)}</div>
-        <div style="font-family:var(--mono);font-size:12px">${typeLabel} · due ${fmt(r.net)}${milestoneSub}</div>
+        <div style="font-family:var(--mono);font-size:12px">${typeLabel} - due ${fmt(r.net)}${milestoneSub}</div>
       </div>
       <div class="pc-dollar-controls" style="display:${mode==='dollar'?'flex':'none'};align-items:center;gap:8px;flex-shrink:0">
         <button class="btn btn-ghost btn-sm" onclick="partialCollectMax(${i})">Max</button>
@@ -2542,8 +2751,8 @@ function _getPartialCollectPlan() {
     partialCollectCtx.rows.forEach((r, i) => {
       const net = _roundMoney(Math.max(0, Math.min(r.net, Number(r.alloc || 0))));
       if (net <= 0) return;
-      const milestoneSub = partialCollectCtx.autoSub && r.itemType === 'milestones' ? _roundMoney(r.assignedSub || 0) : 0;
-      const gross = _roundMoney(Math.min(r.gross, net + milestoneSub));
+      const baseSub = partialCollectCtx.autoSub && (r.itemType === 'milestones' || r.itemType === 'revenueItems') ? _roundMoney(r.assignedSub || 0) : 0;
+      const gross = _roundMoney(Math.min(r.gross, net + baseSub));
       const subCollect = _roundMoney(Math.max(0, gross - net));
       allocs.push({ rowIdx: i, net, gross, subCollect });
       allocatedNet += net;
@@ -2555,8 +2764,8 @@ function _getPartialCollectPlan() {
       selectedNetBase += r.net;
       const ratio = pct / 100;
       const net = _roundMoney(r.net * ratio);
-      const milestoneSub = partialCollectCtx.autoSub && r.itemType === 'milestones' ? _roundMoney(r.assignedSub || 0) : 0;
-      const gross = _roundMoney(Math.min(r.gross, net + milestoneSub));
+      const baseSub = partialCollectCtx.autoSub && (r.itemType === 'milestones' || r.itemType === 'revenueItems') ? _roundMoney(r.assignedSub || 0) : 0;
+      const gross = _roundMoney(Math.min(r.gross, net + baseSub));
       if (net <= 0 && gross <= 0) return;
       const subCollect = _roundMoney(Math.max(0, gross - net));
       allocs.push({ rowIdx: i, net, gross, subCollect });
@@ -2744,7 +2953,6 @@ function savePartialCollect() {
     const pct = Math.max(0, Math.min(100, parseFloat(document.getElementById('pc_percent')?.value) || 0));
     if (pct <= 0) { showAlert('Please enter a percentage greater than 0.'); return; }
   }
-  if (!plan.allocs.length) { showAlert('Please allocate/include at least one line item.'); return; }
   const job = state.jobs.find(j => j.id === partialCollectCtx.jobId);
   if (!job) return;
   const date = document.getElementById('pc_date')?.value || today();
@@ -2753,12 +2961,33 @@ function savePartialCollect() {
     ? Math.max(0, Math.min(100, parseFloat(document.getElementById('pc_percent')?.value) || 0))
     : 0;
   const persist = () => {
+    if (!plan.allocs.length && partialCollectCtx.isHourly && mode === 'dollar' && plan.paymentTotal > 0) {
+      if (!job.revenueItems) job.revenueItems = [];
+      job.revenueItems.push({
+        id: uid(),
+        label: note || 'Collected payment',
+        amount: _roundMoney(plan.paymentTotal),
+        date,
+        status: 'collected'
+      });
+      if (!job.jobNotes) job.jobNotes = [];
+      const summary = note || `Revenue payment logged: ${fmt(plan.paymentTotal)} on ${date}.`;
+      job.jobNotes.push({ id: uid(), text: summary, date, authorId: currentUser?.id || '', authorName: currentUser?.name || 'Admin' });
+      save(); renderJobs(); closeModal('partialCollectModal');
+      partialCollectCtx = null;
+      return;
+    }
+    if (!plan.allocs.length) {
+      showAlert('Please allocate/include at least one line item.');
+      return;
+    }
     const before = {
       milestones: JSON.parse(JSON.stringify(job.milestones || [])),
+      revenueItems: JSON.parse(JSON.stringify(job.revenueItems || [])),
       addOns: JSON.parse(JSON.stringify(job.addOns || [])),
       subtractions: JSON.parse(JSON.stringify(job.subtractions || []))
     };
-    const byType = { milestones: [], addOns: [] };
+    const byType = { milestones: [], revenueItems: [], addOns: [] };
     plan.allocs.forEach(a => {
       const row = partialCollectCtx.rows[a.rowIdx];
       if (!row) return;
@@ -2766,6 +2995,9 @@ function savePartialCollect() {
     });
     byType.milestones.sort((a,b) => b.idx - a.idx).forEach(a =>
       _applyPartialToMilestones(job, a.idx, a.gross, { partialMode: mode, partialPercent, partialDate: date })
+    );
+    byType.revenueItems.sort((a,b) => b.idx - a.idx).forEach(a =>
+      _applyPartialToAmountList(job.revenueItems, a.idx, a.gross, { partialMode: mode, partialPercent, partialDate: date })
     );
     byType.addOns.sort((a,b) => b.idx - a.idx).forEach(a =>
       _applyPartialToAmountList(job.addOns, a.idx, a.gross, { partialMode: mode, partialPercent, partialDate: date })
@@ -2794,7 +3026,7 @@ function savePartialCollect() {
       createdAt: new Date().toISOString()
     });
     if (!job.jobNotes) job.jobNotes = [];
-    const summary = note || `Partial collection logged: ${fmt(plan.paymentTotal)} on ${date}.`;
+    const summary = note || `Revenue collection logged: ${fmt(plan.paymentTotal)} on ${date}.`;
     job.jobNotes.push({ id: uid(), text: summary, date, authorId: currentUser?.id || '', authorName: currentUser?.name || 'Admin' });
     save(); renderJobs(); closeModal('partialCollectModal');
     partialCollectCtx = null;
@@ -2820,6 +3052,7 @@ function deletePartialCollection(jobId, partialId) {
   showConfirm('Delete this partial payment and restore the prior line items?', () => {
     const snap = entry.snapshotBefore || {};
     job.milestones = JSON.parse(JSON.stringify(snap.milestones || []));
+    job.revenueItems = JSON.parse(JSON.stringify(snap.revenueItems || []));
     job.addOns = JSON.parse(JSON.stringify(snap.addOns || []));
     job.subtractions = JSON.parse(JSON.stringify(snap.subtractions || []));
     job.partialCollections = arr.filter(p => p.id !== partialId);
@@ -2840,6 +3073,7 @@ function editPartialCollection(jobId, partialId) {
   const entry = arr[idx];
   const snap = entry.snapshotBefore || {};
   job.milestones = JSON.parse(JSON.stringify(snap.milestones || []));
+  job.revenueItems = JSON.parse(JSON.stringify(snap.revenueItems || []));
   job.addOns = JSON.parse(JSON.stringify(snap.addOns || []));
   job.subtractions = JSON.parse(JSON.stringify(snap.subtractions || []));
   job.partialCollections = arr.filter(p => p.id !== partialId);
@@ -2887,6 +3121,7 @@ function rebuildLegacyPartial(jobId) {
       return out;
     };
     job.milestones = collapseMilestones();
+    job.revenueItems = collapseAmountList(job.revenueItems || []);
     job.addOns = collapseAmountList(job.addOns || []);
     job.subtractions = collapseAmountList(job.subtractions || []).map(s => ({ ...s, status: 'pending' }));
     job.partialCollections = [];
@@ -2951,7 +3186,7 @@ function removeItem(jobId, key, idx) {
   j[key].splice(idx,1); save(); renderJobs();
 }
 
-// ─── NOTES ────────────────────────────────────────────────────────────────────
+// â”€â”€â”€ NOTES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function _notesEntity() {
   if (!notesCtx) return null;
   return notesCtx.type === 'hw'
@@ -2965,7 +3200,7 @@ function openNotes(type, id) {
   notesCtx = { type, id };
   const entity = _notesEntity();
   if (!entity) return;
-  document.getElementById('notesModalTitle').textContent = `Notes — ${entity.name}`;
+  document.getElementById('notesModalTitle').textContent = `Notes - ${entity.name}`;
   document.getElementById('n_date').value = today();
   document.getElementById('n_text').value = '';
   renderNotesList();
@@ -2980,10 +3215,10 @@ function renderNotesList() {
     ? notes.map(n=>`
       <div class="note-item">
         <div class="note-meta">
-          <span class="note-date-label">${fmtDate(n.date)||n.date||'—'}</span>
+          <span class="note-date-label">${fmtDate(n.date)||n.date||'-'}</span>
           <div class="note-actions">
-            <button class="btn btn-ghost btn-sm" onclick="openEditNote('${n.id}')">✏</button>
-            <button class="btn btn-danger btn-sm" onclick="deleteNote('${n.id}')">DEL</button>
+            <button class="btn btn-ghost btn-sm job-icon-btn" onclick="openEditNote('${n.id}')" title="Edit note" aria-label="Edit note">${jobIconSvg('edit')}</button>
+            <button class="btn btn-danger btn-sm btn-icon-only" onclick="deleteNote('${n.id}')" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
           </div>
         </div>
         <div class="note-text">${esc(n.text)}</div>
@@ -3035,12 +3270,12 @@ function saveEditNote() {
   save(); closeModal('editNoteModal'); renderNotesList(); _notesRender();
 }
 
-// ─── HOURS ────────────────────────────────────────────────────────────────────
+// â”€â”€â”€ HOURS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function openHours(jobId) {
   hoursJobId = jobId;
   const job = state.jobs.find(j=>j.id===jobId);
   if (!job) return;
-  document.getElementById('hoursModalTitle').textContent = `Hours — ${job.name}`;
+  document.getElementById('hoursModalTitle').textContent = `Hours - ${job.name}`;
   document.getElementById('h_date').value  = today();
   document.getElementById('h_hours').value = '';
   document.getElementById('h_note').value  = '';
@@ -3067,7 +3302,7 @@ function renderHoursList() {
         </div>
         <div style="display:flex;align-items:center;gap:10px">
           <span style="font-family:var(--mono);font-size:20px;font-weight:600;color:var(--accent)">${h.hours}h</span>
-          <button class="btn btn-danger btn-sm" onclick="deleteHoursEntry('${h.id}')">DEL</button>
+            <button class="btn btn-danger btn-sm btn-icon-only" onclick="deleteHoursEntry('${h.id}')" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
         </div>
       </div>`).join('')
     : '<div style="color:var(--text3);font-size:17px;padding:8px 0 16px">No hours logged yet.</div>';
@@ -3091,7 +3326,7 @@ function deleteHoursEntry(hId) {
   save(); renderHoursList(); renderJobs();
 }
 
-// ─── JOB MODAL ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ JOB MODAL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 let milestoneCount = 0;
 let quoteItemCount = 0;
 function populateEmpDropdown(selectId, wrapId, currentEmpId) {
@@ -3105,10 +3340,45 @@ function populateEmpDropdown(selectId, wrapId, currentEmpId) {
   ).join('');
 }
 let milestoneMode = 'single';
+let jobTypeMode = 'quoted';
+let jobSetupMode = 'unified';
+function refreshJobSetupButtons() {
+  ['unified', 'itemized', 'hourly'].forEach(mode => {
+    const btn = document.getElementById(`js_mode_${mode}`);
+    if (!btn) return;
+    btn.className = `btn ${jobSetupMode === mode ? 'btn-primary selected' : 'btn-ghost'} btn-sm user-pick-btn`;
+  });
+}
+function setJobType(type) {
+  jobTypeMode = type === 'hourly' ? 'hourly' : 'quoted';
+  const typeEl = document.getElementById('f_jobType');
+  if (typeEl && typeEl.value !== jobTypeMode) typeEl.value = jobTypeMode;
+  const quotedWrap = document.getElementById('jobQuotedFields');
+  const hourlyHint = document.getElementById('jobHourlyHint');
+  const hourlyRateWrap = document.getElementById('f_hourly_rate_wrap');
+  if (quotedWrap) quotedWrap.style.display = jobTypeMode === 'hourly' ? 'none' : '';
+  if (hourlyHint) hourlyHint.style.display = jobTypeMode === 'hourly' ? '' : 'none';
+  if (hourlyRateWrap) hourlyRateWrap.style.display = jobTypeMode === 'hourly' ? '' : 'none';
+}
+function setJobSetupMode(mode) {
+  jobSetupMode = mode === 'itemized' ? 'itemized' : mode === 'hourly' ? 'hourly' : 'unified';
+  const isHourly = jobSetupMode === 'hourly';
+  const itemized = jobSetupMode === 'itemized';
+  setJobType(isHourly ? 'hourly' : 'quoted');
+  const itemizedEl = document.getElementById('f_itemized');
+  if (itemizedEl) itemizedEl.checked = itemized;
+  toggleItemizedQuote();
+  refreshJobSetupButtons();
+}
+function onJobTypeChange() {
+  const type = document.getElementById('f_jobType')?.value || 'quoted';
+  if (type === 'hourly') setJobSetupMode('hourly');
+  else setJobSetupMode(document.getElementById('f_itemized')?.checked ? 'itemized' : 'unified');
+}
 function setMilestoneMode(mode) {
   const dms = state.settings.defaultMilestones || [];
   if (mode === 'default' && !dms.length) {
-    document.getElementById('milestoneHint').textContent = 'No defaults set — configure them in Settings → Jobs.';
+    document.getElementById('milestoneHint').textContent = 'No defaults set - configure them in Settings > Jobs.';
     document.getElementById('milestoneHint').style.display = '';
     document.getElementById('milestoneEditor').style.display = 'none';
     // keep single selected
@@ -3123,7 +3393,7 @@ function setMilestoneMode(mode) {
   const hint   = document.getElementById('milestoneHint');
   if (mode === 'single') {
     editor.style.display = 'none';
-    hint.textContent = 'Full invoice — one payment to track.';
+    hint.textContent = 'Full invoice - one payment to track.';
     hint.style.display = '';
     document.getElementById('milestoneList').innerHTML = '';
     milestoneCount = 0;
@@ -3143,7 +3413,7 @@ function setJobFinancialEditLock(locked) {
   const note = document.getElementById('jobFinancialLockNote');
   if (note) note.style.display = locked ? '' : 'none';
 
-  const ids = ['f_itemized', 'f_quote', 'quoteAddItemBtn', 'ms_btn_single', 'ms_btn_default', 'ms_btn_custom', 'milestoneAddBtn'];
+  const ids = ['f_jobType', 'f_hourlyRate', 'f_itemized', 'f_quote', 'quoteAddItemBtn', 'ms_btn_single', 'ms_btn_default', 'ms_btn_custom', 'milestoneAddBtn', 'js_mode_unified', 'js_mode_itemized', 'js_mode_hourly'];
   ids.forEach(id => {
     const el = document.getElementById(id);
     if (el) el.disabled = !!locked;
@@ -3169,11 +3439,13 @@ function openNewJobModal() {
   document.getElementById('f_name').value    = '';
   document.getElementById('f_contact').value = '';
   document.getElementById('f_quote').value   = '';
+  document.getElementById('f_hourlyRate').value = '';
   document.getElementById('f_date').value    = today();
   document.getElementById('f_itemized').checked = false;
+  document.getElementById('f_jobType').value = 'quoted';
   document.getElementById('quoteItemList').innerHTML = '';
   quoteItemCount = 0;
-  toggleItemizedQuote();
+  setJobSetupMode('unified');
   setMilestoneMode('single');
   populateEmpDropdown('f_emp', 'f_emp_wrap', null);
   setJobFinancialEditLock(false);
@@ -3182,33 +3454,42 @@ function openNewJobModal() {
 function editJob(id) {
   const job = state.jobs.find(j=>j.id===id);
   if (!job) return;
+  const jobType = _jobType(job);
   editingJobId = id;
   document.getElementById('jobModalTitle').textContent = 'Edit Job';
   document.getElementById('f_name').value    = job.name;
   document.getElementById('f_contact').value = job.contactName || '';
   document.getElementById('f_quote').value   = job.quote;
+  document.getElementById('f_hourlyRate').value = (job.hourlyRate || 0) > 0 ? Number(job.hourlyRate).toFixed(2) : '';
   document.getElementById('f_date').value    = job.date||'';
   document.getElementById('f_itemized').checked = job.isItemized||false;
+  document.getElementById('f_jobType').value = jobType;
   document.getElementById('quoteItemList').innerHTML = '';
   quoteItemCount = 0;
   if (job.isItemized && job.quoteItems?.length) {
     job.quoteItems.forEach(qi => addQuoteItemField(qi.label, qi.amount));
   }
-  toggleItemizedQuote();
-  const isSingle = job.milestones?.length === 1 && job.milestones[0].pct === 100;
-  if (isSingle) {
-    setMilestoneMode('single');
-  } else {
-    milestoneMode = 'custom';
-    ['single','default','custom'].forEach(m => {
-      const btn = document.getElementById(`ms_btn_${m}`);
-      if (btn) btn.className = `btn ${m === 'custom' ? 'btn-primary' : 'btn-ghost'} btn-sm`;
-    });
-    document.getElementById('milestoneEditor').style.display = '';
-    document.getElementById('milestoneHint').style.display = 'none';
+  setJobSetupMode(jobType === 'hourly' ? 'hourly' : (job.isItemized ? 'itemized' : 'unified'));
+  if (jobType === 'hourly') {
+    milestoneMode = 'single';
     document.getElementById('milestoneList').innerHTML = '';
     milestoneCount = 0;
-    (job.milestones||[]).forEach(m => addMilestoneField(m.label, m.pct));
+  } else {
+    const isSingle = job.milestones?.length === 1 && job.milestones[0].pct === 100;
+    if (isSingle) {
+      setMilestoneMode('single');
+    } else {
+      milestoneMode = 'custom';
+      ['single','default','custom'].forEach(m => {
+        const btn = document.getElementById(`ms_btn_${m}`);
+        if (btn) btn.className = `btn ${m === 'custom' ? 'btn-primary' : 'btn-ghost'} btn-sm`;
+      });
+      document.getElementById('milestoneEditor').style.display = '';
+      document.getElementById('milestoneHint').style.display = 'none';
+      document.getElementById('milestoneList').innerHTML = '';
+      milestoneCount = 0;
+      (job.milestones||[]).forEach(m => addMilestoneField(m.label, m.pct));
+    }
   }
   populateEmpDropdown('f_emp', 'f_emp_wrap', job.employeeId);
   setJobFinancialEditLock(hasPartialFinancialState(job));
@@ -3223,7 +3504,7 @@ function addDmField(label='', pct='') {
   div.innerHTML = `
     <input class="form-input" placeholder="Label" value="${label}" id="dmlabel_${id}" style="flex:2" />
     <input class="form-input" placeholder="%" type="number" value="${pct}" id="dmpct_${id}" style="flex:1;max-width:80px" oninput="updateDmPreview()" />
-    <button class="btn btn-danger btn-sm" onclick="document.getElementById('dmrow_${id}').remove();updateDmPreview()">DEL</button>`;
+    <button class="btn btn-danger btn-sm btn-icon-only" onclick="document.getElementById('dmrow_${id}').remove();updateDmPreview()" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>`;
   document.getElementById('dmList').appendChild(div);
   updateDmPreview();
 }
@@ -3241,7 +3522,7 @@ function addMilestoneField(label='', pct='') {
   div.innerHTML = `
     <input class="form-input" placeholder="Label" value="${label}" id="mlabel_${id}" style="flex:2" />
     <input class="form-input" placeholder="%" type="number" value="${pct}" id="mpct_${id}" style="flex:1;max-width:80px" oninput="updateMilestonePreview()" />
-    <button class="btn btn-danger btn-sm" onclick="document.getElementById('mrow_${id}').remove();updateMilestonePreview()">DEL</button>`;
+    <button class="btn btn-danger btn-sm btn-icon-only" onclick="document.getElementById('mrow_${id}').remove();updateMilestonePreview()" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>`;
   document.getElementById('milestoneList').appendChild(div);
   updateMilestonePreview();
 }
@@ -3249,7 +3530,7 @@ function updateMilestonePreview() {
   let total=0;
   document.querySelectorAll('[id^="mpct_"]').forEach(el=>{total+=parseFloat(el.value)||0;});
   const err = document.getElementById('milestoneError');
-  err.textContent = (Math.abs(total-100)>0.01&&total>0) ? `Milestones total ${total}% — must equal 100%` : '';
+  err.textContent = (Math.abs(total-100)>0.01&&total>0) ? `Milestones total ${total}% - must equal 100%` : '';
 }
 function toggleItemizedQuote() {
   const on = document.getElementById('f_itemized').checked;
@@ -3268,7 +3549,7 @@ function addQuoteItemField(label='', amount='') {
   div.innerHTML = `
     <input class="form-input" placeholder="Description" value="${label}" id="qilabel_${id}" style="flex:2" />
     <input class="form-input" placeholder="$0.00" type="number" step="0.01" value="${amount}" id="qiamt_${id}" style="flex:1;max-width:100px" oninput="updateQuoteItemTotal()" />
-    <button class="btn btn-danger btn-sm" onclick="document.getElementById('qitem_${id}').remove();updateQuoteItemTotal()">DEL</button>`;
+    <button class="btn btn-danger btn-sm btn-icon-only" onclick="document.getElementById('qitem_${id}').remove();updateQuoteItemTotal()" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>`;
   document.getElementById('quoteItemList').appendChild(div);
   updateQuoteItemTotal();
 }
@@ -3281,6 +3562,7 @@ function updateQuoteItemTotal() {
 function hasPartialFinancialState(job) {
   if (!job) return false;
   if ((job.partialCollections || []).length) return true;
+  if ((job.revenueItems || []).some(r => r?.partialState || r?.partialGroupId || r?.partialMode || r?.partialDate)) return true;
   if ((job.milestones || []).some(m => m?.partialState || m?.partialGroupId || m?.partialMode || m?.partialDate)) return true;
   if ((job.addOns || []).some(a => a?.partialState || a?.partialGroupId || a?.partialMode || a?.partialDate)) return true;
   if ((job.subtractions || []).some(s => s?.partialState || s?.appliedByPartial)) return true;
@@ -3297,10 +3579,16 @@ function saveJob() {
   const name        = document.getElementById('f_name').value.trim();
   const contactName = document.getElementById('f_contact').value.trim();
   const date        = document.getElementById('f_date').value;
-  const isItemized  = document.getElementById('f_itemized').checked;
+  const jobType     = (document.getElementById('f_jobType')?.value === 'hourly') ? 'hourly' : 'quoted';
+  const isHourly    = jobType === 'hourly';
+  const hourlyRate  = _roundMoney(parseFloat(document.getElementById('f_hourlyRate')?.value) || 0);
+  const isItemized  = !isHourly && document.getElementById('f_itemized').checked;
   if (!name) { showAlert('Please enter a client name.'); return; }
-  let quote, quoteItems = [];
-  if (isItemized) {
+  let quote = 0, quoteItems = [];
+  if (isHourly) {
+    quote = 0;
+    quoteItems = [];
+  } else if (isItemized) {
     document.querySelectorAll('[id^="qiamt_"]').forEach((el, i) => {
       const amt = parseFloat(el.value)||0;
       const qId = el.id.slice('qiamt_'.length);
@@ -3313,7 +3601,9 @@ function saveJob() {
     quote = parseFloat(document.getElementById('f_quote').value)||0;
   }
   const milestones=[]; let total=0;
-  if (milestoneMode === 'single') {
+  if (isHourly) {
+    // Hourly jobs use revenue entries instead of quote milestones.
+  } else if (milestoneMode === 'single') {
     const prevStatus = editingJobId
       ? (state.jobs.find(j=>j.id===editingJobId)?.milestones?.[0]?.status || 'pending')
       : 'pending';
@@ -3338,12 +3628,13 @@ function saveJob() {
     if (job) {
       const partialLocked = hasPartialFinancialState(job);
       if (partialLocked) {
-        const milestoneChanged = financialSignatureFromMilestones(milestones) !== financialSignatureFromMilestones(job.milestones || []);
-        const quoteChanged = _roundMoney(Number(quote || 0)) !== _roundMoney(Number(job.quote || 0));
-        const itemizedChanged = !!isItemized !== !!job.isItemized;
-        const quoteItemsChanged = financialSignatureFromQuoteItems(quoteItems) !== financialSignatureFromQuoteItems(job.quoteItems || []);
-        if (milestoneChanged || quoteChanged || itemizedChanged || quoteItemsChanged) {
-          showAlert('This job has partial-payment history. Quote and milestone edits are locked here to protect split calculations. Use Revenue > Partial Payments (Edit/Delete) first.');
+        const typeChanged = _jobType(job) !== jobType;
+        const milestoneChanged = !isHourly && (financialSignatureFromMilestones(milestones) !== financialSignatureFromMilestones(job.milestones || []));
+        const quoteChanged = !isHourly && (_roundMoney(Number(quote || 0)) !== _roundMoney(Number(job.quote || 0)));
+        const itemizedChanged = !isHourly && (!!isItemized !== !!job.isItemized);
+        const quoteItemsChanged = !isHourly && (financialSignatureFromQuoteItems(quoteItems) !== financialSignatureFromQuoteItems(job.quoteItems || []));
+        if (typeChanged || milestoneChanged || quoteChanged || itemizedChanged || quoteItemsChanged) {
+          showAlert('This job has revenue-collection history. Job type, quote, and payment structure edits are locked here to protect split calculations. Use Revenue > Collections (Edit/Delete) first.');
           return;
         }
       }
@@ -3351,11 +3642,13 @@ function saveJob() {
       job.contactName = contactName;
       job.date = date;
       if (employeeId) job.employeeId = employeeId;
+      job.jobType = jobType;
+      job.hourlyRate = hourlyRate;
       if (!partialLocked) {
         job.quote = quote;
         job.isItemized = isItemized;
         job.quoteItems = quoteItems;
-        milestones.forEach((m,i)=>{ if(job.milestones[i]) m.status=job.milestones[i].status||'pending'; });
+        if (!isHourly) milestones.forEach((m,i)=>{ if(job.milestones[i]) m.status=job.milestones[i].status||'pending'; });
         job.milestones = milestones;
       }
     }
@@ -3366,25 +3659,50 @@ function saveJob() {
     saveExpandedState();
     state.jobs.push({ id:newId, name, contactName, quote, date, isItemized, quoteItems, status:'active',
       milestones, addOns:[], subtractions:[], materials:[], advances:[], fees:[], jobNotes:[], hours:[], partialCollections:[], repaymentMode:false,
+      revenueItems:[], jobType, hourlyRate,
       employeeId: employeeId || '' });
   }
   save(); renderJobs(); closeModal('jobModal');
   if (isNew || name.toLowerCase() !== originalName.toLowerCase()) checkNewClientPrompt(name);
 }
 
-// ─── ADD ITEM MODAL ───────────────────────────────────────────────────────────
+// â”€â”€â”€ ADD ITEM MODAL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function openAddItem(jobId, type, itemId = null) {
   addItemContext = { jobId, type, itemId };
   const job = state.jobs.find(j => j.id === jobId);
   const en = esc(getEmp(job?.employeeId)?.name || 'Employee');
   const isEdit = !!itemId;
-  const titles = { addon: isEdit?'Edit Addition':'Add Addition', subtraction: isEdit?'Edit Subtraction':'Add Subtraction', material: isEdit?'Edit Material':'Add Material', advance: isEdit?'Edit Employee Pay':'Add Employee Pay' };
+  const titles = {
+    revenue: isEdit ? 'Edit Revenue Entry' : 'Add Revenue Entry',
+    addon: isEdit ? 'Edit Addition' : 'Add Addition',
+    hours: isEdit ? 'Edit Hours' : 'Add Hours',
+    subtraction: isEdit ? 'Edit Subtraction' : 'Add Subtraction',
+    material: isEdit ? 'Edit Material' : 'Add Material',
+    advance: isEdit ? 'Edit Employee Pay' : 'Add Employee Pay'
+  };
   document.getElementById('addItemTitle').textContent = titles[type];
   let html='';
-  if (type==='addon') {
+  if (type==='revenue') {
+    html=`<div class="form-group"><label class="form-label">Description</label><input class="form-input" id="ai_label" placeholder="e.g. 4/26 labor + materials" /></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Amount ($)</label><input class="form-input" id="ai_amount" type="number" step="0.01" placeholder="0.00" /></div>
+        <div class="form-group"><label class="form-label">Date</label><input class="form-input" id="ai_date" type="date" value="${today()}" /></div>
+      </div>`;
+  } else if (type==='addon') {
     html=`<div class="form-group"><label class="form-label">Description</label><input class="form-input" id="ai_label" placeholder="e.g. Extra electrical work" /></div>
       <div class="form-row">
         <div class="form-group"><label class="form-label">Amount ($)</label><input class="form-input" id="ai_amount" type="number" step="0.01" placeholder="0.00" /></div>
+        <div class="form-group"><label class="form-label">Date</label><input class="form-input" id="ai_date" type="date" value="${today()}" /></div>
+      </div>`;
+  } else if (type==='hours') {
+    const defaultRate = Number(job?.hourlyRate || 0);
+    html=`<div class="form-group"><label class="form-label">Description / Note</label><input class="form-input" id="ai_label" placeholder="e.g. Demo + trim install" /></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Hours</label><input class="form-input" id="ai_hours" type="number" step="0.25" min="0" placeholder="0.00" oninput="updateHoursAddItemTotal()" /></div>
+        <div class="form-group"><label class="form-label">Rate ($/hr)</label><input class="form-input" id="ai_rate" type="number" step="0.01" min="0" placeholder="0.00" value="${defaultRate > 0 ? defaultRate.toFixed(2) : ''}" oninput="updateHoursAddItemTotal()" /></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Total ($)</label><input class="form-input" id="ai_amount" type="number" step="0.01" readonly /></div>
         <div class="form-group"><label class="form-label">Date</label><input class="form-input" id="ai_date" type="date" value="${today()}" /></div>
       </div>`;
   } else if (type==='subtraction') {
@@ -3394,10 +3712,10 @@ function openAddItem(jobId, type, itemId = null) {
     const sourceHtml = hasItems ? `
       <div class="form-group"><label class="form-label">Line Item</label>
         <select class="form-input" id="ai_source" onchange="fillSubtractionFromItem()">
-          <option value="">— Select a line item</option>
+          <option value="">- Select a line item</option>
           ${(subJob.quoteItems).map(qi => {
             const used = usedSourceIds.includes(qi.id);
-            return `<option value="${qi.id}"${used ? ' disabled' : ''}>${esc(qi.label)} (${fmt(qi.amount)})${used ? ' — already subtracted' : ''}</option>`;
+            return `<option value="${qi.id}"${used ? ' disabled' : ''}>${esc(qi.label)} (${fmt(qi.amount)})${used ? ' - already subtracted' : ''}</option>`;
           }).join('')}
         </select>
       </div>
@@ -3439,7 +3757,7 @@ function openAddItem(jobId, type, itemId = null) {
   }
   document.getElementById('addItemForm').innerHTML = html;
   if (isEdit) {
-    const arr = type==='addon' ? job?.addOns : type==='subtraction' ? job?.subtractions : type==='material' ? job?.materials : job?.advances;
+    const arr = type==='revenue' ? job?.revenueItems : (type==='addon' || type==='hours') ? job?.addOns : type==='subtraction' ? job?.subtractions : type==='material' ? job?.materials : job?.advances;
     const item = arr?.find(x => x.id === itemId);
     if (type === 'subtraction' && item?.appliedByPartial) {
       showAlert('This subtraction was applied by a partial payment and is locked.');
@@ -3448,7 +3766,12 @@ function openAddItem(jobId, type, itemId = null) {
     if (item) {
       document.getElementById('ai_label').value = item.label || '';
       document.getElementById('ai_amount').value = item.amount || '';
-      if (type==='addon'||type==='subtraction'||type==='advance') document.getElementById('ai_date').value = item.date || '';
+      if (type==='revenue'||type==='addon'||type==='hours'||type==='subtraction'||type==='advance') document.getElementById('ai_date').value = item.date || '';
+      if (type==='hours') {
+        document.getElementById('ai_hours').value = item.hours || '';
+        document.getElementById('ai_rate').value = item.rate || '';
+        updateHoursAddItemTotal();
+      }
       if (type==='material') document.getElementById('ai_who').value = item.who || 'owner';
       if (type==='advance') document.getElementById('ai_paytype').value = item.payType || '';
       if (type === 'addon' && item.partialGroupId) {
@@ -3476,6 +3799,7 @@ function openAddItem(jobId, type, itemId = null) {
       }
     }
   }
+  if (type === 'hours' && !isEdit) updateHoursAddItemTotal();
   document.getElementById('addItemModal').classList.remove('hidden');
 }
 function setAddItemAdvanceMax() {
@@ -3491,21 +3815,74 @@ function setAddItemAdvanceMax() {
   const input = document.getElementById('ai_amount');
   if (input) input.value = maxAmount > 0 ? maxAmount.toFixed(2) : '';
 }
+function updateHoursAddItemTotal() {
+  const hrs = parseFloat(document.getElementById('ai_hours')?.value) || 0;
+  const rate = parseFloat(document.getElementById('ai_rate')?.value) || 0;
+  const amt = _roundMoney(hrs * rate);
+  const amountEl = document.getElementById('ai_amount');
+  if (amountEl) amountEl.value = amt > 0 ? amt.toFixed(2) : '';
+}
 function saveItem() {
   if (!addItemContext) return;
   const { jobId, type, itemId } = addItemContext;
   const job = state.jobs.find(j=>j.id===jobId);
   if (!job) return;
-  const label  = document.getElementById('ai_label')?.value.trim()||'';
-  const amount = parseFloat(document.getElementById('ai_amount')?.value)||0;
-  if (amount<=0) { showAlert('Please enter a valid amount.'); return; }
-  if (type==='addon') {
+  const label  = document.getElementById('ai_label')?.value.trim() || '';
+  let amount = parseFloat(document.getElementById('ai_amount')?.value) || 0;
+  let hours = 0;
+  let rate = 0;
+  if (type === 'hours') {
+    hours = parseFloat(document.getElementById('ai_hours')?.value) || 0;
+    rate = parseFloat(document.getElementById('ai_rate')?.value) || 0;
+    amount = _roundMoney(hours * rate);
+    if (hours <= 0 || rate <= 0 || amount <= 0) {
+      showAlert('Please enter valid hours and hourly rate.');
+      return;
+    }
+  } else if (amount <= 0) {
+    showAlert('Please enter a valid amount.');
+    return;
+  }
+  if (type==='revenue') {
+    const date = document.getElementById('ai_date')?.value||'';
+    if (!job.revenueItems) job.revenueItems = [];
+    if (itemId) {
+      const item = job.revenueItems.find(x=>x.id===itemId);
+      if (item) { item.label=label; item.amount=amount; item.date=date; }
+    } else {
+      job.revenueItems.push({ id:uid(), label, amount, date, status:'pending' });
+    }
+  } else if (type==='addon') {
     const date = document.getElementById('ai_date')?.value||'';
     if (itemId) {
       const item = job.addOns.find(x=>x.id===itemId);
-      if (item) { item.label=label; item.amount=amount; item.date=date; }
+      if (item) { item.label=label; item.amount=amount; item.date=date; item.isHours = false; item.hours = 0; item.rate = 0; }
     } else {
-      job.addOns.push({ id:uid(), label, amount, date, status:'pending' });
+      job.addOns.push({ id:uid(), label, amount, date, status:'pending', isHours:false, hours:0, rate:0 });
+    }
+  } else if (type==='hours') {
+    const date = document.getElementById('ai_date')?.value||'';
+    if (itemId) {
+      const item = job.addOns.find(x=>x.id===itemId);
+      if (item) {
+        item.label = label || 'Hours';
+        item.amount = amount;
+        item.date = date;
+        item.isHours = true;
+        item.hours = hours;
+        item.rate = rate;
+      }
+    } else {
+      job.addOns.push({
+        id: uid(),
+        label: label || 'Hours',
+        amount,
+        date,
+        status: 'pending',
+        isHours: true,
+        hours,
+        rate
+      });
     }
   } else if (type==='subtraction') {
     const date = document.getElementById('ai_date')?.value||'';
@@ -3573,7 +3950,7 @@ function fillSubtractionFromItem() {
   amtEl.style.opacity = '0.65';
 }
 
-// ─── QUOTE SNAPSHOT ───────────────────────────────────────────────────────────
+// â”€â”€â”€ QUOTE SNAPSHOT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function openQuoteSnapshot(jobId) {
   const job = state.jobs.find(j => j.id === jobId);
   if (!job) return;
@@ -3601,7 +3978,7 @@ function openQuoteSnapshot(jobId) {
   const lineItemsHtml = (job.quoteItems||[]).map(qi => {
     const sub = lineItemSubs.find(s => s.sourceItemId === qi.id);
     return sub
-      ? row(esc(qi.label), fmt(qi.amount), { strikethrough:true, sub:`✕ Removed${sub.label ? ': ' + esc(sub.label) : ''}` })
+      ? row(esc(qi.label), fmt(qi.amount), { strikethrough:true, sub:`X Removed${sub.label ? ': ' + esc(sub.label) : ''}` })
       : row(esc(qi.label), fmt(qi.amount));
   }).join('');
 
@@ -3651,7 +4028,7 @@ function printQuoteSnapshot() {
   win.print();
 }
 
-// ─── SETTINGS ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€ SETTINGS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function settingsTab(name, btn) {
   document.querySelectorAll('#settingsModal .settings-nav-btn').forEach(b => b.classList.remove('active'));
   document.querySelectorAll('#settingsModal .settings-panel').forEach(p => p.classList.remove('active'));
@@ -3770,7 +4147,7 @@ function saveSettings() {
     defaultMilestones.push({ label: lbl, pct }); dmTotal += pct;
   });
   if (defaultMilestones.length && Math.abs(dmTotal - 100) > 0.01) {
-    showAlert(`Default milestones total ${dmTotal}% — must equal 100%.`); return;
+    showAlert(`Default milestones total ${dmTotal}% - must equal 100%.`); return;
   }
   state.settings.defaultMilestones = defaultMilestones;
   save(); renderAll(); closeModal('settingsModal');
@@ -3785,7 +4162,7 @@ function renderSquareAlerts(alerts = []) {
   }
   el.innerHTML = alerts.map(a => `
     <div style="border:1px solid var(--border);background:var(--bg3);border-radius:3px;padding:8px 10px;margin-bottom:8px">
-      <div style="font-family:var(--mono);font-size:11px;color:var(--text3);margin-bottom:4px">${esc(a.status || 'alert')} ${a.type ? `· ${esc(a.type)}` : ''}</div>
+      <div style="font-family:var(--mono);font-size:11px;color:var(--text3);margin-bottom:4px">${esc(a.status || 'alert')} ${a.type ? `| ${esc(a.type)}` : ''}</div>
       <div style="font-size:13px;color:var(--text2)">${esc(a.error?.message || a.eventType || a.objectId || 'See logs')}</div>
     </div>
   `).join('');
@@ -3796,7 +4173,7 @@ async function checkSquareHealth() {
   if (out) out.textContent = 'Checking...';
   try {
     const rsp = await callSquareFn('squareHealth', {});
-    if (out) out.textContent = `env=${rsp.env} · enabled=${rsp.flags?.squareEnabled ? 'yes' : 'no'} · send=${rsp.flags?.squareSendEnabled ? 'yes' : 'no'}`;
+    if (out) out.textContent = `env=${rsp.env} | enabled=${rsp.flags?.squareEnabled ? 'yes' : 'no'} | send=${rsp.flags?.squareSendEnabled ? 'yes' : 'no'}`;
   } catch (e) {
     if (out) out.textContent = `Error: ${e.message || 'failed'}`;
   }
@@ -3837,7 +4214,7 @@ function openMySettings() {
   requestAnimationFrame(_initSettingsNavScroll);
 }
 
-// ─── TABS & MODALS ────────────────────────────────────────────────────────────
+// â”€â”€â”€ TABS & MODALS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function switchTab(name, el) {
   closeMobileMenu();
   closeDesktopMenu();
@@ -3848,6 +4225,8 @@ function switchTab(name, el) {
   if (name === 'schedule') renderSchedule();
   if (name === 'homewatch') renderHomewatch();
   if (name === 'clients') renderClients();
+  if (name === 'active' || name === 'complete' || name === 'all') renderSummary();
+  else renderDebtPanel();
 }
 function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
 
@@ -3871,7 +4250,7 @@ function openMobileMenu() {
   const btn = document.getElementById('mobileMenuBtn');
   if (btn) {
     btn.classList.add('open');
-    btn.textContent = '✕';
+    btn.innerHTML = jobIconSvg('close');
     btn.setAttribute('aria-label', 'Close menu');
     btn.setAttribute('aria-expanded', 'true');
   }
@@ -3882,7 +4261,7 @@ function closeMobileMenu() {
   const btn = document.getElementById('mobileMenuBtn');
   if (btn) {
     btn.classList.remove('open');
-    btn.textContent = '☰';
+    btn.innerHTML = jobIconSvg('menu');
     btn.setAttribute('aria-label', 'Open menu');
     btn.setAttribute('aria-expanded', 'false');
   }
@@ -3929,7 +4308,7 @@ document.querySelectorAll('.modal-overlay').forEach(el=>{
 });
 
 
-// ─── LOGIN ────────────────────────────────────────────────────────────────────
+// â”€â”€â”€ LOGIN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function showLogin() {
   const overlay = document.getElementById('loginOverlay');
   const grid = document.getElementById('userPickGrid');
@@ -4029,7 +4408,7 @@ function applyUserView() {
   // Apply admin-only / employee-only visibility (never touches header-admin/header-emp)
   applyAdminClasses();
 
-  // Header buttons: simple display toggle — applyAdminClasses() never touches these
+  // Header buttons: simple display toggle â€” applyAdminClasses() never touches these
   document.querySelectorAll('.header-admin').forEach(el => { el.style.display = isAdmin ? '' : 'none'; });
   document.querySelectorAll('.header-emp').forEach(el => { el.style.display = isAdmin ? 'none' : ''; });
   const menuDivider = document.getElementById('headerMenuDivider');
@@ -4052,7 +4431,7 @@ function renderAll() {
   if (document.getElementById('tab-clients').classList.contains('active')) renderClients();
 }
 
-// ─── USER MANAGEMENT ──────────────────────────────────────────────────────────
+// â”€â”€â”€ USER MANAGEMENT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function openUserMgmt() {
   openSettings();
   settingsTab('employees', document.querySelectorAll('#settingsModal .settings-nav-btn')[1]);
@@ -4065,13 +4444,13 @@ function renderUserList() {
       <div class="user-row">
         <div>
           <div class="user-row-name">${esc(u.name)}</div>
-          <span class="user-row-badge${u.isAdmin?'':' emp'}">${u.isAdmin ? 'Admin' : `Employee · ${Math.round((u.empShare??0.66)*100)}%`}</span>
+          <span class="user-row-badge${u.isAdmin?'':' emp'}">${u.isAdmin ? 'Admin' : `Employee | ${Math.round((u.empShare??0.66)*100)}%`}</span>
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          ${!u.isAdmin ? `<button class="btn btn-ghost btn-sm" onclick="openEditEmp('${u.id}')">Edit</button>` : ''}
+            ${!u.isAdmin ? `<button class="btn btn-ghost btn-sm job-icon-btn" onclick="openEditEmp('${u.id}')" title="Edit employee" aria-label="Edit employee">${jobIconSvg('edit')}</button>` : ''}
           ${u.isAdmin ? `<button class="btn btn-ghost btn-sm" onclick="openResetPin('${u.id}')">Reset PIN</button>` : ''}
           ${!u.isAdmin || users.filter(x=>x.isAdmin).length > 1
-            ? `<button class="btn btn-danger btn-sm" onclick="deleteUser('${u.id}')">DEL</button>`
+            ? `<button class="btn btn-danger btn-sm btn-icon-only" onclick="deleteUser('${u.id}')" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>`
             : ''}
         </div>
       </div>`).join('')
@@ -4131,7 +4510,7 @@ function openEditEmp(userId) {
   const u = state.users.find(x => x.id === userId);
   if (!u) return;
   editEmpId = userId;
-  document.getElementById('empEditTitle').textContent = `Edit — ${esc(u.name)}`;
+  document.getElementById('empEditTitle').textContent = `Edit - ${esc(u.name)}`;
   document.getElementById('ee_name').value  = u.name;
   document.getElementById('ee_share').value = Math.round((u.empShare ?? 0.66) * 100);
   const isDebtEmp = state.settings.debtEmployeeId === userId;
@@ -4168,7 +4547,7 @@ async function reassignDebt(fromId, toId) {
         await save(); openEditEmp(fromId);
       });
     } else if (others.length > 1) {
-      showAlert('Multiple employees — use the Edit button on the target employee to assign debt there.');
+      showAlert('Multiple employees - use the Edit button on the target employee to assign debt there.');
     }
   }
 }
@@ -4195,7 +4574,7 @@ async function doChangePin() {
   showAlert('PIN updated!');
 }
 
-// ─── SCHEDULE ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€ SCHEDULE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Generate synthetic HW payment calendar entries for a given year/month.
 // Each active (or paused) client gets an entry on the same day-of-month as their startDate.
 function hwCalEntries(year, month) {
@@ -4263,7 +4642,7 @@ function renderListView(appts) {
     const day = Number.isNaN(d.getTime())
       ? ''
       : d.toLocaleDateString('en-US', { weekday: 'long' });
-    return `<div style="margin-top:14px;margin-bottom:8px;font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--text3)">${day ? `${day} · ` : ''}${fmtDate(dateStr)}</div>`;
+    return `<div style="margin-top:14px;margin-bottom:8px;font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--text3)">${day ? `${day} | ` : ''}${fmtDate(dateStr)}</div>`;
   };
   const renderGroupedByDate = (items, isPast) => {
     let html = '';
@@ -4291,9 +4670,9 @@ function renderListView(appts) {
   const apptCard = (a, isPast) => a.type === 'hw' ? `
     <div class="appt-card hw-appt${isPast?' past':''}">
       <div style="flex:1;min-width:0">
-        <div class="appt-name" style="display:flex;align-items:center;gap:6px">${esc(a.clientName)}${a.clientName && clientByName(a.clientName) ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 7px;flex-shrink:0" onclick="event.stopPropagation();openClientQuick('${esc(a.clientName)}')" title="View Client">👤</button>` : ''}</div>
+        <div class="appt-name" style="display:flex;align-items:center;gap:6px">${esc(a.clientName)}${a.clientName && clientByName(a.clientName) ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 7px;flex-shrink:0" onclick="event.stopPropagation();openClientQuick('${esc(a.clientName)}')" title="View Client">${jobIconSvg('client')}</button>` : ''}</div>
         <div class="appt-meta">
-          <span style="color:var(--purple)">HomeWatch${a.paused?' · Paused':''}</span>
+          <span style="color:var(--purple)">HomeWatch${a.paused?' | Paused':''}</span>
           <span>${fmt(a.monthlyRate)}/mo</span>
         </div>
       </div>
@@ -4301,24 +4680,24 @@ function renderListView(appts) {
     </div>` : `
     <div class="appt-card${isPast?' past':''}">
       <div style="flex:1;min-width:0">
-        <div class="appt-name" style="display:flex;align-items:center;gap:6px">${esc(a.clientName||'')}${a.clientName && clientByName(a.clientName) ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 7px;flex-shrink:0" onclick="event.stopPropagation();openClientQuick('${esc(a.clientName)}')" title="View Client">👤</button>` : ''}</div>
-        ${a.contactName ? `<div style="font-size:13px;color:var(--blue);margin-top:2px;font-family:var(--mono);display:flex;align-items:center;gap:6px">via ${esc(a.contactName)}${clientByName(a.contactName) ? ` <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 7px" onclick="event.stopPropagation();openClientQuick('${esc(a.contactName)}')" title="View Client">👤</button>` : ''}</div>` : ''}
+        <div class="appt-name" style="display:flex;align-items:center;gap:6px">${esc(a.clientName||'')}${a.clientName && clientByName(a.clientName) ? `<button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 7px;flex-shrink:0" onclick="event.stopPropagation();openClientQuick('${esc(a.clientName)}')" title="View Client">${jobIconSvg('client')}</button>` : ''}</div>
+        ${a.contactName ? `<div style="font-size:13px;color:var(--blue);margin-top:2px;font-family:var(--mono);display:flex;align-items:center;gap:6px">via ${esc(a.contactName)}${clientByName(a.contactName) ? ` <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 7px" onclick="event.stopPropagation();openClientQuick('${esc(a.contactName)}')" title="View Client">${jobIconSvg('client')}</button>` : ''}</div>` : ''}
         <div class="appt-meta">
-          ${fmtTimeRange(a.time, a.endTime)?`<span>🕐 ${fmtTimeRange(a.time, a.endTime)}</span>`:''}
-          ${a.address?`<span>📍 ${esc(a.address)}</span>`:''}
+          ${fmtTimeRange(a.time, a.endTime)?`<span class="icon-inline">${jobIconSvg('time')} ${fmtTimeRange(a.time, a.endTime)}</span>`:''}
+          ${a.address?`<span class="icon-inline">${jobIconSvg('location')} ${esc(a.address)}</span>`:''}
         </div>
         ${a.notes?`<div class="appt-notes">${esc(a.notes)}</div>`:''}
       </div>
       <div class="appt-actions">
-        <button class="btn btn-ghost btn-sm" onclick="openAppt('${a.id}')">✏</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteAppt('${a.id}')">DEL</button>
+        <button class="btn btn-ghost btn-sm job-icon-btn" onclick="openAppt('${a.id}')" title="Edit appointment" aria-label="Edit appointment">${jobIconSvg('edit')}</button>
+        <button class="btn btn-danger btn-sm btn-icon-only" onclick="deleteAppt('${a.id}')" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
       </div>
     </div>`;
 
   // Mobile day filter: show only that day with a back button
   if (selectedDayFilter) {
     const dayAppts = allAppts.filter(a => a.endDate ? (a.date <= selectedDayFilter && a.endDate >= selectedDayFilter) : a.date === selectedDayFilter);
-    const backBtn = `<button class="btn btn-ghost btn-sm" style="margin-bottom:14px" onclick="selectedDayFilter=null;setSchedView('month')">‹ Back to calendar</button>`;
+    const backBtn = `<button class="btn btn-ghost btn-sm" style="margin-bottom:14px" onclick="selectedDayFilter=null;setSchedView('month')">< Back to calendar</button>`;
     const header = `<div style="font-family:var(--mono);font-size:13px;color:var(--text3);margin-bottom:12px;text-transform:uppercase;letter-spacing:0.08em">${fmtDate(selectedDayFilter)}</div>`;
     const cards = dayAppts.length
       ? dayAppts.map(a => apptCard(a, false)).join('')
@@ -4333,7 +4712,7 @@ function renderListView(appts) {
   const pastHtml     = past.length     ? renderGroupedByDate(past, true)     : '';
 
   return `
-    ${upcomingHtml || '<div class="no-appts">📅 No upcoming appointments.<br>Tap + Appointment to add one.</div>'}
+    ${upcomingHtml || `<div class="no-appts icon-inline">${jobIconSvg('calendar')} No upcoming appointments.<br>Tap + Appointment to add one.</div>`}
     ${pastHtml ? `
       <div style="margin-top:24px;margin-bottom:12px;font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--text3)">Past</div>
       ${pastHtml}` : ''}
@@ -4372,10 +4751,10 @@ function renderMonthView(appts) {
     const isToday = dateStr === todayStr;
     const isSelected = dateStr === selectedCalDay;
     const pills = dayAppts.slice(0,3).map(a => {
-      if (a.type === 'hw') return `<div class="cal-hw-pill${a.paused?' hw-paused':''}" onclick="event.stopPropagation();goToHW('${a.hwId}')" title="${esc(a.clientName)} — ${fmt(a.monthlyRate)}/mo${a.paused?' (Paused)':''}">${esc(a.clientName)}</div>`;
+      if (a.type === 'hw') return `<div class="cal-hw-pill${a.paused?' hw-paused':''}" onclick="event.stopPropagation();goToHW('${a.hwId}')" title="${esc(a.clientName)} - ${fmt(a.monthlyRate)}/mo${a.paused?' (Paused)':''}">${esc(a.clientName)}</div>`;
       const isStart = a.date === dateStr;
       const isCont  = !isStart && a.endDate;
-      return `<div class="cal-appt-pill${isCont?' cal-appt-cont':''}" onclick="event.stopPropagation();openAppt('${a.id}')" title="${esc(a.clientName||'Appt')}">${isCont?'↳ ':''}${esc(a.clientName||'Appt')}</div>`;
+      return `<div class="cal-appt-pill${isCont?' cal-appt-cont':''}" onclick="event.stopPropagation();openAppt('${a.id}')" title="${esc(a.clientName||'Appt')}">${isCont?'-> ':''}${esc(a.clientName||'Appt')}</div>`;
     }).join('');
     const more = dayAppts.length > 3 ? `<div class="cal-more">+${dayAppts.length-3} more</div>` : '';
     cells += `<div class="cal-cell${isToday?' today':''}${dayAppts.length?' has-appts':''}${isSelected?' selected':''}"
@@ -4398,13 +4777,13 @@ function renderMonthView(appts) {
     const dayAppts = byDate[selectedCalDay] || [];
     drawer = `
       <div class="day-drawer">
-        <div class="day-drawer-title">${fmtDate(selectedCalDay)}${dayAppts.length===0?' — No appointments':''}</div>
+        <div class="day-drawer-title">${fmtDate(selectedCalDay)}${dayAppts.length===0?' - No appointments':''}</div>
         ${dayAppts.map(a => a.type === 'hw' ? `
           <div class="appt-card hw-appt${a.paused?' past':''}" style="margin-bottom:8px">
             <div style="flex:1;min-width:0">
               <div class="appt-name">${esc(a.clientName)}</div>
               <div class="appt-meta">
-                <span style="color:var(--purple)">HomeWatch${a.paused?' · Paused':''}</span>
+                <span style="color:var(--purple)">HomeWatch${a.paused?' | Paused':''}</span>
                 <span>${fmt(a.monthlyRate)}/mo</span>
               </div>
             </div>
@@ -4414,15 +4793,15 @@ function renderMonthView(appts) {
             <div style="flex:1">
               <div class="appt-name">${esc(a.clientName||'')}</div>
               <div class="appt-meta">
-                ${a.endDate?`<span>📅 ${fmtDate(a.date)} – ${fmtDate(a.endDate)}</span>`:''}
-                ${fmtTimeRange(a.time, a.endTime)?`<span>🕐 ${fmtTimeRange(a.time, a.endTime)}</span>`:''}
-                ${a.address?`<span>📍 ${esc(a.address)}</span>`:''}
+                ${a.endDate?`<span class="icon-inline">${jobIconSvg('calendar')} ${fmtDate(a.date)} - ${fmtDate(a.endDate)}</span>`:''}
+                ${fmtTimeRange(a.time, a.endTime)?`<span class="icon-inline">${jobIconSvg('time')} ${fmtTimeRange(a.time, a.endTime)}</span>`:''}
+                ${a.address?`<span class="icon-inline">${jobIconSvg('location')} ${esc(a.address)}</span>`:''}
               </div>
               ${a.notes?`<div class="appt-notes">${esc(a.notes)}</div>`:''}
             </div>
             <div class="appt-actions">
-              <button class="btn btn-ghost btn-sm" onclick="openAppt('${a.id}')">✏</button>
-              <button class="btn btn-danger btn-sm" onclick="deleteAppt('${a.id}')">DEL</button>
+              <button class="btn btn-ghost btn-sm job-icon-btn" onclick="openAppt('${a.id}')" title="Edit appointment" aria-label="Edit appointment">${jobIconSvg('edit')}</button>
+              <button class="btn btn-danger btn-sm btn-icon-only" onclick="deleteAppt('${a.id}')" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
             </div>
           </div>`).join('')}
         <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="openApptOnDate('${selectedCalDay}')">+ Add on this day</button>
@@ -4431,9 +4810,9 @@ function renderMonthView(appts) {
 
   return `
     <div class="cal-nav">
-      <button class="btn btn-ghost btn-sm" onclick="changeMonth(-1)">‹ Prev</button>
+      <button class="btn btn-ghost btn-sm" onclick="changeMonth(-1)">< Prev</button>
       <div class="cal-month-label">${monthNames[month]} ${year}</div>
-      <button class="btn btn-ghost btn-sm" onclick="changeMonth(1)">Next ›</button>
+      <button class="btn btn-ghost btn-sm" onclick="changeMonth(1)">Next ></button>
     </div>
     <div class="cal-grid">
       ${dowLabels.map(d=>`<div class="cal-dow">${d}</div>`).join('')}
@@ -4485,7 +4864,7 @@ function fmtTimeRange(start, end) {
   return s || '';
 }
 
-// ─── APPOINTMENT CRUD ─────────────────────────────────────────────────────────
+// â”€â”€â”€ APPOINTMENT CRUD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function getApptDates(a) {
   if (!a.allDay || !a.endDate || a.endDate <= a.date) return [a.date];
   const dates = [];
@@ -4616,7 +4995,7 @@ async function deleteAppt(id) {
   });
 }
 
-// ─── EXPORT / IMPORT ──────────────────────────────────────────────────────────
+// â”€â”€â”€ EXPORT / IMPORT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function exportData() {
   const filename = `ehs-tracker-backup-${today()}.json`;
   const json = JSON.stringify(state, null, 2);
@@ -4649,7 +5028,7 @@ function importData(event) {
   event.target.value = '';
 }
 
-// ─── CLIENTS ──────────────────────────────────────────────────────────────────
+// â”€â”€â”€ CLIENTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const CLIENT_COLS = [
   { key:'company',       label:'Company' },
   { key:'email',         label:'Email' },
@@ -4804,7 +5183,7 @@ function processClientImport(text) {
     const added = newClients.length;
     document.getElementById('conflictModalTitle').textContent = 'Review Changes';
     document.getElementById('conflictModalSub').textContent =
-      `${added} new client${added!==1?'s':''} added automatically. ${conflicts.length} existing record${conflicts.length!==1?' have':' has'} changed fields — review below.`;
+      `${added} new client${added!==1?'s':''} added automatically. ${conflicts.length} existing record${conflicts.length!==1?' have':' has'} changed fields - review below.`;
     renderConflictBody();
     document.getElementById('clientConflictModal').classList.remove('hidden');
   } else {
@@ -4906,12 +5285,12 @@ function renderClients() {
   const lastImport = state.settings.clientsLastImport;
   document.getElementById('clientsLastImport').textContent = lastImport ? `Last import: ${fmtDate(lastImport)}` : '';
   if (clients.length === 0) {
-    document.getElementById('clientsList').innerHTML = `<div style="font-family:var(--mono);font-size:14px;color:var(--text3);padding:48px 0;text-align:center">No clients yet.<br><br><button class="btn btn-ghost btn-sm admin-only" onclick="triggerClientImport()">⬆ Import Square CSV</button></div>`;
+    document.getElementById('clientsList').innerHTML = `<div style="font-family:var(--mono);font-size:14px;color:var(--text3);padding:48px 0;text-align:center">No clients yet.<br><br><button class="btn btn-ghost btn-sm admin-only" onclick="triggerClientImport()">Import Square CSV</button></div>`;
     applyAdminClasses(); return;
   }
   const fmtVal = (c, key) => {
     const v = c[key];
-    if (v === undefined || v === null || v === '') return `<span style="color:var(--text3)">—</span>`;
+    if (v === undefined || v === null || v === '') return `<span style="color:var(--text3)">-</span>`;
     if (key === 'lifetimeSpend') return `$${parseFloat(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
     if (key === 'firstVisit' || key === 'lastVisit') return fmtDate(v);
     if (key === 'phone') return formatPhone(v);
@@ -4932,7 +5311,7 @@ function renderClients() {
           ${sorted.map(c => {
             const name = [c.firstName, c.surname].filter(Boolean).join(' ') || c.company || c.email || '(unknown)';
             const sub  = c.company && (c.firstName||c.surname) ? `<br><span style="font-size:11px;color:var(--text3)">${esc(c.company)}</span>` : '';
-            const note = (c.clientNotes||[]).length ? ` <span title="Has notes" style="color:var(--accent)">✎</span>` : '';
+            const note = (c.clientNotes||[]).length ? ` <span title="Has notes" style="color:var(--accent);display:inline-flex;align-items:center">${jobIconSvg('notes')}</span>` : '';
             const isExpanded = expandedClients.has(c.id);
             const expandCols = (() => {
               if (window.innerWidth <= 600) return CLIENT_COLS;
@@ -4951,16 +5330,16 @@ function renderClients() {
               c.lastVisit     ? `Last visit: ${fmtDate(c.lastVisit)}` : '',
               c.txCount       ? `${c.txCount} visit${c.txCount!==1?'s':''}` : '',
               c.lifetimeSpend ? `$${parseFloat(c.lifetimeSpend).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})} lifetime` : '',
-            ].filter(Boolean).join(' · ');
+            ].filter(Boolean).join(' | ');
             return `<tr class="client-row${isExpanded?' client-row-expanded':''}" id="crow_${c.id}" onclick="toggleClientExpand('${c.id}')">
               <td style="color:var(--text);font-weight:500">${esc(name)}${sub}${note}</td>
               ${cols.map(col=>`<td title="${esc(String(c[col.key]||''))}">${fmtVal(c,col.key)}</td>`).join('')}
-              <td style="text-align:right;white-space:nowrap;color:var(--text3);font-size:11px;font-family:var(--mono);width:24px">${isExpanded?'▲':'▼'}</td>
+              <td style="text-align:right;white-space:nowrap;color:var(--text3);font-size:11px;font-family:var(--mono);width:24px">${isExpanded?'^':'v'}</td>
             </tr>
             <tr class="client-expand-row" id="cexp_${c.id}" style="${isExpanded?'':'display:none'}">
               <td colspan="${cols.length + 2}" style="padding:0;border-bottom:1px solid var(--border)">
                 <div style="padding:14px 16px;background:var(--bg2)">
-                  ${sqParts ? `<div style="font-family:var(--mono);font-size:12px;color:var(--text3);padding:7px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;margin-bottom:8px">📊 ${sqParts}</div>` : ''}
+                  ${sqParts ? `<div class="icon-inline" style="font-family:var(--mono);font-size:12px;color:var(--text3);padding:7px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;margin-bottom:8px">${jobIconSvg('chart')} ${sqParts}</div>` : ''}
                   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px 24px;margin-bottom:12px">
                     ${allDetails || '<span style="color:var(--text3);font-size:13px">No additional info.</span>'}
                   </div>
@@ -4969,7 +5348,7 @@ function renderClients() {
                     const notesInlineHtml = recentNotes.length
                       ? `<div style="max-height:110px;overflow-y:auto;display:flex;flex-direction:column;gap:5px">
                           ${recentNotes.map(n=>`<div style="background:var(--bg3);border:1px solid var(--border);border-radius:3px;padding:6px 10px">
-                            <div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-bottom:2px">${esc(n.authorName)} · ${fmtDate(n.date)}</div>
+                            <div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-bottom:2px">${esc(n.authorName)} | ${fmtDate(n.date)}</div>
                             <div style="font-size:12px;color:var(--text2);white-space:pre-wrap;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${esc(n.text)}</div>
                           </div>`).join('')}
                         </div>`
@@ -4980,9 +5359,9 @@ function renderClients() {
                     </div>`;
                   })()}
                   <div style="display:flex;gap:8px;margin-top:8px;padding-top:10px;border-top:1px solid var(--border)">
-                    <button class="btn btn-ghost btn-sm admin-only" onclick="event.stopPropagation();openClientDetail('${c.id}')">✏ Edit</button>
-                    <button class="btn btn-ghost btn-sm employee-only" onclick="event.stopPropagation();openClientDetail('${c.id}')">✎ Notes</button>
-                    <button class="btn btn-danger btn-sm admin-only" onclick="event.stopPropagation();deleteClient('${c.id}')">DEL</button>
+                    <button class="btn btn-ghost btn-sm admin-only job-icon-btn" onclick="event.stopPropagation();openClientDetail('${c.id}')" title="Edit client" aria-label="Edit client">${jobIconSvg('edit')}</button>
+                    <button class="btn btn-ghost btn-sm employee-only" onclick="event.stopPropagation();openClientDetail('${c.id}')">Notes</button>
+                    <button class="btn btn-danger btn-sm btn-icon-only admin-only" onclick="event.stopPropagation();deleteClient('${c.id}')" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
                   </div>
                 </div>
               </td>
@@ -5036,9 +5415,9 @@ function _renderClientDetailModal(c) {
     c.lastVisit     ? `Last visit: ${fmtDate(c.lastVisit)}` : '',
     c.txCount       ? `${c.txCount} visit${c.txCount!==1?'s':''}` : '',
     c.lifetimeSpend ? `$${parseFloat(c.lifetimeSpend).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})} lifetime` : '',
-  ].filter(Boolean).join(' · ');
+  ].filter(Boolean).join(' | ');
   const id = c.id;
-  const sqBar = sqParts ? `<div style="font-family:var(--mono);font-size:12px;color:var(--text3);margin-bottom:14px;padding:8px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:3px">📊 ${sqParts}</div>` : '';
+  const sqBar = sqParts ? `<div class="icon-inline" style="font-family:var(--mono);font-size:12px;color:var(--text3);margin-bottom:14px;padding:8px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:3px">${jobIconSvg('chart')} ${sqParts}</div>` : '';
   const notesSection = `
     <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">
       <div style="font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--text3);margin-bottom:10px">Notes</div>
@@ -5071,11 +5450,11 @@ function _renderClientDetailModal(c) {
         <div class="form-group"><label class="form-label">Zip</label><input class="form-input" id="cd_postal" value="${esc(c.postal||'')}" style="max-width:110px" /></div>
       </div>
       <div class="form-group"><label class="form-label">Birthday</label><input class="form-input" id="cd_birthday" value="${esc(c.birthday||'')}" placeholder="e.g. 1985-06-15" style="max-width:160px" /></div>
-      ${!clientDetailIsNew ? `<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-ghost btn-sm" onclick="syncClientToSquare('${id}')">Sync to Square API</button><button class="btn btn-ghost btn-sm" onclick="exportClientToSquare('${id}')">⬇ Export to Square CSV</button></div>` : ''}
+      ${!clientDetailIsNew ? `<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-ghost btn-sm" onclick="syncClientToSquare('${id}')">Sync to Square API</button><button class="btn btn-ghost btn-sm" onclick="exportClientToSquare('${id}')">Export to Square CSV</button></div>` : ''}
       ${notesSection}
     `;
   } else {
-    const ro = (label, val) => `<div><div style="font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);margin-bottom:3px">${label}</div><div style="font-family:var(--mono);font-size:14px;color:var(--text2)">${esc(val||'—')}</div></div>`;
+    const ro = (label, val) => `<div><div style="font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);margin-bottom:3px">${label}</div><div style="font-family:var(--mono);font-size:14px;color:var(--text2)">${esc(val||'-')}</div></div>`;
     document.getElementById('clientDetailBody').innerHTML = `
       ${sqBar}
       <div class="form-row">
@@ -5127,7 +5506,7 @@ function _renderClientNotesThread(c) {
   el.innerHTML = notes.map(n => {
     if (_editingNoteId === n.id) {
       return `<div style="background:var(--bg3);border:1px solid var(--accent);border-radius:3px;padding:8px 12px;margin-bottom:6px">
-        <div style="font-family:var(--mono);font-size:11px;color:var(--text3);margin-bottom:6px">${esc(n.authorName||'Unknown')} · ${fmtDate(n.date)||n.date}</div>
+        <div style="font-family:var(--mono);font-size:11px;color:var(--text3);margin-bottom:6px">${esc(n.authorName||'Unknown')} | ${fmtDate(n.date)||n.date}</div>
         <textarea class="form-input" id="noteEditInput_${n.id}" style="width:100%;resize:vertical;min-height:60px;margin-bottom:6px">${esc(n.text)}</textarea>
         <div style="display:flex;gap:6px">
           <button class="btn btn-primary btn-sm" onclick="saveNoteEdit('${c.id}','${n.id}')">Save</button>
@@ -5140,19 +5519,19 @@ function _renderClientNotesThread(c) {
     const secsLeft = empCanAct ? Math.ceil((empExpiry - now) / 1000) : 0;
     const actionBtns = isAdmin
       ? `<div style="display:flex;gap:4px">
-          <button class="btn btn-ghost btn-sm" style="padding:1px 6px;font-size:11px" onclick="startNoteEdit('${c.id}','${n.id}')">✏</button>
-          <button class="btn btn-danger btn-sm" style="padding:1px 6px;font-size:11px" onclick="deleteClientNote('${c.id}','${n.id}')">DEL</button>
+          <button class="btn btn-ghost btn-sm job-icon-btn" style="padding:1px 6px;font-size:11px" onclick="startNoteEdit('${c.id}','${n.id}')" title="Edit note" aria-label="Edit note">${jobIconSvg('edit')}</button>
+          <button class="btn btn-danger btn-sm btn-icon-only" style="padding:1px 6px;font-size:11px" onclick="deleteClientNote('${c.id}','${n.id}')" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
         </div>`
       : empCanAct
       ? `<div style="display:flex;gap:4px;align-items:center">
           <span style="font-family:var(--mono);font-size:10px;color:var(--text3)">${secsLeft}s</span>
-          <button class="btn btn-ghost btn-sm" style="padding:1px 6px;font-size:11px" onclick="startNoteEdit('${c.id}','${n.id}')">✏</button>
-          <button class="btn btn-danger btn-sm" style="padding:1px 6px;font-size:11px" onclick="empDeleteNote('${c.id}','${n.id}')">DEL</button>
+          <button class="btn btn-ghost btn-sm job-icon-btn" style="padding:1px 6px;font-size:11px" onclick="startNoteEdit('${c.id}','${n.id}')" title="Edit note" aria-label="Edit note">${jobIconSvg('edit')}</button>
+          <button class="btn btn-danger btn-sm btn-icon-only" style="padding:1px 6px;font-size:11px" onclick="empDeleteNote('${c.id}','${n.id}')" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
         </div>`
       : '';
     return `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:3px;padding:8px 12px;margin-bottom:6px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-        <span style="font-family:var(--mono);font-size:11px;color:var(--text3)">${esc(n.authorName||'Unknown')} · ${fmtDate(n.date)||n.date}</span>
+        <span style="font-family:var(--mono);font-size:11px;color:var(--text3)">${esc(n.authorName||'Unknown')} | ${fmtDate(n.date)||n.date}</span>
         ${actionBtns}
       </div>
       <div style="font-family:var(--mono);font-size:13px;color:var(--text2);white-space:pre-wrap">${esc(n.text)}</div>
@@ -5169,7 +5548,7 @@ function _renderClientNotesThread(c) {
       const t = Date.now();
       let anyLeft = false;
       for (const [nid, exp] of Object.entries(_empNoteTimers)) { if (t < exp) anyLeft = true; else delete _empNoteTimers[nid]; }
-      // Skip re-render while employee is mid-edit — would reset the textarea
+      // Skip re-render while employee is mid-edit â€” would reset the textarea
       if (!_editingNoteId) _renderClientNotesThread(c2);
       if (!anyLeft) { clearInterval(_noteCountdownInterval); _noteCountdownInterval = null; }
     }, 1000);
@@ -5324,7 +5703,7 @@ function downloadCSV(csv, filename) {
   a.click(); URL.revokeObjectURL(a.href);
 }
 
-// ─── CLIENT AUTOCOMPLETE ──────────────────────────────────────────────────────
+// â”€â”€â”€ CLIENT AUTOCOMPLETE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 let _acIdx = -1;
 
 function showAC(inputId) {
@@ -5346,7 +5725,7 @@ function showAC(inputId) {
   _acIdx = -1;
   list.innerHTML = matches.map((c, i) => {
     const name = [c.firstName, c.surname].filter(Boolean).join(' ') || c.company || c.email;
-    const sub  = [c.city, c.email].filter(Boolean).join(' · ');
+    const sub  = [c.city, c.email].filter(Boolean).join(' | ');
     return `<div class="ac-item" data-idx="${i}" data-name="${esc(name)}" onmousedown="pickAC('${inputId}','${esc(name).replace(/'/g,"\\'")}')">
       <div>${esc(name)}</div>
       ${sub?`<div style="font-size:11px;color:var(--text3)">${esc(sub)}</div>`:''}
@@ -5378,7 +5757,7 @@ function _acHighlight(list) {
   list.querySelectorAll('.ac-item').forEach((el,i) => el.classList.toggle('ac-active', i === _acIdx));
 }
 
-// ─── "ADD AS CLIENT" PROMPT ──────────────────────────────────────────────────
+// â”€â”€â”€ "ADD AS CLIENT" PROMPT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function clientByName(name) {
   if (!name) return null;
   const q = name.toLowerCase().trim();
@@ -5405,7 +5784,7 @@ function goToClient(name) {
 let _cqClientId = null;
 let _editingNoteId = null;
 let _clientNotesSnapshot = null;
-const _empNoteTimers = {}; // noteId → expiry timestamp (ms) for employee 30s edit window
+const _empNoteTimers = {}; // noteId to expiry timestamp (ms) for employee 30s edit window
 let _noteCountdownInterval = null;
 function openClientQuick(name) {
   const c = clientByName(name);
@@ -5426,7 +5805,7 @@ function openClientQuick(name) {
     c.lastVisit     ? `Last visit: ${fmtDate(c.lastVisit)}` : '',
     c.txCount       ? `${c.txCount} visit${c.txCount!==1?'s':''}` : '',
     c.lifetimeSpend ? `$${parseFloat(c.lifetimeSpend).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})} lifetime` : '',
-  ].filter(Boolean).join(' · ');
+  ].filter(Boolean).join(' | ');
   const quickCols = (() => {
     const qc = _clientQuickColsForView();
     if (!qc || !qc.length) return CLIENT_COLS;
@@ -5440,11 +5819,11 @@ function openClientQuick(name) {
   const notes = (c.clientNotes||[]);
   const notesHtml = notes.length ? notes.map(n=>`
     <div style="background:var(--bg3);border:1px solid var(--border);border-radius:3px;padding:8px 10px;margin-bottom:6px">
-      <div style="font-family:var(--mono);font-size:11px;color:var(--text3);margin-bottom:4px">${esc(n.authorName)} · ${fmtDate(n.date)}</div>
+      <div style="font-family:var(--mono);font-size:11px;color:var(--text3);margin-bottom:4px">${esc(n.authorName)} | ${fmtDate(n.date)}</div>
       <div style="color:var(--text2);font-size:13px;white-space:pre-wrap">${esc(n.text)}</div>
     </div>`).join('') : '<div style="color:var(--text3);font-size:13px">No notes.</div>';
   document.getElementById('cqBody').innerHTML = `
-    ${sqParts ? `<div style="font-family:var(--mono);font-size:12px;color:var(--text3);padding:7px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;margin-bottom:12px">📊 ${sqParts}</div>` : ''}
+    ${sqParts ? `<div class="icon-inline" style="font-family:var(--mono);font-size:12px;color:var(--text3);padding:7px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;margin-bottom:12px">${jobIconSvg('chart')} ${sqParts}</div>` : ''}
     ${rows || '<div style="color:var(--text3);font-size:13px;margin-bottom:12px">No contact info on file.</div>'}
     <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
       <div style="font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--text3);margin-bottom:8px">Notes</div>
@@ -5506,7 +5885,7 @@ function confirmAddNewClient() {
     txCount:0, lifetimeSpend:'', clientNotes:[],
   };
   closeModal('addClientPromptModal');
-  openNewClientDetail(newClient); // not saved yet — save/cancel handled in detail modal
+  openNewClientDetail(newClient); // not saved yet â€” save/cancel handled in detail modal
 }
 
 firebase.auth().onAuthStateChanged(user => { if (user) load(); });
@@ -5532,7 +5911,7 @@ function goHeaderHome() {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-// ─── TABS SCROLL INDICATOR ────────────────────────────────────────────────────
+// â”€â”€â”€ TABS SCROLL INDICATOR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function _initSettingsNavScroll() {
   document.querySelectorAll('.settings-nav-wrap').forEach(wrap => {
     const nav = wrap.querySelector('.settings-nav');
@@ -5566,7 +5945,7 @@ function _initTabsScroll() {
   requestAnimationFrame(update);
 }
 
-// ─── BODY SCROLL LOCK — prevent background scroll when any modal is open ───────
+// â”€â”€â”€ BODY SCROLL LOCK â€” prevent background scroll when any modal is open â”€â”€â”€â”€â”€â”€â”€
 (function() {
   const observer = new MutationObserver(() => {
     const anyOpen = !!document.querySelector('.modal-overlay:not(.hidden)');
@@ -5618,6 +5997,7 @@ document.addEventListener('keydown', e => {
     redoAction();
   }
 });
+
 
 
 

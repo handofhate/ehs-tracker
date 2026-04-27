@@ -1,10 +1,11 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Job Tracker</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
@@ -61,6 +62,9 @@
   .mobile-menu-backdrop { display: none; }
 
   .btn { font-family: var(--mono); font-size: 16px; font-weight: 500; letter-spacing: 0.05em; padding: 8px 16px; border: none; cursor: pointer; border-radius: 3px; transition: all 0.15s; text-transform: uppercase; }
+  .btn .ph { font-size: 16px; line-height: 1; vertical-align: middle; margin-right: 4px; }
+  .btn-icon-only { min-width: 34px; padding: 6px 8px; display: inline-flex; align-items: center; justify-content: center; }
+  .btn-icon-only .ph { margin-right: 0; }
   .btn-primary { background: var(--accent); color: #0f1117; }
   .btn-primary:hover { background: var(--accent2); }
   .btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border2); }
@@ -89,6 +93,9 @@
   .owed-toggle.on { background: var(--accent); }
   .owed-toggle-thumb { width: 12px; height: 12px; border-radius: 50%; background: #fff; transform: translateX(0); transition: transform 0.15s ease; }
   .owed-toggle.on .owed-toggle-thumb { transform: translateX(14px); }
+.po-mode-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+.po-mode-btn { justify-content: center; text-align: center; }
+.po-mode-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 
   .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
   .section-title { font-family: var(--mono); font-size: 15px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--text3); }
@@ -123,8 +130,11 @@
   .job-action-pad { width: 74px; display: grid; grid-template-columns: repeat(2, 34px); grid-template-rows: repeat(2, 34px); gap: 6px; justify-content: end; }
   .job-icon-btn { width: 34px; height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; position: relative; }
   .job-icon-btn svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .job-icon-btn .ph { font-size: 16px; line-height: 1; margin-right: 0; display: block; }
   .job-icon-btn.accent { color: var(--accent); border-color: var(--accent); }
   .job-icon-btn:disabled { opacity: 0.45; cursor: default; }
+  .icon-inline { display: inline-flex; align-items: center; gap: 4px; }
+  .icon-inline .ph { font-size: 14px; line-height: 1; }
   .job-detail-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
   .job-detail-admin-actions { display: flex; gap: 10px; flex-wrap: wrap; }
   .job-detail-mode-actions { display: flex; justify-content: flex-end; }
@@ -254,7 +264,7 @@
   .hours-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); gap: 8px; }
   .hours-item:last-child { border-bottom: none; }
 
-  /* ── MOBILE ───────────────────────────────────────────────────────────────── */
+  /* Ã¢â€â‚¬Ã¢â€â‚¬ MOBILE Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
   @media (min-width: 601px) {
     .hw-pay-right { display: contents; }
     .hw-pay-spacer { display: none; }
@@ -266,7 +276,7 @@
     /* Header + mobile slideout menu */
     .header { padding: 10px 12px; flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; }
     .header-title { font-size: 18px; }
-    .mobile-menu-btn { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0; font-size: 20px; line-height: 1; background: transparent; color: var(--text2); border: 1px solid var(--border2); border-radius: 3px; cursor: pointer; }
+    .mobile-menu-btn { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0; font-size: 18px; line-height: 1; background: transparent; color: var(--text2); border: 1px solid var(--border2); border-radius: 3px; cursor: pointer; }
     .mobile-menu-btn:hover { border-color: var(--accent); color: var(--accent); }
     .mobile-menu-btn.open { border-color: var(--accent); color: var(--accent); background: rgba(245,166,35,0.08); }
     .mobile-menu-backdrop { display: block; position: fixed; inset: 0; background: rgba(0,0,0,0.45); opacity: 0; pointer-events: none; transition: opacity 0.18s ease; z-index: 99; }
@@ -306,18 +316,18 @@
     .desktop-menu-divider { order: 49; margin: 18px 0 14px; }
     .desktop-menu-divider { display: none !important; }
     #settingsBtn, #settingsEmpBtn { margin-top: auto; }
-    /* On mobile, hide sign out and user label — sign out is in Settings modal */
+    /* On mobile, hide sign out and user label Ã¢â‚¬â€ sign out is in Settings modal */
     #headerUserLabel { display: none !important; }
 
     /* Main padding */
     .main { padding: 14px; }
 
-    /* Summary cards — 2 columns on mobile */
+    /* Summary cards Ã¢â‚¬â€ 2 columns on mobile */
     .summary-grid { grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 18px; }
     .summary-card { padding: 12px; }
     .summary-value { font-size: 20px; }
 
-    /* Tabs — horizontal scroll on mobile */
+    /* Tabs Ã¢â‚¬â€ horizontal scroll on mobile */
     .tabs { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; touch-action: pan-x; overscroll-behavior-x: contain; }
     .tabs::-webkit-scrollbar { display: none; }
     .tab { flex-shrink: 0; padding: 10px 12px; font-size: 11px; letter-spacing: 0.04em; }
@@ -341,7 +351,7 @@
     .job-stat { text-align: left; }
     .job-header-btns { width: 100%; justify-content: flex-end; border-top: 1px solid var(--border); padding-top: 8px; margin-top: 2px; }
     .repay-toggle { font-size: 15px; }
-    /* Job status + emp name — upper-right on mobile */
+    /* Job status + emp name Ã¢â‚¬â€ upper-right on mobile */
     .job-status-wrap { display: none; }
     .job-header-main-grid { display: grid; grid-template-columns: 1fr auto; column-gap: 12px; row-gap: 8px; align-items: start; }
     .job-emp-rail { display: none; }
@@ -366,13 +376,13 @@
     .job-detail-admin-actions { justify-content: center; width: 100%; }
     .job-detail-mode-actions { justify-content: center; }
 
-    /* Line items — stack value/actions below label (except simple inline ones) */
+    /* Line items Ã¢â‚¬â€ stack value/actions below label (except simple inline ones) */
     .line-item:not(.line-item-simple) { flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 3px; padding: 6px 0; }
     .line-item-simple { justify-content: space-between; }
     .line-item-actions { width: 100%; }
     .line-item-actions .line-item-value { margin-right: auto; }
 
-    /* HW card meta — force to its own line and truncate */
+    /* HW card meta Ã¢â‚¬â€ force to its own line and truncate */
     .job-meta { flex-basis: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .hw-pay-row { flex-direction: row !important; align-items: center !important; justify-content: space-between !important; }
     .hw-pay-right { margin-left: auto; display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex: 1; min-width: 0; text-align: right; }
@@ -437,7 +447,7 @@
     .form-group:not(:has(.ac-wrap)) { overflow: hidden; }
     input[type="date"].form-input { min-width: 0; width: 100% !important; max-width: 100%; }
 
-    /* Settings modal — flip sidebar to top tab bar, fixed height */
+    /* Settings modal Ã¢â‚¬â€ flip sidebar to top tab bar, fixed height */
     .settings-modal { width: 100%; height: 85vh; }
     .settings-modal-header { padding: 16px 16px 12px; }
     .settings-body { flex-direction: column; }
@@ -459,12 +469,12 @@
     .settings-nav-wrap.snav-has-right::after { opacity: 1; }
     .settings-panel { padding: 16px; }
     .settings-modal-footer { padding: 10px 16px; }
-    /* Fix form-row stacked spacing — grid gap handles Name→PIN, margin-bottom handles PIN→Role */
+    /* Fix form-row stacked spacing Ã¢â‚¬â€ grid gap handles NameÃ¢â€ â€™PIN, margin-bottom handles PINÃ¢â€ â€™Role */
     .form-row { gap: 16px; margin-bottom: 16px; }
     .form-row .form-group { margin-bottom: 0; }
   }
 
-  /* ── LOGIN ────────────────────────────────────────────────────────────────── */
+  /* Ã¢â€â‚¬Ã¢â€â‚¬ LOGIN Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
   .login-overlay { position:fixed;inset:0;background:var(--bg);z-index:998;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;padding:24px; }
   .login-card { background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:32px;width:100%;max-width:380px; }
   .login-title { font-family:var(--mono);font-size:22px;font-weight:600;color:var(--accent);letter-spacing:0.08em;text-align:center;margin-bottom:6px; }
@@ -476,7 +486,7 @@
   .login-pin-row { display:flex;gap:10px;margin-top:4px; }
   .login-error { font-family:var(--mono);font-size:12px;color:var(--red);text-align:center;margin-top:10px;min-height:18px; }
 
-  /* ── SCHEDULE ──────────────────────────────────────────────────────────────── */
+  /* Ã¢â€â‚¬Ã¢â€â‚¬ SCHEDULE Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
   .sched-toolbar { display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px; }
   .sched-view-toggle { display:flex;gap:0;border:1px solid var(--border2);border-radius:3px;overflow:hidden; }
   .sched-view-btn { font-family:var(--mono);font-size:12px;padding:7px 16px;cursor:pointer;background:transparent;color:var(--text3);border:none;transition:all 0.15s;text-transform:uppercase;letter-spacing:0.06em; }
@@ -534,7 +544,7 @@
     .sched-toolbar { flex-direction:row;align-items:center;justify-content:space-between;flex-wrap:nowrap; }
   }
 
-  /* ─── CLIENTS ─── */
+  /* Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ CLIENTS Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
   .clients-table-wrap { overflow-x:auto; }
   .clients-table { width:100%; border-collapse:collapse; }
   .clients-table th { font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:0.1em; color:var(--text3); padding:8px 12px; border-bottom:1px solid var(--border); text-align:left; white-space:nowrap; }
@@ -615,33 +625,32 @@
 
 <div class="header">
   <div class="header-title tap-home" onclick="goHeaderHome()">JOB<span>/</span>TRACKER</div>
-  <button class="mobile-menu-btn" id="mobileMenuBtn" onclick="toggleMobileMenu()" aria-label="Open menu">☰</button>
+  <button class="mobile-menu-btn" id="mobileMenuBtn" onclick="toggleMobileMenu()" aria-label="Open menu"><i class="ph ph-list"></i></button>
   <div class="header-actions">
-    <button class="btn btn-ghost btn-sm desktop-menu-trigger" id="desktopMenuBtn" onclick="toggleDesktopMenu()" aria-label="Open actions menu">☰ Menu</button>
+    <button class="btn btn-ghost btn-sm desktop-menu-trigger" id="desktopMenuBtn" onclick="toggleDesktopMenu()" aria-label="Open actions menu"><i class="ph ph-list"></i> Menu</button>
     <div class="desktop-menu-panel" id="desktopMenuPanel">
       <button class="btn btn-primary header-admin" id="newJobBtn" onclick="openNewJobModal()">+ New Job</button>
       <button class="btn btn-ghost btn-sm header-admin" id="payOutBtn" onclick="openPayOut()">$ Pay Out</button>
-      <button class="btn btn-ghost btn-sm header-admin" id="splitPayBtn" onclick="openSplitPay()">÷ Split Pay</button>
-      <button class="btn btn-ghost btn-sm header-admin" id="splitLedgerBtn" onclick="openSplitLedger()">≡ Ledger</button>
+      <button class="btn btn-ghost btn-sm header-admin" id="splitPayBtn" onclick="openSplitPay()"><i class="ph ph-split-horizontal"></i> Split Pay</button>
+      <button class="btn btn-ghost btn-sm header-admin" id="splitLedgerBtn" onclick="openSplitLedger()"><i class="ph ph-book-open-text"></i> Ledger</button>
       <div class="desktop-menu-inline-two header-admin" id="undoRedoRow">
-        <button class="btn btn-ghost btn-sm" id="undoBtn" onclick="undoAction()" style="opacity:0.35" title="Nothing to undo">↩ Undo</button>
-        <button class="btn btn-ghost btn-sm" id="redoBtn" onclick="redoAction()" style="opacity:0.35" title="Nothing to redo">↻ Redo</button>
+        <button class="btn btn-ghost btn-sm" id="undoBtn" onclick="undoAction()" style="opacity:0.35" title="Nothing to undo"><i class="ph ph-arrow-counter-clockwise"></i> Undo</button>
+        <button class="btn btn-ghost btn-sm" id="redoBtn" onclick="redoAction()" style="opacity:0.35" title="Nothing to redo"><i class="ph ph-arrow-clockwise"></i> Redo</button>
       </div>
       <div class="desktop-menu-divider" id="headerMenuDivider"></div>
-      <button class="btn btn-ghost btn-sm header-admin" id="settingsBtn" onclick="openSettings()">⚙ Settings</button>
-      <button class="btn btn-ghost btn-sm header-emp" id="settingsEmpBtn" onclick="openMySettings()" style="display:none">⚙ Settings</button>
-      <button class="btn btn-ghost btn-sm" id="signOutBtn" onclick="signOut()" style="display:none">⎋ Sign Out</button>
+      <button class="btn btn-ghost btn-sm header-admin" id="settingsBtn" onclick="openSettings()"><i class="ph ph-gear"></i> Settings</button>
+      <button class="btn btn-ghost btn-sm header-emp" id="settingsEmpBtn" onclick="openMySettings()" style="display:none"><i class="ph ph-gear"></i> Settings</button>
+      <button class="btn btn-ghost btn-sm" id="signOutBtn" onclick="signOut()" style="display:none"><i class="ph ph-sign-out"></i> Sign Out</button>
     </div>
     <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)" />
   </div>
 </div>
 
 <div class="main">
-  <div id="debtPanel"></div>
   <div id="summaryCards" class="summary-grid"></div>
   <div id="empSummaryCards" class="summary-grid" style="display:none"></div>
   <div class="tabs-wrap">
-    <span class="tabs-arr tabs-arr-l">‹</span>
+    <span class="tabs-arr tabs-arr-l">&lt;</span>
     <div class="tabs">
       <div class="tab job-tab active" onclick="switchTab('active', this)">Active</div>
       <div class="tab job-tab" onclick="switchTab('complete', this)">Completed</div>
@@ -650,7 +659,7 @@
       <div class="tab" id="schedTab" onclick="switchTab('schedule', this)">Schedule</div>
       <div class="tab" id="clientsTab" onclick="switchTab('clients', this)">Clients</div>
     </div>
-    <span class="tabs-arr tabs-arr-r">›</span>
+    <span class="tabs-arr tabs-arr-r">&gt;</span>
   </div>
   <div id="tab-active" class="tab-content active">
     <div class="section-header"><span class="section-title" id="activeCount"></span></div>
@@ -672,15 +681,15 @@
         <span class="section-title" id="clientCount">0 Clients</span>
         <div style="position:relative;display:inline-flex;align-items:center">
           <input class="form-input" id="clientSearchInput" placeholder="Search..." oninput="renderClients()" style="width:200px;padding:5px 28px 5px 10px;font-size:14px" />
-          <button onclick="document.getElementById('clientSearchInput').value='';renderClients()" style="position:absolute;right:6px;background:none;border:none;color:var(--text3);cursor:pointer;font-size:15px;line-height:1;padding:0" title="Clear search">✕</button>
+          <button onclick="document.getElementById('clientSearchInput').value='';renderClients()" style="position:absolute;right:6px;background:none;border:none;color:var(--text3);cursor:pointer;font-size:15px;line-height:1;padding:0" title="Clear search">x</button>
         </div>
       </div>
       <div class="clients-header-actions" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <span class="clients-last-import" style="font-family:var(--mono);font-size:12px;color:var(--text3)" id="clientsLastImport"></span>
-        <button class="btn btn-ghost btn-sm admin-only" onclick="triggerClientImport()">⬆ Import CSV</button>
-        <button class="btn btn-ghost btn-sm admin-only" onclick="exportAllClientsToSquare()">⬇ Export All</button>
+        <button class="btn btn-ghost btn-sm admin-only" onclick="triggerClientImport()"><i class="ph ph-upload-simple"></i> Import CSV</button>
+        <button class="btn btn-ghost btn-sm admin-only" onclick="exportAllClientsToSquare()"><i class="ph ph-download-simple"></i> Export All</button>
         <div class="col-toggle-wrap clients-col-toggle">
-          <button class="btn btn-ghost btn-sm" onclick="toggleColPanel()">Columns ▾</button>
+          <button class="btn btn-ghost btn-sm" onclick="toggleColPanel()">Columns</button>
           <div class="col-toggle-panel" id="colTogglePanel"></div>
         </div>
       </div>
@@ -688,6 +697,7 @@
     <input type="file" id="clientCsvInput" accept=".csv" style="display:none" onchange="handleClientCSV(event)" />
     <div id="clientsList"></div>
   </div>
+  <div id="debtPanel"></div>
 </div>
 
 <!-- NEW/EDIT JOB MODAL -->
@@ -701,7 +711,7 @@
       </div>
     </div>
     <div class="form-group">
-      <label class="form-label">Contact Name <span style="font-weight:400;color:var(--text3)">(optional — if different from client)</span></label>
+      <label class="form-label">Contact Name <span style="font-weight:400;color:var(--text3)">(optional - if different from client)</span></label>
       <div class="ac-wrap">
         <input class="form-input" id="f_contact" placeholder="e.g. John the contractor" autocomplete="off" oninput="showAC('f_contact')" onkeydown="navigateAC(event,'f_contact')" onblur="setTimeout(()=>hideAC('f_contact'),150)" />
       </div>
@@ -711,17 +721,31 @@
       <input class="form-input" id="f_date" type="date" />
     </div>
     <div id="jobFinancialLockNote" style="display:none;margin:6px 0 12px;padding:10px 12px;border:1px solid var(--border2);border-radius:3px;background:var(--bg3);font-family:var(--mono);font-size:12px;color:var(--text2)">
-      Quote and payment structure are locked for this job because partial payments have already been applied. Use Revenue > Partial Payments (Edit/Delete) first.
+      Quote and payment structure are locked for this job because revenue collections have already been applied. Use Revenue > Collections (Edit/Delete) first.
     </div>
     <div class="form-group" id="f_emp_wrap">
       <label class="form-label">Assign to Employee</label>
       <select class="form-input" id="f_emp"></select>
     </div>
     <div id="jobFinancialLockRegion">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
-        <input type="checkbox" id="f_itemized" onchange="toggleItemizedQuote()" style="width:16px;height:16px;cursor:pointer;accent-color:var(--accent)" />
-        <label for="f_itemized" style="cursor:pointer;font-family:var(--mono);font-size:15px;color:var(--text2);user-select:none">Itemized Quote</label>
+      <div class="form-group">
+        <label class="form-label">Job Setup</label>
+        <div id="jobSetupPicker" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
+          <button type="button" class="btn btn-ghost btn-sm user-pick-btn" id="js_mode_unified" onclick="setJobSetupMode('unified')">Unified Quote</button>
+          <button type="button" class="btn btn-ghost btn-sm user-pick-btn" id="js_mode_itemized" onclick="setJobSetupMode('itemized')">Itemized Quote</button>
+          <button type="button" class="btn btn-ghost btn-sm user-pick-btn" id="js_mode_hourly" onclick="setJobSetupMode('hourly')">Hourly</button>
+        </div>
+        <select class="form-input" id="f_jobType" onchange="onJobTypeChange()" style="display:none">
+          <option value="quoted">Quoted Job</option>
+          <option value="hourly">Hourly + Materials</option>
+        </select>
+        <input type="checkbox" id="f_itemized" onchange="toggleItemizedQuote()" style="display:none" />
       </div>
+      <div class="form-group" id="f_hourly_rate_wrap" style="display:none">
+        <label class="form-label">Hourly Rate ($)</label>
+        <input class="form-input" id="f_hourlyRate" type="number" step="0.01" min="0" placeholder="0.00" />
+      </div>
+      <div id="jobQuotedFields">
       <div id="f_quote_wrap" class="form-group">
         <label class="form-label">Quote Amount ($)</label>
         <input class="form-input" id="f_quote" type="number" step="0.01" placeholder="0.00" oninput="updateMilestonePreview()" />
@@ -744,12 +768,16 @@
           <button id="ms_btn_default" class="btn btn-ghost btn-sm"   onclick="setMilestoneMode('default')">Use Defaults</button>
           <button id="ms_btn_custom"  class="btn btn-ghost btn-sm"   onclick="setMilestoneMode('custom')">Custom</button>
         </div>
-        <div id="milestoneHint" style="font-family:var(--mono);font-size:14px;color:var(--text3)">Full invoice — one payment to track.</div>
+        <div id="milestoneHint" style="font-family:var(--mono);font-size:14px;color:var(--text3)">Full invoice - one payment to track.</div>
         <div id="milestoneEditor" style="display:none">
           <div id="milestoneList" class="milestone-list"></div>
           <button id="milestoneAddBtn" class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="addMilestoneField()">+ Add Milestone</button>
           <div id="milestoneError" style="color:var(--red);font-size:15px;margin-top:4px"></div>
         </div>
+      </div>
+      </div>
+      <div id="jobHourlyHint" style="display:none;margin-top:2px;padding:10px 12px;border:1px solid var(--border2);border-radius:3px;background:var(--bg3);font-family:var(--mono);font-size:12px;color:var(--text2)">
+        Hourly + Materials jobs do not require a starting quote. Use Revenue to add billable entries, then log collections as payments are received.
       </div>
     </div>
     <div class="modal-actions">
@@ -776,11 +804,11 @@
   <div class="modal settings-modal">
     <div class="settings-modal-header">
       <div class="modal-title">Settings</div>
-      <span style="font-family:var(--mono);font-size:12px;color:var(--text3);cursor:pointer;text-decoration:underline dotted" onclick="openChangelog()">v1.20</span>
+      <span style="font-family:var(--mono);font-size:12px;color:var(--text3);cursor:pointer;text-decoration:underline dotted" onclick="openChangelog()">v1.21</span>
     </div>
     <div class="settings-body">
       <div class="settings-nav-wrap">
-        <span class="settings-nav-arr settings-nav-arr-l">‹</span>
+        <span class="settings-nav-arr settings-nav-arr-l">&lt;</span>
         <nav class="settings-nav">
           <button class="settings-nav-btn active" onclick="settingsTab('employees',this)">Employees</button>
           <button class="settings-nav-btn" onclick="settingsTab('fees',this)">Square Fees</button>
@@ -790,7 +818,7 @@
           <button class="settings-nav-btn" onclick="settingsTab('clients',this)">Clients</button>
           <button class="settings-nav-btn" onclick="settingsTab('data',this)">Data</button>
         </nav>
-        <span class="settings-nav-arr settings-nav-arr-r">›</span>
+        <span class="settings-nav-arr settings-nav-arr-r">&gt;</span>
       </div>
       <div style="flex:1;overflow:hidden;display:flex;flex-direction:column">
         <div id="stab-employees" class="settings-panel">
@@ -867,7 +895,7 @@
             <div class="form-hint">Total startup debt agreed upon.</div>
           </div>
           <div class="form-group">
-            <label class="form-label">Repayment split — your share</label>
+            <label class="form-label">Repayment split - your share</label>
             <div style="display:flex;align-items:center;gap:8px">
               <input class="form-input" id="s_debtOwnerShare" type="number" step="1" min="0" max="100" style="max-width:120px" />
               <span style="font-family:var(--mono);color:var(--text3)">%</span>
@@ -894,7 +922,7 @@
           </div>
           <div class="form-group" style="margin-top:16px;border-top:1px solid var(--border);padding-top:16px">
             <label class="form-label">Quick View Fields</label>
-            <div class="form-hint" style="margin-bottom:8px">Choose which fields appear in the quick popup (👤 button).</div>
+            <div class="form-hint" style="margin-bottom:8px">Choose which fields appear in the quick popup (pin button).</div>
             <div id="s_quickColsList" style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px"></div>
           </div>
         </div>
@@ -902,16 +930,16 @@
           <div class="form-group">
             <label class="form-label">Backup &amp; Restore</label>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
-              <button class="btn btn-ghost btn-sm" onclick="exportData()">⬇ Export Backup</button>
-              <button class="btn btn-ghost btn-sm" onclick="closeModal('settingsModal');document.getElementById('importFile').click()">⬆ Import Backup</button>
+              <button class="btn btn-ghost btn-sm" onclick="exportData()"><i class="ph ph-download-simple"></i> Export Backup</button>
+              <button class="btn btn-ghost btn-sm" onclick="closeModal('settingsModal');document.getElementById('importFile').click()"><i class="ph ph-upload-simple"></i> Import Backup</button>
             </div>
-            <div class="form-hint">Export saves all data — jobs, HomeWatch clients, appointments, clients, users, debt payments, and settings — as a JSON file.</div>
+            <div class="form-hint">Export saves all data - jobs, HomeWatch clients, appointments, clients, users, debt payments, and settings - as a JSON file.</div>
           </div>
         </div>
       </div>
     </div>
     <div class="settings-modal-footer">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal('settingsModal');signOut()" style="margin-right:auto">⎋ Sign Out</button>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('settingsModal');signOut()" style="margin-right:auto"><i class="ph ph-sign-out"></i> Sign Out</button>
       <button class="btn btn-ghost" onclick="closeModal('settingsModal')">Close</button>
       <button class="btn btn-primary" id="s_saveBtn" onclick="saveSettings()">Save</button>
     </div>
@@ -1022,7 +1050,7 @@
     <div id="dp_jobWrap" style="display:none" class="form-group">
       <label class="form-label">Job or HomeWatch Client</label>
       <select class="form-input" id="dp_linkSelect">
-        <option value="">— Select —</option>
+        <option value="">- Select -</option>
       </select>
       <div class="form-hint" style="margin-top:6px">Reduces the employee's outstanding balance on the selected job or HomeWatch client.</div>
     </div>
@@ -1043,7 +1071,7 @@
       </div>
     </div>
     <div class="form-group">
-      <label class="form-label">Contact Person <span style="color:var(--text3);font-weight:400">(optional — if different from client)</span></label>
+      <label class="form-label">Contact Person <span style="color:var(--text3);font-weight:400">(optional - if different from client)</span></label>
       <div class="ac-wrap">
         <input class="form-input" id="ap_contact" placeholder="e.g. John the contractor" autocomplete="off" oninput="showAC('ap_contact')" onkeydown="navigateAC(event,'ap_contact')" onblur="setTimeout(()=>hideAC('ap_contact'),150)" />
       </div>
@@ -1114,78 +1142,90 @@
     <div class="modal-title">Version History</div>
     <div style="font-family:var(--mono);font-size:13px;line-height:1.7;color:var(--text2)">
       <div style="margin-bottom:14px">
-        <div style="color:var(--accent);font-size:14px;margin-bottom:4px">v1.20 � Apr 2026</div>
-        <div>� New Pay Out workflow with employee picker and Include Potential Pay toggle</div>
-        <div>� Split Pay and Pay Out ledger modal with jump-to-job/homewatch links</div>
-        <div>� Desktop header actions moved into a cleaner menu; mobile slideout menu added</div>
-        <div>� Employee settings redesigned with USER / CLIENTS tabs and split percentage badge</div>
-        <div>� User-scoped UI preferences for summary timeframe, schedule view state, and client row expansion</div>
-        <div>� Schedule list now groups by day/date headers; timed appointments support start + finish times</div>
+        <div style="color:var(--accent);font-size:14px;margin-bottom:4px">v1.21 - Apr 2026</div>
+        <div>- Added dedicated Hourly + Materials workflow enhancements: hourly rate on job setup, Hours entry modal, and automatic hours x rate totals</div>
+        <div>- Additions area for hourly jobs now supports separate Additions and Hours columns while still rolling into one total job cost</div>
+        <div>- Revenue flow for hourly jobs simplified to a single + action (removed separate Entry button)</div>
+        <div>- Log Payment no longer hard-blocks when no pending lines exist; direct collected payment logging now works for upfront collections</div>
+        <div>- New Job setup unified into one 3-mode selector: Unified Quote, Itemized Quote, Hourly</div>
+        <div>- Updated header/section action alignment so hourly Additions and Hours + buttons sit beside section labels</div>
+        <div>- Debt repayment panel behavior refined to show only on Jobs views (Active, Completed, All Jobs)</div>
+        <div>- Replaced remaining emoji-style controls with consistent icon/text actions in key UI areas (including print/export/import/sign-out surfaces)</div>
+        <div>- Broad mojibake cleanup pass across ledger, repayment, settlement, HomeWatch, schedule, clients, modals, and changelog text</div>
       </div>
       <div style="margin-bottom:14px">
-        <div style="color:var(--text3);font-size:14px;margin-bottom:4px">v1.19 — Apr 2026</div>
-        <div>· Partial Payments workflow (dollar + percentage based)</div>
-        <div>· Revenue + button moved to card header for faster access</div>
-        <div>· Split display cleanup: parent rows keep original value, child rows show Partial Paid / Partial Left</div>
-        <div>· Split hints now show partial percent and date (example: 90% partial - 04/10/2026)</div>
-        <div>· Subtractions applied via partial payments now lock and show as Applied</div>
-        <div>· Partial payment history now supports latest-only Edit/Delete with safety guardrails</div>
-        <div>· Edit Job now locks quote + payment structure once partial payments exist</div>
+        <div style="color:var(--accent);font-size:14px;margin-bottom:4px">v1.20 - Apr 2026</div>
+        <div>- New Pay Out workflow with employee picker plus Pay Now / Pay To Zero modes</div>
+        <div>- Split Pay and Pay Out ledger modal with jump-to-job/homewatch links</div>
+        <div>- Desktop header actions moved into a cleaner menu; mobile slideout menu added</div>
+        <div>- Employee settings redesigned with USER / CLIENTS tabs and split percentage badge</div>
+        <div>- User-scoped UI preferences for summary timeframe, schedule view state, and client row expansion</div>
+        <div>- Schedule list now groups by day/date headers; timed appointments support start + finish times</div>
       </div>
       <div style="margin-bottom:14px">
-        <div style="color:var(--text3);font-size:14px;margin-bottom:4px">v1.18 — Mar 2026</div>
-        <div>· Mobile-first settings modal — horizontal scrollable tab bar with scroll indicators</div>
-        <div>· Settings footer static on all tabs (Sign Out · Close · Save always visible)</div>
-        <div>· Employee rows simplified — badge below name, Reset PIN moved to Edit modal</div>
-        <div>· View As feature removed</div>
-        <div>· Summary cards clickable — Active Jobs and HomeWatch navigate to their tabs</div>
-        <div>· Debt panel split-active badge hidden on mobile</div>
-        <div>· Add User form spacing fixed on mobile</div>
+        <div style="color:var(--text3);font-size:14px;margin-bottom:4px">v1.19 - Apr 2026</div>
+        <div>- Partial Payments workflow (dollar + percentage based)</div>
+        <div>- Revenue + button moved to card header for faster access</div>
+        <div>- Split display cleanup: parent rows keep original value, child rows show Partial Paid / Partial Left</div>
+        <div>- Split hints now show partial percent and date (example: 90% partial - 04/10/2026)</div>
+        <div>- Subtractions applied via partial payments now lock and show as Applied</div>
+        <div>- Partial payment history now supports latest-only Edit/Delete with safety guardrails</div>
+        <div>- Edit Job now locks quote + payment structure once partial payments exist</div>
       </div>
       <div style="margin-bottom:14px">
-        <div style="color:var(--text3);font-size:14px;margin-bottom:4px">v1.17 — Mar 2026</div>
-        <div>· Clients tab — Square CSV import/export, field-level conflict resolution</div>
-        <div>· Client notes thread (add/edit/delete, employee 30s edit window)</div>
-        <div>· Client quick-view popup (👤 on job, HW, and schedule cards)</div>
-        <div>· Client row expand/collapse inline with 2-column detail grid</div>
-        <div>· Appointment contact person field (same as jobs)</div>
-        <div>· Undo / Redo with descriptive toast (Ctrl+Z / Ctrl+Y)</div>
-        <div>· Action-level undo stack (up to 50 steps)</div>
-        <div>· Themed confirm/alert modals — no more browser dialogs</div>
-        <div>· Column visibility settings for client table, expand view, and quick view</div>
-        <div>· Account settings tab removed (PIN change is in Employees)</div>
+        <div style="color:var(--text3);font-size:14px;margin-bottom:4px">v1.18 - Mar 2026</div>
+        <div>- Mobile-first settings modal with horizontal scrollable tab bar and scroll indicators</div>
+        <div>- Settings footer static on all tabs (Sign Out | Close | Save always visible)</div>
+        <div>- Employee rows simplified with badge below name and Reset PIN moved to Edit modal</div>
+        <div>- View As feature removed</div>
+        <div>- Summary cards clickable: Active Jobs and HomeWatch navigate to their tabs</div>
+        <div>- Debt panel split-active badge hidden on mobile</div>
+        <div>- Add User form spacing fixed on mobile</div>
       </div>
       <div style="margin-bottom:14px">
-        <div style="color:var(--text3);font-size:14px;margin-bottom:4px">v1.16 — Mar 2026</div>
-        <div>· Tabbed settings modal (Account · Employees · Square Fees · Debt · Data)</div>
-        <div>· Employee management moved inline — no more separate modal</div>
-        <div>· Square per-transaction fee ($0.30) support</div>
-        <div>· All % inputs normalized (type 2.9 not 0.029)</div>
-        <div>· Consistent dividers across job detail cards</div>
+        <div style="color:var(--text3);font-size:14px;margin-bottom:4px">v1.17 - Mar 2026</div>
+        <div>- Clients tab with Square CSV import/export and field-level conflict resolution</div>
+        <div>- Client notes thread (add/edit/delete, employee 30s edit window)</div>
+        <div>- Client quick-view popup on job, HW, and schedule cards</div>
+        <div>- Client row expand/collapse inline with 2-column detail grid</div>
+        <div>- Appointment contact person field (same as jobs)</div>
+        <div>- Undo / Redo with descriptive toast (Ctrl+Z / Ctrl+Y)</div>
+        <div>- Action-level undo stack (up to 50 steps)</div>
+        <div>- Themed confirm/alert modals (no more browser dialogs)</div>
+        <div>- Column visibility settings for client table, expand view, and quick view</div>
+        <div>- Account settings tab removed (PIN change is in Employees)</div>
       </div>
       <div style="margin-bottom:14px">
-        <div style="color:var(--text3);font-size:14px;margin-bottom:4px">v1.15 — Mar 2026</div>
-        <div>· Mobile layout fixes (header, buttons, detail overflow)</div>
-        <div>· HW card meta wraps cleanly on narrow screens</div>
-        <div>· Repay toggle height matched to other buttons</div>
-        <div>· "Mark Complete" shortened to "Complete"</div>
-        <div>· Clickable version number with changelog popup</div>
+        <div style="color:var(--text3);font-size:14px;margin-bottom:4px">v1.16 - Mar 2026</div>
+        <div>- Tabbed settings modal (Account | Employees | Square Fees | Debt | Data)</div>
+        <div>- Employee management moved inline (no more separate modal)</div>
+        <div>- Square per-transaction fee ($0.30) support</div>
+        <div>- All % inputs normalized (type 2.9 not 0.029)</div>
+        <div>- Consistent dividers across job detail cards</div>
       </div>
       <div style="margin-bottom:14px">
-        <div style="color:var(--text3);font-size:14px;margin-bottom:4px">v1.14 — Mar 2026</div>
-        <div>· Multi-employee support (per-employee profit share)</div>
-        <div>· Jobs and HW clients assigned to specific employees</div>
-        <div>· Admin sees one "Owed to" card per employee</div>
-        <div>· Employee views scoped to their own jobs/HW</div>
-        <div>· Employee name shown on card headers (admin only)</div>
-        <div>· Manage Employees modal with edit + debt reassignment</div>
+        <div style="color:var(--text3);font-size:14px;margin-bottom:4px">v1.15 - Mar 2026</div>
+        <div>- Mobile layout fixes (header, buttons, detail overflow)</div>
+        <div>- HW card meta wraps cleanly on narrow screens</div>
+        <div>- Repay toggle height matched to other buttons</div>
+        <div>- "Mark Complete" shortened to "Complete"</div>
+        <div>- Clickable version number with changelog popup</div>
+      </div>
+      <div style="margin-bottom:14px">
+        <div style="color:var(--text3);font-size:14px;margin-bottom:4px">v1.14 - Mar 2026</div>
+        <div>- Multi-employee support (per-employee profit share)</div>
+        <div>- Jobs and HW clients assigned to specific employees</div>
+        <div>- Admin sees one "Owed to" card per employee</div>
+        <div>- Employee views scoped to their own jobs/HW</div>
+        <div>- Employee name shown on card headers (admin only)</div>
+        <div>- Manage Employees modal with edit and debt reassignment</div>
       </div>
       <div style="margin-bottom:14px">
         <div style="color:var(--text3);font-size:14px;margin-bottom:4px">v1.13 and earlier</div>
-        <div>· Single-employee tracking, job/HW management</div>
-        <div>· Startup debt panel, settlement breakdowns</div>
-        <div>· Advances, add-ons, subtractions, itemized quotes</div>
-        <div>· Hours logging, notes, backup/restore</div>
+        <div>- Single-employee tracking, job/HW management</div>
+        <div>- Startup debt panel, settlement breakdowns</div>
+        <div>- Advances, add-ons, subtractions, itemized quotes</div>
+        <div>- Hours logging, notes, backup/restore</div>
       </div>
     </div>
     <div class="modal-actions">
@@ -1336,21 +1376,19 @@
         <input class="form-input" id="po_date" type="date" />
       </div>
     </div>
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px;margin-bottom:10px">
-      <div class="form-label" style="margin:0">Include Potential Pay</div>
-      <div style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none" onclick="togglePayOutPotential()">
-        <span style="font-family:var(--mono);font-size:14px;color:var(--text3);text-transform:uppercase;letter-spacing:0.1em" id="po_potentialLabel">Off</span>
-        <span id="po_potentialTrack" data-on="false" style="display:inline-flex;align-items:center;width:40px;height:22px;border-radius:11px;background:var(--border2);transition:background 0.2s;cursor:pointer;flex-shrink:0;padding:2px;box-sizing:border-box">
-          <span id="po_potentialThumb" style="width:18px;height:18px;border-radius:50%;background:#fff;transition:transform 0.2s;display:block"></span>
-        </span>
+    <div style="margin-top:4px;margin-bottom:10px">
+      <div class="form-label" style="margin:0 0 8px 0">Payout Mode</div>
+      <div class="po-mode-row">
+        <button type="button" id="po_mode_now" class="btn btn-ghost po-mode-btn" onclick="setPayOutMode('pay_now')">Pay Now</button>
+        <button type="button" id="po_mode_zero" class="btn btn-ghost po-mode-btn" onclick="setPayOutMode('pay_to_zero')">Pay To Zero</button>
       </div>
     </div>
     <div id="po_totals" style="background:var(--bg3);border:1px solid var(--border2);border-radius:3px;padding:12px 16px;font-family:var(--mono);font-size:14px;display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-bottom:10px"></div>
     <div id="po_rows" style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:3px;padding:0 12px"></div>
-    <div class="form-hint" id="po_hint" style="margin-top:8px">Current-owed mode ignores negative rows so prepaid jobs do not reduce payout.</div>
+    <div class="form-hint" id="po_hint" style="margin-top:8px">Pay Now ignores negative rows so prepaid jobs do not reduce what is paid today.</div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('payOutModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="applyPayOutToSplitPay()">Use in Split Pay</button>
+      <button class="btn btn-primary" id="po_applyBtn" onclick="applyPayOutToSplitPay()">Use Pay Now in Split Pay</button>
     </div>
   </div>
 </div>
@@ -1396,7 +1434,7 @@
 <!-- PARTIAL COLLECTION MODAL -->
 <div id="partialCollectModal" class="modal-overlay hidden">
   <div class="modal modal-wide">
-    <div class="modal-title">Collect Partial Payment</div>
+    <div class="modal-title" id="pc_modalTitle">Log Revenue Collection</div>
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">Collection Type</label>
@@ -1423,7 +1461,7 @@
       <input class="form-input" id="pc_note" placeholder="e.g. Client paid 90% of selected remaining balance" />
     </div>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px">
-      <span style="font-family:var(--mono);font-size:14px;color:var(--text2);user-select:none">Apply pending subtractions across remaining milestones</span>
+      <span id="pc_autoSubLabel" style="font-family:var(--mono);font-size:14px;color:var(--text2);user-select:none">Apply pending subtractions across remaining milestones</span>
       <div style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none" onclick="togglePartialAutoSubtractions()">
         <span style="font-family:var(--mono);font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:0.08em">On</span>
         <span id="pc_autoTrack" data-on="true" style="display:inline-flex;align-items:center;width:40px;height:22px;border-radius:11px;background:var(--accent);transition:background 0.2s;cursor:pointer;flex-shrink:0;padding:2px;box-sizing:border-box">
@@ -1433,7 +1471,7 @@
     </div>
     <div id="pc_subInfo" style="background:var(--bg3);border:1px solid var(--border2);border-radius:3px;padding:12px 16px;font-family:var(--mono);font-size:13px;display:flex;flex-direction:column;align-items:flex-end;gap:4px;margin-bottom:12px"></div>
     <div style="border-top:1px solid var(--border);padding-top:12px">
-      <div class="form-label" style="margin:0 0 8px 0">Pending Milestones + Additions</div>
+      <div class="form-label" id="pc_listLabel" style="margin:0 0 8px 0">Pending Milestones + Additions</div>
       <div style="max-height:320px;overflow-y:auto;border:1px solid var(--border);border-radius:3px;padding:0 10px;background:var(--bg2)">
         <div id="pc_list"></div>
       </div>
@@ -1451,7 +1489,7 @@
   <div class="modal" style="max-width:540px" id="quoteSnapshotInner">
     <div id="quoteSnapshotContent"></div>
     <div class="modal-actions" style="margin-top:16px" id="quoteSnapshotActions">
-      <button class="btn btn-ghost btn-sm" onclick="printQuoteSnapshot()">🖨 Print</button>
+      <button class="btn btn-ghost btn-sm" onclick="printQuoteSnapshot()"><i class="ph ph-printer"></i> Print</button>
       <button class="btn btn-ghost" onclick="closeModal('quoteSnapshotModal')">Close</button>
     </div>
   </div>
@@ -1465,12 +1503,12 @@
     </div>
     <div class="settings-body">
       <div class="settings-nav-wrap">
-        <span class="settings-nav-arr settings-nav-arr-l">‹</span>
+        <span class="settings-nav-arr settings-nav-arr-l">&lt;</span>
         <nav class="settings-nav">
           <button class="settings-nav-btn active" onclick="mySettingsTab('user',this)">User</button>
           <button class="settings-nav-btn" onclick="mySettingsTab('clients',this)">Clients</button>
         </nav>
-        <span class="settings-nav-arr settings-nav-arr-r">›</span>
+        <span class="settings-nav-arr settings-nav-arr-r">&gt;</span>
       </div>
       <div style="flex:1;overflow:hidden;display:flex;flex-direction:column">
         <div id="mstab-user" class="settings-panel active">
@@ -1480,7 +1518,7 @@
               <span class="user-row-badge emp" id="ms_split">66% split</span>
             </div>
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-              <button class="btn btn-ghost btn-sm" onclick="closeModal('mySettingsModal');openChangePin()">🔑 Change My PIN</button>
+          <button class="btn btn-ghost btn-sm" onclick="closeModal('mySettingsModal');openChangePin()">Change My PIN</button>
             </div>
           </div>
         </div>
@@ -1497,7 +1535,7 @@
       </div>
     </div>
     <div class="settings-modal-footer">
-      <button class="btn btn-ghost btn-sm" onclick="closeModal('mySettingsModal');signOut()" style="margin-right:auto">⎋ Sign Out</button>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('mySettingsModal');signOut()" style="margin-right:auto"><i class="ph ph-sign-out"></i> Sign Out</button>
       <button class="btn btn-ghost" onclick="closeModal('mySettingsModal')">Close</button>
     </div>
   </div>
@@ -1543,9 +1581,12 @@
 
 <script src="app.js"></script>
 
-<div id="undoToast">↩ Undo applied</div>
+<div id="undoToast">Undo applied</div>
 </body>
 </html>
+
+
+
 
 
 
