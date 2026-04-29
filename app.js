@@ -619,27 +619,27 @@ function calcJob(job) {
   const effectiveEmpShare   = 1 - effectiveOwnerShare;
   const ownerShare = effectiveOwnerShare;
   const jobType = _jobType(job);
-  const isHourly = false;
-  const isHourly2 = jobType === 'hourly';
-  const revenueItems = isHourly ? (job.revenueItems || []) : [];
+  const isLegacyHourly = false;
+  const isHourly = jobType === 'hourly';
+  const revenueItems = isLegacyHourly ? (job.revenueItems || []) : [];
   const revenueTotal = revenueItems.reduce((s, r) => s + (r.amount || 0), 0);
   const hoursTotal = (job.addOns || []).filter(a => !!a.isHours).reduce((s, a) => s + (a.amount || 0), 0);
   const materialChargeTotal = (job.materials || []).reduce((s, m) => s + Number(m.chargeAmount ?? m.amount ?? 0), 0);
 
-  const addOnTotal      = isHourly2 ? 0 : (job.addOns || []).reduce((s,a) => s + (a.amount||0), 0);
-  const subtractionTotal= isHourly2 ? 0 : (job.subtractions || []).reduce((s,a) => s + (a.amount||0), 0);
-  const contractTotal   = isHourly2
+  const addOnTotal      = isHourly ? 0 : (job.addOns || []).reduce((s,a) => s + (a.amount||0), 0);
+  const subtractionTotal= isHourly ? 0 : (job.subtractions || []).reduce((s,a) => s + (a.amount||0), 0);
+  const contractTotal   = isHourly
     ? _roundMoney(hoursTotal + materialChargeTotal)
-    : (isHourly ? revenueTotal : (job.quote || 0)) + addOnTotal - subtractionTotal;
+    : (isLegacyHourly ? revenueTotal : (job.quote || 0)) + addOnTotal - subtractionTotal;
 
   let collectedGross = 0, estimatedFees = 0, collectedTxns = 0;
-  if (isHourly2) {
+  if (isHourly) {
     if ((job.hourlyStatus || 'pending') === 'collected') {
       collectedGross += contractTotal;
       estimatedFees += contractTotal * feeRate;
       collectedTxns++;
     }
-  } else if (isHourly) {
+  } else if (isLegacyHourly) {
     revenueItems.forEach(r => {
       if ((r.status || 'pending') === 'collected') {
         const g = Number(r.amount || 0);
@@ -656,7 +656,7 @@ function calcJob(job) {
       }
     });
   }
-  if (!isHourly2) {
+  if (!isHourly) {
     (job.addOns || []).forEach(a => {
       if (a.status === 'collected') {
         collectedGross += a.amount||0; estimatedFees += (a.amount||0) * feeRate; collectedTxns++;
@@ -674,12 +674,12 @@ function calcJob(job) {
   const netRevenue = collectedGross - totalFees;
 
   let pendingGross = 0, pendingTxns = 0;
-  if (isHourly2) {
+  if (isHourly) {
     if ((job.hourlyStatus || 'pending') !== 'collected') {
       pendingGross += contractTotal;
       pendingTxns++;
     }
-  } else if (isHourly) {
+  } else if (isLegacyHourly) {
     revenueItems.forEach(r => {
       if ((r.status || 'pending') === 'collected') return;
       pendingGross += Number(r.amount || 0);
@@ -689,7 +689,7 @@ function calcJob(job) {
     (job.milestones || []).forEach(m => { if (m.status !== 'collected') pendingGross += (m.pct/100)*(job.quote||0); });
     (job.milestones || []).forEach(m => { if (m.status !== 'collected') pendingTxns++; });
   }
-  if (!isHourly2) {
+  if (!isHourly) {
     (job.addOns || []).forEach(a => { if (a.status !== 'collected') { pendingGross += a.amount||0; pendingTxns++; } });
     (job.subtractions || []).forEach(a => { if (a.status !== 'collected') pendingGross -= a.amount||0; });
   }
@@ -1305,9 +1305,9 @@ function jobIconButton({ title, icon, onclick = '', accent = false, disabled = f
 
 function jobCard(job) {
   const c = calcJob(job);
-  const isHourly2 = _jobType(job) === 'hourly';
-  const fadedStatStyle = isHourly2 ? 'opacity:0.45' : '';
-  const fadedValueStyle = isHourly2 ? 'color:var(--text3)!important' : '';
+  const isHourly = _jobType(job) === 'hourly';
+  const fadedStatStyle = isHourly ? 'opacity:0.45' : '';
+  const fadedValueStyle = isHourly ? 'color:var(--text3)!important' : '';
   const isZeroStat = (n) => Math.abs(Number(n || 0)) < 0.005;
   const statTileStyle = (n, extra = '') => {
     const faded = isZeroStat(n);
@@ -1337,8 +1337,8 @@ function jobCard(job) {
           <div style="font-size:15px;color:var(--text3);margin-top:2px;font-family:var(--mono)">${job.date||''}</div>
         </div>
         <div class="job-quick-stats job-quick-stats-grid">
-          <div class="job-stat" style="${statTileStyle(job.quote, fadedStatStyle)}"><div class="job-stat-label">Quote</div><div class="job-stat-value" style="${isHourly2 ? fadedValueStyle : statValueStyle(job.quote)}">${fmt(job.quote)}</div></div>
-          <div class="job-stat" style="${statTileStyle(c.addOnTotal-c.subtractionTotal, fadedStatStyle)}"><div class="job-stat-label">Adjust</div><div class="job-stat-value" style="${isHourly2 ? fadedValueStyle : statValueStyle(c.addOnTotal-c.subtractionTotal, c.addOnTotal-c.subtractionTotal>=0?'var(--purple)':'var(--red)')}">${fmt(c.addOnTotal-c.subtractionTotal)}</div></div>
+          <div class="job-stat" style="${statTileStyle(job.quote, fadedStatStyle)}"><div class="job-stat-label">Quote</div><div class="job-stat-value" style="${isHourly ? fadedValueStyle : statValueStyle(job.quote)}">${fmt(job.quote)}</div></div>
+          <div class="job-stat" style="${statTileStyle(c.addOnTotal-c.subtractionTotal, fadedStatStyle)}"><div class="job-stat-label">Adjust</div><div class="job-stat-value" style="${isHourly ? fadedValueStyle : statValueStyle(c.addOnTotal-c.subtractionTotal, c.addOnTotal-c.subtractionTotal>=0?'var(--purple)':'var(--red)')}">${fmt(c.addOnTotal-c.subtractionTotal)}</div></div>
           <div class="job-stat" style="${statTileStyle(c.contractTotal)}"><div class="job-stat-label">Contract</div><div class="job-stat-value" style="${statValueStyle(c.contractTotal)}">${fmt(c.contractTotal)}</div></div>
           <div class="job-stat" style="${statTileStyle(c.collectedGross)}"><div class="job-stat-label">Collected</div><div class="job-stat-value" style="${statValueStyle(c.collectedGross, 'var(--green)')}">${fmt(c.collectedGross)}</div></div>
           <div class="job-stat" style="${statTileStyle(c.outstanding)}"><div class="job-stat-label">Outstanding</div><div class="job-stat-value" style="${statValueStyle(c.outstanding, c.outstanding>0?'var(--blue)':'var(--text2)')}">${fmt(c.outstanding)}</div></div>
@@ -1647,11 +1647,11 @@ function jobDetail(job, c) {
     return '';
   };
   const jobType = _jobType(job);
-  const isHourly = false;
-  const isHourly2 = jobType === 'hourly';
+  const isLegacyHourly = false;
+  const isHourly = jobType === 'hourly';
 
   const hasLegacyPartial = !(job.partialCollections || []).length && (
-    (isHourly
+    (isLegacyHourly
       ? (job.revenueItems || []).some(r => !!r.partialState)
       : (job.milestones || []).some(m => !!m.partialState)) ||
     (job.addOns || []).some(a => !!a.partialState) ||
@@ -1826,7 +1826,7 @@ function jobDetail(job, c) {
     }).join('');
   };
   const addOnsHtml = renderAddOnRows(standardAddOnEntries, 'addon');
-  const hoursHtml = renderAddOnRows(hoursAddOnEntries, 'hours', !isHourly2);
+  const hoursHtml = renderAddOnRows(hoursAddOnEntries, 'hours', !isHourly);
 
   const partialHistoryHtml = (job.partialCollections || []).length
     ? `<div style="margin-top:10px;border-top:1px dashed var(--border);padding-top:10px">
@@ -1857,7 +1857,7 @@ function jobDetail(job, c) {
     <div class="line-item">
       <div class="line-item-label">${esc(m.label||'Materials')}<span class="tag ${m.who==='owner'?'tag-mine':'tag-his'}">${m.who==='owner'?'EHS':en}</span></div>
       <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
-        <div class="line-item-value red">${fmt(Number(isHourly2 ? (m.costAmount ?? m.amount ?? 0) : (m.amount ?? 0)))}</div>
+        <div class="line-item-value red">${fmt(Number(isHourly ? (m.costAmount ?? m.amount ?? 0) : (m.amount ?? 0)))}</div>
         <button class="btn btn-ghost btn-sm admin-only job-icon-btn" onclick="openAddItem('${job.id}','material','${m.id}')" title="Edit" aria-label="Edit">${jobIconSvg('edit')}</button>
         <button class="btn btn-danger btn-sm btn-icon-only admin-only" onclick="removeItem('${job.id}','materials',${i})" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
       </div>
@@ -1880,24 +1880,24 @@ function jobDetail(job, c) {
 
       <div class="detail-section">
         <div class="detail-section-header" style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
-          <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">${isHourly2 ? 'Hours' : 'Revenue'}</div>
-          ${isHourly2
+          <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">${isHourly ? 'Hours' : 'Revenue'}</div>
+          ${isHourly
             ? `<button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','hours')">+</button>`
             : `<button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openPartialCollect('${job.id}')">+</button>`}
         </div>
-        ${isHourly2
+        ${isHourly
           ? (hoursHtml || '<div style="color:var(--text3);font-size:16px;padding:4px 0">No hours entries yet.</div>')
-          : isHourly
+          : isLegacyHourly
           ? (hourlyRevenueHtml || '<div style="color:var(--text3);font-size:16px;padding:4px 0">No revenue entries yet.</div>')
           : `<div class="line-item line-item-simple mobile-base-quote-row"><div class="line-item-label">Base Quote</div><div class="line-item-value">${fmt(job.quote)}</div></div>${milestonesHtml}`
         }
-        ${isHourly2 ? '' : partialHistoryHtml}
-        ${isHourly2 ? '' : legacyPartialHtml}
+        ${isHourly ? '' : partialHistoryHtml}
+        ${isHourly ? '' : legacyPartialHtml}
       </div>
 
       <div class="detail-section">
         <div class="detail-section-title">Collected / Net Revenue</div>
-        ${isHourly2 ? `<div class="line-item"><div class="line-item-label">Invoice</div><div class="line-item-actions" style="display:flex;align-items:center;gap:8px"><div class="line-item-value dim">${fmt(c.contractTotal)}</div>${badgeHtml(job.hourlyStatus || 'pending',job.id,'hourlyRevenue',0)}</div></div>` : ''}
+        ${isHourly ? `<div class="line-item"><div class="line-item-label">Invoice</div><div class="line-item-actions" style="display:flex;align-items:center;gap:8px"><div class="line-item-value dim">${fmt(c.contractTotal)}</div>${badgeHtml(job.hourlyStatus || 'pending',job.id,'hourlyRevenue',0)}</div></div>` : ''}
         <div class="total-line"><span style="color:var(--text2)">Collected (gross)</span><span class="line-item-value green">${fmt(c.collectedGross)}</span></div>
         <div class="admin-only">
           <div class="line-item mobile-fee-row" style="padding-top:6px">
@@ -1908,7 +1908,7 @@ function jobDetail(job, c) {
         </div>
       </div>
 
-      ${isHourly2 ? '' : `<div class="detail-section">
+      ${isHourly ? '' : `<div class="detail-section">
         <div class="detail-section-header" style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
           <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Subtractions</div>
           <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','subtraction')">+</button>
@@ -1918,7 +1918,7 @@ function jobDetail(job, c) {
       </div>`}
 
       <div class="detail-section">
-        ${isHourly2 ? `
+        ${isHourly ? `
           <div class="detail-section-header" style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
             <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Materials</div>
             <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','material')">+</button>
@@ -1929,7 +1929,7 @@ function jobDetail(job, c) {
             <div class="line-item"><div class="line-item-label" style="font-size:16px">${en}'s materials</div><div class="line-item-value dim" style="font-size:16px">-${fmt(c.empMats)}</div></div>
           </div>
           <div class="total-line"><span style="color:var(--text2)">Total Materials</span><span class="line-item-value" style="color:var(--purple)">+${fmt((job.materials||[]).reduce((s,m)=>s+Number(m.chargeAmount ?? m.amount ?? 0),0))}</span></div>
-        ` : isHourly ? `
+        ` : isLegacyHourly ? `
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
             <div>
               <div class="detail-section-header" style="display:flex;align-items:center;gap:8px;margin-bottom:6px;padding-bottom:8px;border-bottom:1px solid var(--border)">
@@ -1956,7 +1956,7 @@ function jobDetail(job, c) {
         ${c.addOnTotal>0?`<div class="total-line"><span style="color:var(--text2)">Total</span><span class="line-item-value" style="color:var(--purple)">+${fmt(c.addOnTotal)}</span></div>`:''}
       </div>
 
-      ${isHourly2 ? '' : `<div class="detail-section">
+      ${isHourly ? '' : `<div class="detail-section">
         <div class="detail-section-header" style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
           <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Materials</div>
           <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','material')">+</button>
@@ -3750,7 +3750,7 @@ function saveJob() {
 function openAddItem(jobId, type, itemId = null) {
   addItemContext = { jobId, type, itemId };
   const job = state.jobs.find(j => j.id === jobId);
-  const isHourly2 = _jobType(job) === 'hourly';
+  const isHourly = _jobType(job) === 'hourly';
   const en = esc(getEmp(job?.employeeId)?.name || 'Employee');
   const isEdit = !!itemId;
   const titles = {
@@ -3908,7 +3908,7 @@ function saveItem() {
   const { jobId, type, itemId } = addItemContext;
   const job = state.jobs.find(j=>j.id===jobId);
   if (!job) return;
-  const isHourly2 = _jobType(job) === 'hourly';
+  const isHourly = _jobType(job) === 'hourly';
   const label  = document.getElementById('ai_label')?.value.trim() || '';
   let amount = parseFloat(document.getElementById('ai_amount')?.value) || 0;
   let hours = 0;
@@ -3929,7 +3929,7 @@ function saveItem() {
     showAlert('Please enter a non-zero amount.');
     return;
   }
-  if (isHourly2 && (type === 'revenue' || type === 'addon' || type === 'subtraction')) {
+  if (isHourly && (type === 'revenue' || type === 'addon' || type === 'subtraction')) {
     showAlert('Hourly uses Hours + Materials only for client billing.');
     return;
   }
