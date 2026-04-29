@@ -194,8 +194,10 @@ function migrateState(s) {
   (s.jobs || []).forEach(job => {
     delete job._expanded; // moved to local localStorage - not stored in Firestore
     if (!job.employeeId && defaultEmp) job.employeeId = defaultEmp.id;
-    if (job.jobType !== 'hourly' && job.jobType !== 'quoted') job.jobType = 'quoted';
+    if (job.jobType !== 'hourly' && job.jobType !== 'hourly2' && job.jobType !== 'quoted') job.jobType = 'quoted';
     if (job.hourlyRate === undefined) job.hourlyRate = 0;
+    if (!job.hourly2Status) job.hourly2Status = 'pending';
+    if (!job.hourly2SquareInvoiceId) job.hourly2SquareInvoiceId = '';
     if (job.repaymentMode === undefined) job.repaymentMode = false;
     if (job.contactName === undefined) job.contactName = '';
     if (!job.jobNotes) {
@@ -603,6 +605,7 @@ function getEmp(userId) {
   return state.users.find(u => u.id === userId);
 }
 function _jobType(job) {
+  if (job?.jobType === 'hourly2') return 'hourly2';
   return job?.jobType === 'hourly' ? 'hourly' : 'quoted';
 }
 
@@ -614,16 +617,28 @@ function calcJob(job) {
   const effectiveOwnerShare = job.repaymentMode ? (debtOwnerShare || 0.50) : normalOwnerShare;
   const effectiveEmpShare   = 1 - effectiveOwnerShare;
   const ownerShare = effectiveOwnerShare;
-  const isHourly = _jobType(job) === 'hourly';
+  const jobType = _jobType(job);
+  const isHourly = jobType === 'hourly';
+  const isHourly2 = jobType === 'hourly2';
   const revenueItems = isHourly ? (job.revenueItems || []) : [];
   const revenueTotal = revenueItems.reduce((s, r) => s + (r.amount || 0), 0);
+  const hoursTotal = (job.addOns || []).filter(a => !!a.isHours).reduce((s, a) => s + (a.amount || 0), 0);
+  const materialChargeTotal = (job.materials || []).reduce((s, m) => s + Number(m.chargeAmount ?? m.amount ?? 0), 0);
 
-  const addOnTotal      = (job.addOns       || []).reduce((s,a) => s + (a.amount||0), 0);
-  const subtractionTotal= (job.subtractions || []).reduce((s,a) => s + (a.amount||0), 0);
-  const contractTotal   = (isHourly ? revenueTotal : (job.quote || 0)) + addOnTotal - subtractionTotal;
+  const addOnTotal      = isHourly2 ? 0 : (job.addOns || []).reduce((s,a) => s + (a.amount||0), 0);
+  const subtractionTotal= isHourly2 ? 0 : (job.subtractions || []).reduce((s,a) => s + (a.amount||0), 0);
+  const contractTotal   = isHourly2
+    ? _roundMoney(hoursTotal + materialChargeTotal)
+    : (isHourly ? revenueTotal : (job.quote || 0)) + addOnTotal - subtractionTotal;
 
   let collectedGross = 0, estimatedFees = 0, collectedTxns = 0;
-  if (isHourly) {
+  if (isHourly2) {
+    if ((job.hourly2Status || 'pending') === 'collected') {
+      collectedGross += contractTotal;
+      estimatedFees += contractTotal * feeRate;
+      collectedTxns++;
+    }
+  } else if (isHourly) {
     revenueItems.forEach(r => {
       if ((r.status || 'pending') === 'collected') {
         const g = Number(r.amount || 0);
@@ -640,23 +655,30 @@ function calcJob(job) {
       }
     });
   }
-  (job.addOns || []).forEach(a => {
-    if (a.status === 'collected') {
-      collectedGross += a.amount||0; estimatedFees += (a.amount||0) * feeRate; collectedTxns++;
-    }
-  });
-  (job.subtractions || []).forEach(a => {
-    if (a.status === 'collected') {
-      collectedGross -= a.amount||0; estimatedFees -= (a.amount||0) * feeRate;
-    }
-  });
+  if (!isHourly2) {
+    (job.addOns || []).forEach(a => {
+      if (a.status === 'collected') {
+        collectedGross += a.amount||0; estimatedFees += (a.amount||0) * feeRate; collectedTxns++;
+      }
+    });
+    (job.subtractions || []).forEach(a => {
+      if (a.status === 'collected') {
+        collectedGross -= a.amount||0; estimatedFees -= (a.amount||0) * feeRate;
+      }
+    });
+  }
   estimatedFees += txnFee * collectedTxns;
   const manualFees = (job.fees || []).reduce((s,f) => s + (f.amount||0), 0);
   const totalFees = estimatedFees + manualFees;
   const netRevenue = collectedGross - totalFees;
 
   let pendingGross = 0, pendingTxns = 0;
-  if (isHourly) {
+  if (isHourly2) {
+    if ((job.hourly2Status || 'pending') !== 'collected') {
+      pendingGross += contractTotal;
+      pendingTxns++;
+    }
+  } else if (isHourly) {
     revenueItems.forEach(r => {
       if ((r.status || 'pending') === 'collected') return;
       pendingGross += Number(r.amount || 0);
@@ -666,11 +688,13 @@ function calcJob(job) {
     (job.milestones || []).forEach(m => { if (m.status !== 'collected') pendingGross += (m.pct/100)*(job.quote||0); });
     (job.milestones || []).forEach(m => { if (m.status !== 'collected') pendingTxns++; });
   }
-  (job.addOns       || []).forEach(a => { if (a.status !== 'collected') { pendingGross += a.amount||0; pendingTxns++; } });
-  (job.subtractions || []).forEach(a => { if (a.status !== 'collected') pendingGross -= a.amount||0; });
+  if (!isHourly2) {
+    (job.addOns || []).forEach(a => { if (a.status !== 'collected') { pendingGross += a.amount||0; pendingTxns++; } });
+    (job.subtractions || []).forEach(a => { if (a.status !== 'collected') pendingGross -= a.amount||0; });
+  }
 
-  const ownerMats = (job.materials||[]).filter(m=>m.who==='owner').reduce((s,m)=>s+(m.amount||0),0);
-  const empMats   = (job.materials||[]).filter(m=>m.who==='emp').reduce((s,m)=>s+(m.amount||0),0);
+  const ownerMats = (job.materials||[]).filter(m=>m.who==='owner').reduce((s,m)=>s+Number(m.costAmount ?? m.amount ?? 0),0);
+  const empMats   = (job.materials||[]).filter(m=>m.who==='emp').reduce((s,m)=>s+Number(m.costAmount ?? m.amount ?? 0),0);
   const totalMats = ownerMats + empMats;
 
   const profitPool  = Math.max(0, netRevenue - totalMats);
@@ -1280,6 +1304,19 @@ function jobIconButton({ title, icon, onclick = '', accent = false, disabled = f
 
 function jobCard(job) {
   const c = calcJob(job);
+  const isHourly2 = _jobType(job) === 'hourly2';
+  const fadedStatStyle = isHourly2 ? 'opacity:0.45' : '';
+  const fadedValueStyle = isHourly2 ? 'color:var(--text3)!important' : '';
+  const isZeroStat = (n) => Math.abs(Number(n || 0)) < 0.005;
+  const statTileStyle = (n, extra = '') => {
+    const faded = isZeroStat(n);
+    const base = faded ? 'opacity:0.45' : '';
+    return [base, extra].filter(Boolean).join(';');
+  };
+  const statValueStyle = (n, normalColor = '') => {
+    if (isZeroStat(n)) return 'color:var(--text3)!important';
+    return normalColor ? `color:${normalColor}` : '';
+  };
   const isExp = expandedJobs.has(job.id);
   const sc    = job.status === 'complete' ? 'complete' : 'active';
   const nc    = (job.jobNotes||[]).length;
@@ -1299,14 +1336,14 @@ function jobCard(job) {
           <div style="font-size:15px;color:var(--text3);margin-top:2px;font-family:var(--mono)">${job.date||''}</div>
         </div>
         <div class="job-quick-stats job-quick-stats-grid">
-          <div class="job-stat"><div class="job-stat-label">Quote</div><div class="job-stat-value">${fmt(job.quote)}</div></div>
-          <div class="job-stat"><div class="job-stat-label">Adjust</div><div class="job-stat-value" style="color:${c.addOnTotal-c.subtractionTotal>=0?'var(--purple)':'var(--red)'}">${fmt(c.addOnTotal-c.subtractionTotal)}</div></div>
-          <div class="job-stat"><div class="job-stat-label">Contract</div><div class="job-stat-value">${fmt(c.contractTotal)}</div></div>
-          <div class="job-stat"><div class="job-stat-label">Collected</div><div class="job-stat-value" style="color:var(--green)">${fmt(c.collectedGross)}</div></div>
-          <div class="job-stat"><div class="job-stat-label">Outstanding</div><div class="job-stat-value" style="color:${c.outstanding>0?'var(--blue)':'var(--text2)'}">${fmt(c.outstanding)}</div></div>
+          <div class="job-stat" style="${statTileStyle(job.quote, fadedStatStyle)}"><div class="job-stat-label">Quote</div><div class="job-stat-value" style="${isHourly2 ? fadedValueStyle : statValueStyle(job.quote)}">${fmt(job.quote)}</div></div>
+          <div class="job-stat" style="${statTileStyle(c.addOnTotal-c.subtractionTotal, fadedStatStyle)}"><div class="job-stat-label">Adjust</div><div class="job-stat-value" style="${isHourly2 ? fadedValueStyle : statValueStyle(c.addOnTotal-c.subtractionTotal, c.addOnTotal-c.subtractionTotal>=0?'var(--purple)':'var(--red)')}">${fmt(c.addOnTotal-c.subtractionTotal)}</div></div>
+          <div class="job-stat" style="${statTileStyle(c.contractTotal)}"><div class="job-stat-label">Contract</div><div class="job-stat-value" style="${statValueStyle(c.contractTotal)}">${fmt(c.contractTotal)}</div></div>
+          <div class="job-stat" style="${statTileStyle(c.collectedGross)}"><div class="job-stat-label">Collected</div><div class="job-stat-value" style="${statValueStyle(c.collectedGross, 'var(--green)')}">${fmt(c.collectedGross)}</div></div>
+          <div class="job-stat" style="${statTileStyle(c.outstanding)}"><div class="job-stat-label">Outstanding</div><div class="job-stat-value" style="${statValueStyle(c.outstanding, c.outstanding>0?'var(--blue)':'var(--text2)')}">${fmt(c.outstanding)}</div></div>
           <div class="job-emp-stats">
-            <div class="job-stat"><div class="job-stat-label">Emp. Balance</div><div class="job-stat-value" style="color:var(--accent)">${fmt(c.empBalance)}</div></div>
-            <div class="job-stat"><div class="job-stat-label">Potential</div><div class="job-stat-value" style="color:${c.potentialEmpBalance>0?'var(--yellow)':'var(--text2)'}">${fmt(c.potentialEmpBalance)}</div></div>
+            <div class="job-stat" style="${statTileStyle(c.empBalance)}"><div class="job-stat-label">Emp. Balance</div><div class="job-stat-value" style="${statValueStyle(c.empBalance, 'var(--accent)')}">${fmt(c.empBalance)}</div></div>
+            <div class="job-stat" style="${statTileStyle(c.potentialEmpBalance)}"><div class="job-stat-label">Potential</div><div class="job-stat-value" style="${statValueStyle(c.potentialEmpBalance, c.potentialEmpBalance>0?'var(--yellow)':'var(--text2)')}">${fmt(c.potentialEmpBalance)}</div></div>
           </div>
         </div>
       </div>
@@ -1339,7 +1376,10 @@ function badgeHtml(status, jobId, itemType, idx) {
   const item = job?.[itemType]?.[idx];
   const locked = itemType === 'subtractions' && !!item?.appliedByPartial;
   const title = locked ? 'Locked: applied via partial payment' : 'Click to cycle';
-  return `<span class="status-badge ${cls}"${admin && !locked ? ` onclick="cycleStatus('${jobId}','${itemType}',${idx})"` : ''} title="${title}">${label}</span>`;
+  const click = itemType === 'hourly2Revenue'
+    ? ` onclick="cycleHourly2Status('${jobId}')"`
+    : ` onclick="cycleStatus('${jobId}','${itemType}',${idx})"`;
+  return `<span class="status-badge ${cls}"${admin && !locked ? click : ''} title="${title}">${label}</span>`;
 }
 
 function payTypeBadgeHtml(payType, jobId, idx) {
@@ -1429,7 +1469,17 @@ async function _sendSquareInvoicePayload(payload) {
 
 function _jobInvoiceItems(job) {
   const refs = [], lineItems = [];
-  if (_jobType(job) === 'hourly') {
+  const jt = _jobType(job);
+  if (jt === 'hourly2') {
+    if ((job.hourly2Status || 'pending') !== 'collected' && !job.hourly2SquareInvoiceId) {
+      const c = calcJob(job);
+      const amountCents = Math.round((c.contractTotal || 0) * 100);
+      if (amountCents > 0) {
+        lineItems.push({ name: `${job.name} - Hourly2.0 Services`, amountCents });
+        refs.push({ kind:'job', jobId:job.id, itemType:'hourly2Revenue', itemId:'hourly2Revenue' });
+      }
+    }
+  } else if (jt === 'hourly') {
     (job.revenueItems || []).forEach(r => {
       if ((r.status || 'pending') === 'collected') return;
       if (r.squareInvoiceId) return;
@@ -1604,7 +1654,9 @@ function jobDetail(job, c) {
     }
     return '';
   };
-  const isHourly = _jobType(job) === 'hourly';
+  const jobType = _jobType(job);
+  const isHourly = jobType === 'hourly';
+  const isHourly2 = jobType === 'hourly2';
 
   const hasLegacyPartial = !(job.partialCollections || []).length && (
     (isHourly
@@ -1727,7 +1779,7 @@ function jobDetail(job, c) {
   const addOnEntries = (job.addOns || []).map((a, i) => ({ a, i }));
   const standardAddOnEntries = addOnEntries.filter(({ a }) => !a.isHours);
   const hoursAddOnEntries = addOnEntries.filter(({ a }) => !!a.isHours);
-  const renderAddOnRows = (entries, editType) => {
+  const renderAddOnRows = (entries, editType, showStatusBadge = true) => {
     const renderedGroups = new Set();
     return entries.map(({ a, i }) => {
       const groupId = a.partialGroupId || '';
@@ -1748,7 +1800,7 @@ function jobDetail(job, c) {
             </div>
             <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
               <div class="line-item-value ${st==='collected' ? 'green' : 'dim'}">${fmt(ga.amount)}</div>
-              ${badgeHtml(st,job.id,'addOns',gi)}
+              ${showStatusBadge ? badgeHtml(st,job.id,'addOns',gi) : ''}
               <button class="btn btn-ghost btn-sm admin-only job-icon-btn" onclick="openAddItem('${job.id}','${editType}','${ga.id}')" title="Edit" aria-label="Edit">${jobIconSvg('edit')}</button>
               <button class="btn btn-danger btn-sm btn-icon-only admin-only" onclick="removeItem('${job.id}','addOns',${gi})" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
             </div>
@@ -1764,16 +1816,17 @@ function jobDetail(job, c) {
       const st = a.status || 'pending';
       const tag = partialTag(a);
       const hoursMeta = a.isHours
-        ? `<span style="font-size:14px;color:var(--text3);margin-left:6px">${(Number(a.hours || 0)).toFixed(2)}h @ ${fmt(a.rate || 0)}</span>`
+        ? `<div style="font-size:14px;color:var(--text3);margin-top:2px">${(Number(a.hours || 0)).toFixed(2)}h @ ${fmt(a.rate || 0)}${a.date ? ` ${fmtDate(a.date)}` : ''}</div>`
         : '';
       return `<div class="line-item">
         <div class="line-item-label" style="display:flex;flex-direction:column;gap:4px">
-          <span>${esc(a.label || (a.isHours ? 'Hours' : 'Addition'))}${hoursMeta}${a.date ? `<span style="font-size:14px;color:var(--text3);margin-left:6px">${fmtDate(a.date)}</span>` : ''}</span>
+          <span>${esc(a.label || (a.isHours ? 'Hours' : 'Addition'))}${!a.isHours && a.date ? `<span style="font-size:14px;color:var(--text3);margin-left:6px">${fmtDate(a.date)}</span>` : ''}</span>
+          ${hoursMeta}
           ${tag ? `<span>${tag}</span>` : ''}
         </div>
         <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
           <div class="line-item-value ${st==='collected' ? 'green' : 'dim'}">${fmt(a.amount)}</div>
-          ${badgeHtml(st,job.id,'addOns',i)}
+          ${showStatusBadge ? badgeHtml(st,job.id,'addOns',i) : ''}
           <button class="btn btn-ghost btn-sm admin-only job-icon-btn" onclick="openAddItem('${job.id}','${editType}','${a.id}')" title="Edit" aria-label="Edit">${jobIconSvg('edit')}</button>
           <button class="btn btn-danger btn-sm btn-icon-only admin-only" onclick="removeItem('${job.id}','addOns',${i})" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
         </div>
@@ -1781,7 +1834,7 @@ function jobDetail(job, c) {
     }).join('');
   };
   const addOnsHtml = renderAddOnRows(standardAddOnEntries, 'addon');
-  const hoursHtml = renderAddOnRows(hoursAddOnEntries, 'hours');
+  const hoursHtml = renderAddOnRows(hoursAddOnEntries, 'hours', !isHourly2);
 
   const partialHistoryHtml = (job.partialCollections || []).length
     ? `<div style="margin-top:10px;border-top:1px dashed var(--border);padding-top:10px">
@@ -1812,7 +1865,7 @@ function jobDetail(job, c) {
     <div class="line-item">
       <div class="line-item-label">${esc(m.label||'Materials')}<span class="tag ${m.who==='owner'?'tag-mine':'tag-his'}">${m.who==='owner'?'EHS':en}</span></div>
       <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
-        <div class="line-item-value red">${fmt(m.amount)}</div>
+        <div class="line-item-value red">${fmt(Number(isHourly2 ? (m.costAmount ?? m.amount ?? 0) : (m.amount ?? 0)))}</div>
         <button class="btn btn-ghost btn-sm admin-only job-icon-btn" onclick="openAddItem('${job.id}','material','${m.id}')" title="Edit" aria-label="Edit">${jobIconSvg('edit')}</button>
         <button class="btn btn-danger btn-sm btn-icon-only admin-only" onclick="removeItem('${job.id}','materials',${i})" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
       </div>
@@ -1835,19 +1888,24 @@ function jobDetail(job, c) {
 
       <div class="detail-section">
         <div class="detail-section-header" style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
-          <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Revenue</div>
-          <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openPartialCollect('${job.id}')">+</button>
+          <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">${isHourly2 ? 'Hours' : 'Revenue'}</div>
+          ${isHourly2
+            ? `<button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','hours')">+</button>`
+            : `<button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openPartialCollect('${job.id}')">+</button>`}
         </div>
-        ${isHourly
+        ${isHourly2
+          ? (hoursHtml || '<div style="color:var(--text3);font-size:16px;padding:4px 0">No hours entries yet.</div>')
+          : isHourly
           ? (hourlyRevenueHtml || '<div style="color:var(--text3);font-size:16px;padding:4px 0">No revenue entries yet.</div>')
           : `<div class="line-item line-item-simple mobile-base-quote-row"><div class="line-item-label">Base Quote</div><div class="line-item-value">${fmt(job.quote)}</div></div>${milestonesHtml}`
         }
-        ${partialHistoryHtml}
-        ${legacyPartialHtml}
+        ${isHourly2 ? '' : partialHistoryHtml}
+        ${isHourly2 ? '' : legacyPartialHtml}
       </div>
 
       <div class="detail-section">
         <div class="detail-section-title">Collected / Net Revenue</div>
+        ${isHourly2 ? `<div class="line-item"><div class="line-item-label">Invoice</div><div class="line-item-actions" style="display:flex;align-items:center;gap:8px"><div class="line-item-value dim">${fmt(c.contractTotal)}</div>${badgeHtml(job.hourly2Status || 'pending',job.id,'hourly2Revenue',0)}</div></div>` : ''}
         <div class="total-line"><span style="color:var(--text2)">Collected (gross)</span><span class="line-item-value green">${fmt(c.collectedGross)}</span></div>
         <div class="admin-only">
           <div class="line-item mobile-fee-row" style="padding-top:6px">
@@ -1858,17 +1916,28 @@ function jobDetail(job, c) {
         </div>
       </div>
 
-      <div class="detail-section">
+      ${isHourly2 ? '' : `<div class="detail-section">
         <div class="detail-section-header" style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
           <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Subtractions</div>
           <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','subtraction')">+</button>
         </div>
         ${subtractionsHtml||'<div style="color:var(--text3);font-size:16px;padding:4px 0">None</div>'}
         ${c.subtractionTotal>0?`<div class="total-line"><span style="color:var(--text2)">Total</span><span class="line-item-value red">-${fmt(c.subtractionTotal)}</span></div>`:''}
-      </div>
+      </div>`}
 
       <div class="detail-section">
-        ${isHourly ? `
+        ${isHourly2 ? `
+          <div class="detail-section-header" style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+            <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Materials</div>
+            <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','material')">+</button>
+          </div>
+          ${matsHtml||'<div style="color:var(--text3);font-size:16px;padding:4px 0">None logged</div>'}
+          <div style="margin-top:4px;padding-top:4px">
+            <div class="line-item admin-only"><div class="line-item-label" style="font-size:16px">EHS materials</div><div class="line-item-value dim" style="font-size:16px">-${fmt(c.ownerMats)}</div></div>
+            <div class="line-item"><div class="line-item-label" style="font-size:16px">${en}'s materials</div><div class="line-item-value dim" style="font-size:16px">-${fmt(c.empMats)}</div></div>
+          </div>
+          <div class="total-line"><span style="color:var(--text2)">Total Materials</span><span class="line-item-value" style="color:var(--purple)">+${fmt((job.materials||[]).reduce((s,m)=>s+Number(m.chargeAmount ?? m.amount ?? 0),0))}</span></div>
+        ` : isHourly ? `
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
             <div>
               <div class="detail-section-header" style="display:flex;align-items:center;gap:8px;margin-bottom:6px;padding-bottom:8px;border-bottom:1px solid var(--border)">
@@ -1895,7 +1964,7 @@ function jobDetail(job, c) {
         ${c.addOnTotal>0?`<div class="total-line"><span style="color:var(--text2)">Total</span><span class="line-item-value" style="color:var(--purple)">+${fmt(c.addOnTotal)}</span></div>`:''}
       </div>
 
-      <div class="detail-section">
+      ${isHourly2 ? '' : `<div class="detail-section">
         <div class="detail-section-header" style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
           <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Materials</div>
           <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','material')">+</button>
@@ -1906,7 +1975,7 @@ function jobDetail(job, c) {
           <div class="line-item"><div class="line-item-label" style="font-size:16px">${en}'s materials</div><div class="line-item-value dim" style="font-size:16px">-${fmt(c.empMats)}</div></div>
         </div>
         <div class="total-line"><span style="color:var(--text2)">Total Materials</span><span class="line-item-value red">-${fmt(c.totalMats)}</span></div>
-      </div>
+      </div>`}
 
       <div class="detail-section">
         <div class="detail-section-header" style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
@@ -3166,6 +3235,22 @@ function cycleStatus(jobId, itemType, idx) {
   item.status = cycle[item.status||'pending'];
   save(); renderJobs();
 }
+function cycleHourly2Status(jobId) {
+  const job = state.jobs.find(j=>j.id===jobId);
+  if (!job || _jobType(job) !== 'hourly2') return;
+  const curr = job.hourly2Status || 'pending';
+  const cycle = { pending:'invoiced', invoiced:'collected', collected:'pending' };
+  const doIt = () => {
+    job.hourly2Status = cycle[curr] || 'pending';
+    if (job.hourly2Status === 'pending') job.hourly2SquareInvoiceId = '';
+    save(); renderJobs();
+  };
+  if (curr === 'collected') {
+    showConfirm('Mark this as Pending? This will remove it from collected revenue.', doIt);
+    return;
+  }
+  doIt();
+}
 function toggleComplete(id) {
   const j = state.jobs.find(j=>j.id===id);
   if (j) { j.status = j.status==='complete'?'active':'complete'; save(); renderJobs(); }
@@ -3343,28 +3428,29 @@ let milestoneMode = 'single';
 let jobTypeMode = 'quoted';
 let jobSetupMode = 'unified';
 function refreshJobSetupButtons() {
-  ['unified', 'itemized', 'hourly'].forEach(mode => {
+  ['unified', 'itemized', 'hourly', 'hourly2'].forEach(mode => {
     const btn = document.getElementById(`js_mode_${mode}`);
     if (!btn) return;
     btn.className = `btn ${jobSetupMode === mode ? 'btn-primary selected' : 'btn-ghost'} btn-sm user-pick-btn`;
   });
 }
 function setJobType(type) {
-  jobTypeMode = type === 'hourly' ? 'hourly' : 'quoted';
+  jobTypeMode = type === 'hourly2' ? 'hourly2' : type === 'hourly' ? 'hourly' : 'quoted';
   const typeEl = document.getElementById('f_jobType');
   if (typeEl && typeEl.value !== jobTypeMode) typeEl.value = jobTypeMode;
   const quotedWrap = document.getElementById('jobQuotedFields');
   const hourlyHint = document.getElementById('jobHourlyHint');
   const hourlyRateWrap = document.getElementById('f_hourly_rate_wrap');
-  if (quotedWrap) quotedWrap.style.display = jobTypeMode === 'hourly' ? 'none' : '';
-  if (hourlyHint) hourlyHint.style.display = jobTypeMode === 'hourly' ? '' : 'none';
-  if (hourlyRateWrap) hourlyRateWrap.style.display = jobTypeMode === 'hourly' ? '' : 'none';
+  const hourlyLike = jobTypeMode === 'hourly' || jobTypeMode === 'hourly2';
+  if (quotedWrap) quotedWrap.style.display = hourlyLike ? 'none' : '';
+  if (hourlyHint) hourlyHint.style.display = hourlyLike ? '' : 'none';
+  if (hourlyRateWrap) hourlyRateWrap.style.display = hourlyLike ? '' : 'none';
 }
 function setJobSetupMode(mode) {
-  jobSetupMode = mode === 'itemized' ? 'itemized' : mode === 'hourly' ? 'hourly' : 'unified';
-  const isHourly = jobSetupMode === 'hourly';
+  jobSetupMode = mode === 'itemized' ? 'itemized' : mode === 'hourly2' ? 'hourly2' : mode === 'hourly' ? 'hourly' : 'unified';
+  const isHourly = jobSetupMode === 'hourly' || jobSetupMode === 'hourly2';
   const itemized = jobSetupMode === 'itemized';
-  setJobType(isHourly ? 'hourly' : 'quoted');
+  setJobType(jobSetupMode === 'hourly2' ? 'hourly2' : isHourly ? 'hourly' : 'quoted');
   const itemizedEl = document.getElementById('f_itemized');
   if (itemizedEl) itemizedEl.checked = itemized;
   toggleItemizedQuote();
@@ -3372,7 +3458,8 @@ function setJobSetupMode(mode) {
 }
 function onJobTypeChange() {
   const type = document.getElementById('f_jobType')?.value || 'quoted';
-  if (type === 'hourly') setJobSetupMode('hourly');
+  if (type === 'hourly2') setJobSetupMode('hourly2');
+  else if (type === 'hourly') setJobSetupMode('hourly');
   else setJobSetupMode(document.getElementById('f_itemized')?.checked ? 'itemized' : 'unified');
 }
 function setMilestoneMode(mode) {
@@ -3413,7 +3500,7 @@ function setJobFinancialEditLock(locked) {
   const note = document.getElementById('jobFinancialLockNote');
   if (note) note.style.display = locked ? '' : 'none';
 
-  const ids = ['f_jobType', 'f_hourlyRate', 'f_itemized', 'f_quote', 'quoteAddItemBtn', 'ms_btn_single', 'ms_btn_default', 'ms_btn_custom', 'milestoneAddBtn', 'js_mode_unified', 'js_mode_itemized', 'js_mode_hourly'];
+  const ids = ['f_jobType', 'f_hourlyRate', 'f_itemized', 'f_quote', 'quoteAddItemBtn', 'ms_btn_single', 'ms_btn_default', 'ms_btn_custom', 'milestoneAddBtn', 'js_mode_unified', 'js_mode_itemized', 'js_mode_hourly', 'js_mode_hourly2'];
   ids.forEach(id => {
     const el = document.getElementById(id);
     if (el) el.disabled = !!locked;
@@ -3469,8 +3556,8 @@ function editJob(id) {
   if (job.isItemized && job.quoteItems?.length) {
     job.quoteItems.forEach(qi => addQuoteItemField(qi.label, qi.amount));
   }
-  setJobSetupMode(jobType === 'hourly' ? 'hourly' : (job.isItemized ? 'itemized' : 'unified'));
-  if (jobType === 'hourly') {
+  setJobSetupMode(jobType === 'hourly2' ? 'hourly2' : jobType === 'hourly' ? 'hourly' : (job.isItemized ? 'itemized' : 'unified'));
+  if (jobType === 'hourly' || jobType === 'hourly2') {
     milestoneMode = 'single';
     document.getElementById('milestoneList').innerHTML = '';
     milestoneCount = 0;
@@ -3579,8 +3666,9 @@ function saveJob() {
   const name        = document.getElementById('f_name').value.trim();
   const contactName = document.getElementById('f_contact').value.trim();
   const date        = document.getElementById('f_date').value;
-  const jobType     = (document.getElementById('f_jobType')?.value === 'hourly') ? 'hourly' : 'quoted';
-  const isHourly    = jobType === 'hourly';
+  const selectedType = document.getElementById('f_jobType')?.value || 'quoted';
+  const jobType     = selectedType === 'hourly2' ? 'hourly2' : selectedType === 'hourly' ? 'hourly' : 'quoted';
+  const isHourly    = jobType === 'hourly' || jobType === 'hourly2';
   const hourlyRate  = _roundMoney(parseFloat(document.getElementById('f_hourlyRate')?.value) || 0);
   const isItemized  = !isHourly && document.getElementById('f_itemized').checked;
   if (!name) { showAlert('Please enter a client name.'); return; }
@@ -3660,6 +3748,7 @@ function saveJob() {
     state.jobs.push({ id:newId, name, contactName, quote, date, isItemized, quoteItems, status:'active',
       milestones, addOns:[], subtractions:[], materials:[], advances:[], fees:[], jobNotes:[], hours:[], partialCollections:[], repaymentMode:false,
       revenueItems:[], jobType, hourlyRate,
+      hourly2Status:'pending', hourly2SquareInvoiceId:'',
       employeeId: employeeId || '' });
   }
   save(); renderJobs(); closeModal('jobModal');
@@ -3670,6 +3759,7 @@ function saveJob() {
 function openAddItem(jobId, type, itemId = null) {
   addItemContext = { jobId, type, itemId };
   const job = state.jobs.find(j => j.id === jobId);
+  const isHourly2 = _jobType(job) === 'hourly2';
   const en = esc(getEmp(job?.employeeId)?.name || 'Employee');
   const isEdit = !!itemId;
   const titles = {
@@ -3827,6 +3917,7 @@ function saveItem() {
   const { jobId, type, itemId } = addItemContext;
   const job = state.jobs.find(j=>j.id===jobId);
   if (!job) return;
+  const isHourly2 = _jobType(job) === 'hourly2';
   const label  = document.getElementById('ai_label')?.value.trim() || '';
   let amount = parseFloat(document.getElementById('ai_amount')?.value) || 0;
   let hours = 0;
@@ -3839,8 +3930,16 @@ function saveItem() {
       showAlert('Please enter valid hours and hourly rate.');
       return;
     }
-  } else if (amount <= 0) {
+  } else if (type !== 'advance' && amount <= 0) {
     showAlert('Please enter a valid amount.');
+    return;
+  }
+  if (type === 'advance' && Math.abs(amount) < 0.000001) {
+    showAlert('Please enter a non-zero amount.');
+    return;
+  }
+  if (isHourly2 && (type === 'revenue' || type === 'addon' || type === 'subtraction')) {
+    showAlert('Hourly2.0 uses Hours + Materials only for client billing.');
     return;
   }
   if (type==='revenue') {
@@ -3898,11 +3997,18 @@ function saveItem() {
     }
   } else if (type==='material') {
     const who = document.getElementById('ai_who').value;
+    const costAmount = amount;
     if (itemId) {
       const item = job.materials.find(x=>x.id===itemId);
-      if (item) { item.label=label; item.amount=amount; item.who=who; }
+      if (item) {
+        item.label = label;
+        item.amount = amount;
+        item.who = who;
+        item.chargeAmount = amount;
+        item.costAmount = costAmount;
+      }
     } else {
-      job.materials.push({ id:uid(), label, amount, who });
+      job.materials.push({ id:uid(), label, amount, who, chargeAmount: amount, costAmount: costAmount });
     }
   } else if (type==='advance') {
     const date = document.getElementById('ai_date')?.value||'';

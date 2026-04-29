@@ -734,10 +734,12 @@
           <button type="button" class="btn btn-ghost btn-sm user-pick-btn" id="js_mode_unified" onclick="setJobSetupMode('unified')">Unified Quote</button>
           <button type="button" class="btn btn-ghost btn-sm user-pick-btn" id="js_mode_itemized" onclick="setJobSetupMode('itemized')">Itemized Quote</button>
           <button type="button" class="btn btn-ghost btn-sm user-pick-btn" id="js_mode_hourly" onclick="setJobSetupMode('hourly')">Hourly</button>
+          <button type="button" class="btn btn-ghost btn-sm user-pick-btn" id="js_mode_hourly2" onclick="setJobSetupMode('hourly2')">Hourly2.0</button>
         </div>
         <select class="form-input" id="f_jobType" onchange="onJobTypeChange()" style="display:none">
           <option value="quoted">Quoted Job</option>
           <option value="hourly">Hourly + Materials</option>
+          <option value="hourly2">Hourly2.0</option>
         </select>
         <input type="checkbox" id="f_itemized" onchange="toggleItemizedQuote()" style="display:none" />
       </div>
@@ -777,7 +779,7 @@
       </div>
       </div>
       <div id="jobHourlyHint" style="display:none;margin-top:2px;padding:10px 12px;border:1px solid var(--border2);border-radius:3px;background:var(--bg3);font-family:var(--mono);font-size:12px;color:var(--text2)">
-        Hourly + Materials jobs do not require a starting quote. Use Revenue to add billable entries, then log collections as payments are received.
+        Hourly modes do not require a starting quote. Hourly2.0 uses Hours + Materials as the invoice total with one billing status toggle.
       </div>
     </div>
     <div class="modal-actions">
@@ -804,7 +806,7 @@
   <div class="modal settings-modal">
     <div class="settings-modal-header">
       <div class="modal-title">Settings</div>
-      <span style="font-family:var(--mono);font-size:12px;color:var(--text3);cursor:pointer;text-decoration:underline dotted" onclick="openChangelog()">v1.21</span>
+      <span style="font-family:var(--mono);font-size:12px;color:var(--text3);cursor:pointer;text-decoration:underline dotted" onclick="openChangelog()">v1.22</span>
     </div>
     <div class="settings-body">
       <div class="settings-nav-wrap">
@@ -1142,7 +1144,16 @@
     <div class="modal-title">Version History</div>
     <div style="font-family:var(--mono);font-size:13px;line-height:1.7;color:var(--text2)">
       <div style="margin-bottom:14px">
-        <div style="color:var(--accent);font-size:14px;margin-bottom:4px">v1.21 - Apr 2026</div>
+        <div style="color:var(--accent);font-size:14px;margin-bottom:4px">v1.22 - Apr 2026</div>
+        <div>- Added a new 4th job mode: Hourly2.0, while keeping existing Hourly jobs unchanged for transition safety</div>
+        <div>- Hourly2.0 now uses Hours + Materials as the source of truth for invoice totals and revenue math</div>
+        <div>- Hourly2.0 uses a single billing status toggle (Pending/Invoiced/Collected) instead of per-line revenue toggles</div>
+        <div>- Hourly2.0 hides legacy Revenue/Additions/Subtractions sections and keeps the flow focused on Hours + Materials</div>
+        <div>- Materials in Hourly2.0 now track both client charge and material cost for employee/company reimbursement splits</div>
+        <div>- Payout/Split Pay calculations now include Hourly2.0 collected/net values via shared job calc wiring</div>
+      </div>
+      <div style="margin-bottom:14px">
+        <div style="color:var(--text3);font-size:14px;margin-bottom:4px">v1.21 - Apr 2026</div>
         <div>- Added dedicated Hourly + Materials workflow enhancements: hourly rate on job setup, Hours entry modal, and automatic hours x rate totals</div>
         <div>- Additions area for hourly jobs now supports separate Additions and Hours columns while still rolling into one total job cost</div>
         <div>- Revenue flow for hourly jobs simplified to a single + action (removed separate Entry button)</div>
