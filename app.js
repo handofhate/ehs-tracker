@@ -1,4 +1,4 @@
-﻿// â”€â”€â”€ FIREBASE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── FIREBASE ─────────────────────────────────────────────────────────────────
 const firebaseConfig = {
   apiKey: "AIzaSyCZyxBVvINYbPeWSDkNPZsxnw9f_6uGEV4",
   authDomain: "ehs-tracker-7d6ed.firebaseapp.com",
@@ -11,7 +11,7 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const DOC = db.collection('jobtracker').doc('state');
 
-// â”€â”€â”€ STATE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── STATE ────────────────────────────────────────────────────────────────────
 let state = {
   settings: {
     empName: 'Employee',
@@ -109,7 +109,7 @@ function saveExpandedClientsState() {
   try { localStorage.setItem(_uiKey('expClients'), JSON.stringify([...expandedClients])); } catch(e) {}
 }
 
-// â”€â”€â”€ PERSIST â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── PERSIST ─────────────────────────────────────────────────────────────────
 function migrateState(s) {
   if (!s.settings.empName) s.settings.empName = 'Employee';
   if (s.settings.historicalAdj !== undefined && s.settings.debtOriginal === undefined) {
@@ -194,10 +194,11 @@ function migrateState(s) {
   (s.jobs || []).forEach(job => {
     delete job._expanded; // moved to local localStorage - not stored in Firestore
     if (!job.employeeId && defaultEmp) job.employeeId = defaultEmp.id;
-    if (job.jobType !== 'hourly' && job.jobType !== 'hourly2' && job.jobType !== 'quoted') job.jobType = 'quoted';
+    if (job.jobType === 'hourly2') job.jobType = 'hourly';
+    if (job.jobType !== 'hourly' && job.jobType !== 'quoted') job.jobType = 'quoted';
     if (job.hourlyRate === undefined) job.hourlyRate = 0;
-    if (!job.hourly2Status) job.hourly2Status = 'pending';
-    if (!job.hourly2SquareInvoiceId) job.hourly2SquareInvoiceId = '';
+    if (!job.hourlyStatus) job.hourlyStatus = 'pending';
+    if (!job.hourlySquareInvoiceId) job.hourlySquareInvoiceId = '';
     if (job.repaymentMode === undefined) job.repaymentMode = false;
     if (job.contactName === undefined) job.contactName = '';
     if (!job.jobNotes) {
@@ -591,7 +592,7 @@ async function callSquareFn(endpoint, payload = {}) {
   return json;
 }
 
-// â”€â”€â”€ CALCULATIONS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── CALCULATIONS ─────────────────────────────────────────────────────────────
 function calcSplit(gross, { empShare, feeRate, txnFee = 0, txnCount = 0 }) {
   const normalizedGross = _roundMoney(gross);
   const totalFees  = _roundMoney(normalizedGross * feeRate + txnFee * txnCount);
@@ -605,8 +606,8 @@ function getEmp(userId) {
   return state.users.find(u => u.id === userId);
 }
 function _jobType(job) {
-  if (job?.jobType === 'hourly2') return 'hourly2';
-  return job?.jobType === 'hourly' ? 'hourly' : 'quoted';
+  if (job?.jobType === 'hourly' || job?.jobType === 'hourly2') return 'hourly';
+  return 'quoted';
 }
 
 function calcJob(job) {
@@ -618,8 +619,8 @@ function calcJob(job) {
   const effectiveEmpShare   = 1 - effectiveOwnerShare;
   const ownerShare = effectiveOwnerShare;
   const jobType = _jobType(job);
-  const isHourly = jobType === 'hourly';
-  const isHourly2 = jobType === 'hourly2';
+  const isHourly = false;
+  const isHourly2 = jobType === 'hourly';
   const revenueItems = isHourly ? (job.revenueItems || []) : [];
   const revenueTotal = revenueItems.reduce((s, r) => s + (r.amount || 0), 0);
   const hoursTotal = (job.addOns || []).filter(a => !!a.isHours).reduce((s, a) => s + (a.amount || 0), 0);
@@ -633,7 +634,7 @@ function calcJob(job) {
 
   let collectedGross = 0, estimatedFees = 0, collectedTxns = 0;
   if (isHourly2) {
-    if ((job.hourly2Status || 'pending') === 'collected') {
+    if ((job.hourlyStatus || 'pending') === 'collected') {
       collectedGross += contractTotal;
       estimatedFees += contractTotal * feeRate;
       collectedTxns++;
@@ -674,7 +675,7 @@ function calcJob(job) {
 
   let pendingGross = 0, pendingTxns = 0;
   if (isHourly2) {
-    if ((job.hourly2Status || 'pending') !== 'collected') {
+    if ((job.hourlyStatus || 'pending') !== 'collected') {
       pendingGross += contractTotal;
       pendingTxns++;
     }
@@ -794,7 +795,7 @@ function syncHomewatchAutoInvoices() {
   return changed;
 }
 
-// â”€â”€â”€ HOMEWATCH â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── HOMEWATCH ────────────────────────────────────────────────────────────────
 let editingHWId  = null;
 let hwPayContext = null;
 let hwPayMode    = 'payment'; // 'payment' | 'advance'
@@ -1029,7 +1030,7 @@ function cycleHWPayStatus(hwId, payId) {
   } else { doIt(); }
 }
 
-// â”€â”€â”€ DEBT PANEL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── DEBT PANEL ───────────────────────────────────────────────────────────────
 function renderDebtPanel() {
   const debtEl = document.getElementById('debtPanel');
   if (!debtEl) return;
@@ -1110,7 +1111,7 @@ function renderDebtPanel() {
     </div>`;
 }
 
-// â”€â”€â”€ SUMMARY â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── SUMMARY ─────────────────────────────────────────────────────────────────
 function renderSummary() {
   renderDebtPanel();
   renderEmpSummary();
@@ -1204,7 +1205,7 @@ function renderEmpSummary() {
   const pausedHW = (state.homewatch||[]).filter(hw => hw.status === 'paused' && hw.employeeId === myId);
   const allHW    = (state.homewatch||[]).filter(hw => hw.employeeId === myId);
 
-  // Currently owed (collected but not yet paid out â€” includes paused clients with collected invoices)
+  // Currently owed (collected but not yet paid out — includes paused clients with collected invoices)
   let tOwed = 0;
   active.forEach(j => { tOwed += calcJob(j).empBalance; });
   allHW.forEach(hw => { tOwed += calcHW(hw).empBalance; });
@@ -1258,7 +1259,7 @@ function renderEmpSummary() {
     <div class="summary-card"><div class="summary-label">Potential Pay</div><div class="summary-value orange">${fmt(Math.max(0,tPotential))}</div><div class="summary-sub">if all active work completes</div></div>`;
 }
 
-// â”€â”€â”€ RENDER JOBS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── RENDER JOBS ─────────────────────────────────────────────────────────────
 function renderJobs() {
   renderSummary();
   const isAdmin = currentUser?.isAdmin;
@@ -1304,7 +1305,7 @@ function jobIconButton({ title, icon, onclick = '', accent = false, disabled = f
 
 function jobCard(job) {
   const c = calcJob(job);
-  const isHourly2 = _jobType(job) === 'hourly2';
+  const isHourly2 = _jobType(job) === 'hourly';
   const fadedStatStyle = isHourly2 ? 'opacity:0.45' : '';
   const fadedValueStyle = isHourly2 ? 'color:var(--text3)!important' : '';
   const isZeroStat = (n) => Math.abs(Number(n || 0)) < 0.005;
@@ -1376,8 +1377,8 @@ function badgeHtml(status, jobId, itemType, idx) {
   const item = job?.[itemType]?.[idx];
   const locked = itemType === 'subtractions' && !!item?.appliedByPartial;
   const title = locked ? 'Locked: applied via partial payment' : 'Click to cycle';
-  const click = itemType === 'hourly2Revenue'
-    ? ` onclick="cycleHourly2Status('${jobId}')"`
+  const click = itemType === 'hourlyRevenue'
+    ? ` onclick="cycleHourlyStatus('${jobId}')"`
     : ` onclick="cycleStatus('${jobId}','${itemType}',${idx})"`;
   return `<span class="status-badge ${cls}"${admin && !locked ? click : ''} title="${title}">${label}</span>`;
 }
@@ -1470,24 +1471,15 @@ async function _sendSquareInvoicePayload(payload) {
 function _jobInvoiceItems(job) {
   const refs = [], lineItems = [];
   const jt = _jobType(job);
-  if (jt === 'hourly2') {
-    if ((job.hourly2Status || 'pending') !== 'collected' && !job.hourly2SquareInvoiceId) {
+  if (jt === 'hourly') {
+    if ((job.hourlyStatus || 'pending') !== 'collected' && !job.hourlySquareInvoiceId) {
       const c = calcJob(job);
       const amountCents = Math.round((c.contractTotal || 0) * 100);
       if (amountCents > 0) {
-        lineItems.push({ name: `${job.name} - Hourly2.0 Services`, amountCents });
-        refs.push({ kind:'job', jobId:job.id, itemType:'hourly2Revenue', itemId:'hourly2Revenue' });
+        lineItems.push({ name: `${job.name} - Hourly Services`, amountCents });
+        refs.push({ kind:'job', jobId:job.id, itemType:'hourlyRevenue', itemId:'hourlyRevenue' });
       }
     }
-  } else if (jt === 'hourly') {
-    (job.revenueItems || []).forEach(r => {
-      if ((r.status || 'pending') === 'collected') return;
-      if (r.squareInvoiceId) return;
-      const amountCents = Math.round((r.amount || 0) * 100);
-      if (!amountCents) return;
-      lineItems.push({ name: `${job.name} - ${r.label || 'Revenue'}`, amountCents });
-      refs.push({ kind:'job', jobId:job.id, itemType:'revenueItems', itemId:r.id });
-    });
   } else {
     (job.milestones || []).forEach(m => {
       if ((m.status || 'pending') === 'collected') return;
@@ -1655,8 +1647,8 @@ function jobDetail(job, c) {
     return '';
   };
   const jobType = _jobType(job);
-  const isHourly = jobType === 'hourly';
-  const isHourly2 = jobType === 'hourly2';
+  const isHourly = false;
+  const isHourly2 = jobType === 'hourly';
 
   const hasLegacyPartial = !(job.partialCollections || []).length && (
     (isHourly
@@ -1905,7 +1897,7 @@ function jobDetail(job, c) {
 
       <div class="detail-section">
         <div class="detail-section-title">Collected / Net Revenue</div>
-        ${isHourly2 ? `<div class="line-item"><div class="line-item-label">Invoice</div><div class="line-item-actions" style="display:flex;align-items:center;gap:8px"><div class="line-item-value dim">${fmt(c.contractTotal)}</div>${badgeHtml(job.hourly2Status || 'pending',job.id,'hourly2Revenue',0)}</div></div>` : ''}
+        ${isHourly2 ? `<div class="line-item"><div class="line-item-label">Invoice</div><div class="line-item-actions" style="display:flex;align-items:center;gap:8px"><div class="line-item-value dim">${fmt(c.contractTotal)}</div>${badgeHtml(job.hourlyStatus || 'pending',job.id,'hourlyRevenue',0)}</div></div>` : ''}
         <div class="total-line"><span style="color:var(--text2)">Collected (gross)</span><span class="line-item-value green">${fmt(c.collectedGross)}</span></div>
         <div class="admin-only">
           <div class="line-item mobile-fee-row" style="padding-top:6px">
@@ -2030,8 +2022,8 @@ function jobDetail(job, c) {
   </div>`;
 }
 
-// â”€â”€â”€ INTERACTIONS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// â”€â”€â”€ DEBT PAYMENTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── INTERACTIONS ─────────────────────────────────────────────────────────────
+// ─── DEBT PAYMENTS ────────────────────────────────────────────────────────────
 function openAddDebtPayment() {
   document.getElementById('dp_label').value  = '';
   document.getElementById('dp_amount').value = '';
@@ -2246,7 +2238,7 @@ function renderSplitLedger() {
   }).join('');
 }
 
-// â”€â”€â”€ SPLIT PAY â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── SPLIT PAY ────────────────────────────────────────────────────────────────
 function _buildPayOutRows(employeeId) {
   if (!employeeId) return [];
   const rows = [];
@@ -2567,7 +2559,7 @@ async function saveSplitPay() {
   }
 }
 
-// â”€â”€â”€ PARTIAL COLLECTION (JOBS) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── PARTIAL COLLECTION (JOBS) ───────────────────────────────────────────────
 function _roundMoney(n) {
   const x = Number(n || 0);
   if (!Number.isFinite(x)) return 0;
@@ -3235,14 +3227,14 @@ function cycleStatus(jobId, itemType, idx) {
   item.status = cycle[item.status||'pending'];
   save(); renderJobs();
 }
-function cycleHourly2Status(jobId) {
+function cycleHourlyStatus(jobId) {
   const job = state.jobs.find(j=>j.id===jobId);
-  if (!job || _jobType(job) !== 'hourly2') return;
-  const curr = job.hourly2Status || 'pending';
+  if (!job || _jobType(job) !== 'hourly') return;
+  const curr = job.hourlyStatus || 'pending';
   const cycle = { pending:'invoiced', invoiced:'collected', collected:'pending' };
   const doIt = () => {
-    job.hourly2Status = cycle[curr] || 'pending';
-    if (job.hourly2Status === 'pending') job.hourly2SquareInvoiceId = '';
+    job.hourlyStatus = cycle[curr] || 'pending';
+    if (job.hourlyStatus === 'pending') job.hourlySquareInvoiceId = '';
     save(); renderJobs();
   };
   if (curr === 'collected') {
@@ -3271,7 +3263,7 @@ function removeItem(jobId, key, idx) {
   j[key].splice(idx,1); save(); renderJobs();
 }
 
-// â”€â”€â”€ NOTES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── NOTES ────────────────────────────────────────────────────────────────────
 function _notesEntity() {
   if (!notesCtx) return null;
   return notesCtx.type === 'hw'
@@ -3355,7 +3347,7 @@ function saveEditNote() {
   save(); closeModal('editNoteModal'); renderNotesList(); _notesRender();
 }
 
-// â”€â”€â”€ HOURS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── HOURS ────────────────────────────────────────────────────────────────────
 function openHours(jobId) {
   hoursJobId = jobId;
   const job = state.jobs.find(j=>j.id===jobId);
@@ -3411,7 +3403,7 @@ function deleteHoursEntry(hId) {
   save(); renderHoursList(); renderJobs();
 }
 
-// â”€â”€â”€ JOB MODAL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── JOB MODAL ────────────────────────────────────────────────────────────────
 let milestoneCount = 0;
 let quoteItemCount = 0;
 function populateEmpDropdown(selectId, wrapId, currentEmpId) {
@@ -3428,29 +3420,29 @@ let milestoneMode = 'single';
 let jobTypeMode = 'quoted';
 let jobSetupMode = 'unified';
 function refreshJobSetupButtons() {
-  ['unified', 'itemized', 'hourly', 'hourly2'].forEach(mode => {
+  ['unified', 'itemized', 'hourly'].forEach(mode => {
     const btn = document.getElementById(`js_mode_${mode}`);
     if (!btn) return;
     btn.className = `btn ${jobSetupMode === mode ? 'btn-primary selected' : 'btn-ghost'} btn-sm user-pick-btn`;
   });
 }
 function setJobType(type) {
-  jobTypeMode = type === 'hourly2' ? 'hourly2' : type === 'hourly' ? 'hourly' : 'quoted';
+  jobTypeMode = type === 'hourly' ? 'hourly' : 'quoted';
   const typeEl = document.getElementById('f_jobType');
   if (typeEl && typeEl.value !== jobTypeMode) typeEl.value = jobTypeMode;
   const quotedWrap = document.getElementById('jobQuotedFields');
   const hourlyHint = document.getElementById('jobHourlyHint');
   const hourlyRateWrap = document.getElementById('f_hourly_rate_wrap');
-  const hourlyLike = jobTypeMode === 'hourly' || jobTypeMode === 'hourly2';
+  const hourlyLike = jobTypeMode === 'hourly' || jobTypeMode === 'hourly';
   if (quotedWrap) quotedWrap.style.display = hourlyLike ? 'none' : '';
   if (hourlyHint) hourlyHint.style.display = hourlyLike ? '' : 'none';
   if (hourlyRateWrap) hourlyRateWrap.style.display = hourlyLike ? '' : 'none';
 }
 function setJobSetupMode(mode) {
-  jobSetupMode = mode === 'itemized' ? 'itemized' : mode === 'hourly2' ? 'hourly2' : mode === 'hourly' ? 'hourly' : 'unified';
-  const isHourly = jobSetupMode === 'hourly' || jobSetupMode === 'hourly2';
+  jobSetupMode = mode === 'itemized' ? 'itemized' : mode === 'hourly' ? 'hourly' : 'unified';
+  const isHourly = jobSetupMode === 'hourly';
   const itemized = jobSetupMode === 'itemized';
-  setJobType(jobSetupMode === 'hourly2' ? 'hourly2' : isHourly ? 'hourly' : 'quoted');
+  setJobType(isHourly ? 'hourly' : 'quoted');
   const itemizedEl = document.getElementById('f_itemized');
   if (itemizedEl) itemizedEl.checked = itemized;
   toggleItemizedQuote();
@@ -3458,8 +3450,7 @@ function setJobSetupMode(mode) {
 }
 function onJobTypeChange() {
   const type = document.getElementById('f_jobType')?.value || 'quoted';
-  if (type === 'hourly2') setJobSetupMode('hourly2');
-  else if (type === 'hourly') setJobSetupMode('hourly');
+  if (type === 'hourly') setJobSetupMode('hourly');
   else setJobSetupMode(document.getElementById('f_itemized')?.checked ? 'itemized' : 'unified');
 }
 function setMilestoneMode(mode) {
@@ -3500,7 +3491,7 @@ function setJobFinancialEditLock(locked) {
   const note = document.getElementById('jobFinancialLockNote');
   if (note) note.style.display = locked ? '' : 'none';
 
-  const ids = ['f_jobType', 'f_hourlyRate', 'f_itemized', 'f_quote', 'quoteAddItemBtn', 'ms_btn_single', 'ms_btn_default', 'ms_btn_custom', 'milestoneAddBtn', 'js_mode_unified', 'js_mode_itemized', 'js_mode_hourly', 'js_mode_hourly2'];
+  const ids = ['f_jobType', 'f_hourlyRate', 'f_itemized', 'f_quote', 'quoteAddItemBtn', 'ms_btn_single', 'ms_btn_default', 'ms_btn_custom', 'milestoneAddBtn', 'js_mode_unified', 'js_mode_itemized', 'js_mode_hourly'];
   ids.forEach(id => {
     const el = document.getElementById(id);
     if (el) el.disabled = !!locked;
@@ -3556,8 +3547,8 @@ function editJob(id) {
   if (job.isItemized && job.quoteItems?.length) {
     job.quoteItems.forEach(qi => addQuoteItemField(qi.label, qi.amount));
   }
-  setJobSetupMode(jobType === 'hourly2' ? 'hourly2' : jobType === 'hourly' ? 'hourly' : (job.isItemized ? 'itemized' : 'unified'));
-  if (jobType === 'hourly' || jobType === 'hourly2') {
+  setJobSetupMode(jobType === 'hourly' ? 'hourly' : (job.isItemized ? 'itemized' : 'unified'));
+  if (jobType === 'hourly') {
     milestoneMode = 'single';
     document.getElementById('milestoneList').innerHTML = '';
     milestoneCount = 0;
@@ -3667,8 +3658,8 @@ function saveJob() {
   const contactName = document.getElementById('f_contact').value.trim();
   const date        = document.getElementById('f_date').value;
   const selectedType = document.getElementById('f_jobType')?.value || 'quoted';
-  const jobType     = selectedType === 'hourly2' ? 'hourly2' : selectedType === 'hourly' ? 'hourly' : 'quoted';
-  const isHourly    = jobType === 'hourly' || jobType === 'hourly2';
+  const jobType     = selectedType === 'hourly' ? 'hourly' : 'quoted';
+  const isHourly    = jobType === 'hourly';
   const hourlyRate  = _roundMoney(parseFloat(document.getElementById('f_hourlyRate')?.value) || 0);
   const isItemized  = !isHourly && document.getElementById('f_itemized').checked;
   if (!name) { showAlert('Please enter a client name.'); return; }
@@ -3748,18 +3739,18 @@ function saveJob() {
     state.jobs.push({ id:newId, name, contactName, quote, date, isItemized, quoteItems, status:'active',
       milestones, addOns:[], subtractions:[], materials:[], advances:[], fees:[], jobNotes:[], hours:[], partialCollections:[], repaymentMode:false,
       revenueItems:[], jobType, hourlyRate,
-      hourly2Status:'pending', hourly2SquareInvoiceId:'',
+      hourlyStatus:'pending', hourlySquareInvoiceId:'',
       employeeId: employeeId || '' });
   }
   save(); renderJobs(); closeModal('jobModal');
   if (isNew || name.toLowerCase() !== originalName.toLowerCase()) checkNewClientPrompt(name);
 }
 
-// â”€â”€â”€ ADD ITEM MODAL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── ADD ITEM MODAL ───────────────────────────────────────────────────────────
 function openAddItem(jobId, type, itemId = null) {
   addItemContext = { jobId, type, itemId };
   const job = state.jobs.find(j => j.id === jobId);
-  const isHourly2 = _jobType(job) === 'hourly2';
+  const isHourly2 = _jobType(job) === 'hourly';
   const en = esc(getEmp(job?.employeeId)?.name || 'Employee');
   const isEdit = !!itemId;
   const titles = {
@@ -3917,7 +3908,7 @@ function saveItem() {
   const { jobId, type, itemId } = addItemContext;
   const job = state.jobs.find(j=>j.id===jobId);
   if (!job) return;
-  const isHourly2 = _jobType(job) === 'hourly2';
+  const isHourly2 = _jobType(job) === 'hourly';
   const label  = document.getElementById('ai_label')?.value.trim() || '';
   let amount = parseFloat(document.getElementById('ai_amount')?.value) || 0;
   let hours = 0;
@@ -3939,7 +3930,7 @@ function saveItem() {
     return;
   }
   if (isHourly2 && (type === 'revenue' || type === 'addon' || type === 'subtraction')) {
-    showAlert('Hourly2.0 uses Hours + Materials only for client billing.');
+    showAlert('Hourly uses Hours + Materials only for client billing.');
     return;
   }
   if (type==='revenue') {
@@ -4056,7 +4047,7 @@ function fillSubtractionFromItem() {
   amtEl.style.opacity = '0.65';
 }
 
-// â”€â”€â”€ QUOTE SNAPSHOT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── QUOTE SNAPSHOT ───────────────────────────────────────────────────────────
 function openQuoteSnapshot(jobId) {
   const job = state.jobs.find(j => j.id === jobId);
   if (!job) return;
@@ -4134,7 +4125,7 @@ function printQuoteSnapshot() {
   win.print();
 }
 
-// â”€â”€â”€ SETTINGS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── SETTINGS ─────────────────────────────────────────────────────────────────
 function settingsTab(name, btn) {
   document.querySelectorAll('#settingsModal .settings-nav-btn').forEach(b => b.classList.remove('active'));
   document.querySelectorAll('#settingsModal .settings-panel').forEach(p => p.classList.remove('active'));
@@ -4320,7 +4311,7 @@ function openMySettings() {
   requestAnimationFrame(_initSettingsNavScroll);
 }
 
-// â”€â”€â”€ TABS & MODALS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── TABS & MODALS ────────────────────────────────────────────────────────────
 function switchTab(name, el) {
   closeMobileMenu();
   closeDesktopMenu();
@@ -4414,7 +4405,7 @@ document.querySelectorAll('.modal-overlay').forEach(el=>{
 });
 
 
-// â”€â”€â”€ LOGIN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── LOGIN ────────────────────────────────────────────────────────────────────
 function showLogin() {
   const overlay = document.getElementById('loginOverlay');
   const grid = document.getElementById('userPickGrid');
@@ -4514,7 +4505,7 @@ function applyUserView() {
   // Apply admin-only / employee-only visibility (never touches header-admin/header-emp)
   applyAdminClasses();
 
-  // Header buttons: simple display toggle â€” applyAdminClasses() never touches these
+  // Header buttons: simple display toggle — applyAdminClasses() never touches these
   document.querySelectorAll('.header-admin').forEach(el => { el.style.display = isAdmin ? '' : 'none'; });
   document.querySelectorAll('.header-emp').forEach(el => { el.style.display = isAdmin ? 'none' : ''; });
   const menuDivider = document.getElementById('headerMenuDivider');
@@ -4537,7 +4528,7 @@ function renderAll() {
   if (document.getElementById('tab-clients').classList.contains('active')) renderClients();
 }
 
-// â”€â”€â”€ USER MANAGEMENT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── USER MANAGEMENT ──────────────────────────────────────────────────────────
 function openUserMgmt() {
   openSettings();
   settingsTab('employees', document.querySelectorAll('#settingsModal .settings-nav-btn')[1]);
@@ -4680,7 +4671,7 @@ async function doChangePin() {
   showAlert('PIN updated!');
 }
 
-// â”€â”€â”€ SCHEDULE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── SCHEDULE ─────────────────────────────────────────────────────────────────
 // Generate synthetic HW payment calendar entries for a given year/month.
 // Each active (or paused) client gets an entry on the same day-of-month as their startDate.
 function hwCalEntries(year, month) {
@@ -4970,7 +4961,7 @@ function fmtTimeRange(start, end) {
   return s || '';
 }
 
-// â”€â”€â”€ APPOINTMENT CRUD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── APPOINTMENT CRUD ─────────────────────────────────────────────────────────
 function getApptDates(a) {
   if (!a.allDay || !a.endDate || a.endDate <= a.date) return [a.date];
   const dates = [];
@@ -5101,7 +5092,7 @@ async function deleteAppt(id) {
   });
 }
 
-// â”€â”€â”€ EXPORT / IMPORT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── EXPORT / IMPORT ──────────────────────────────────────────────────────────
 function exportData() {
   const filename = `ehs-tracker-backup-${today()}.json`;
   const json = JSON.stringify(state, null, 2);
@@ -5134,7 +5125,7 @@ function importData(event) {
   event.target.value = '';
 }
 
-// â”€â”€â”€ CLIENTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── CLIENTS ──────────────────────────────────────────────────────────────────
 const CLIENT_COLS = [
   { key:'company',       label:'Company' },
   { key:'email',         label:'Email' },
@@ -5654,7 +5645,7 @@ function _renderClientNotesThread(c) {
       const t = Date.now();
       let anyLeft = false;
       for (const [nid, exp] of Object.entries(_empNoteTimers)) { if (t < exp) anyLeft = true; else delete _empNoteTimers[nid]; }
-      // Skip re-render while employee is mid-edit â€” would reset the textarea
+      // Skip re-render while employee is mid-edit — would reset the textarea
       if (!_editingNoteId) _renderClientNotesThread(c2);
       if (!anyLeft) { clearInterval(_noteCountdownInterval); _noteCountdownInterval = null; }
     }, 1000);
@@ -5809,7 +5800,7 @@ function downloadCSV(csv, filename) {
   a.click(); URL.revokeObjectURL(a.href);
 }
 
-// â”€â”€â”€ CLIENT AUTOCOMPLETE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── CLIENT AUTOCOMPLETE ──────────────────────────────────────────────────────
 let _acIdx = -1;
 
 function showAC(inputId) {
@@ -5863,7 +5854,7 @@ function _acHighlight(list) {
   list.querySelectorAll('.ac-item').forEach((el,i) => el.classList.toggle('ac-active', i === _acIdx));
 }
 
-// â”€â”€â”€ "ADD AS CLIENT" PROMPT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── "ADD AS CLIENT" PROMPT ──────────────────────────────────────────────────
 function clientByName(name) {
   if (!name) return null;
   const q = name.toLowerCase().trim();
@@ -5991,7 +5982,7 @@ function confirmAddNewClient() {
     txCount:0, lifetimeSpend:'', clientNotes:[],
   };
   closeModal('addClientPromptModal');
-  openNewClientDetail(newClient); // not saved yet â€” save/cancel handled in detail modal
+  openNewClientDetail(newClient); // not saved yet — save/cancel handled in detail modal
 }
 
 firebase.auth().onAuthStateChanged(user => { if (user) load(); });
@@ -6017,7 +6008,7 @@ function goHeaderHome() {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-// â”€â”€â”€ TABS SCROLL INDICATOR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── TABS SCROLL INDICATOR ────────────────────────────────────────────────────
 function _initSettingsNavScroll() {
   document.querySelectorAll('.settings-nav-wrap').forEach(wrap => {
     const nav = wrap.querySelector('.settings-nav');
@@ -6051,7 +6042,7 @@ function _initTabsScroll() {
   requestAnimationFrame(update);
 }
 
-// â”€â”€â”€ BODY SCROLL LOCK â€” prevent background scroll when any modal is open â”€â”€â”€â”€â”€â”€â”€
+// ─── BODY SCROLL LOCK — prevent background scroll when any modal is open ───────
 (function() {
   const observer = new MutationObserver(() => {
     const anyOpen = !!document.querySelector('.modal-overlay:not(.hidden)');
@@ -6103,6 +6094,7 @@ document.addEventListener('keydown', e => {
     redoAction();
   }
 });
+
 
 
 
