@@ -623,13 +623,16 @@ function calcJob(job) {
   const isHourly = jobType === 'hourly';
   const revenueItems = isLegacyHourly ? (job.revenueItems || []) : [];
   const revenueTotal = revenueItems.reduce((s, r) => s + (r.amount || 0), 0);
+  const hourlyRate = Number(job.hourlyRate || 0);
   const hoursTotal = (job.addOns || []).filter(a => !!a.isHours).reduce((s, a) => s + (a.amount || 0), 0);
+  const loggedHoursTotal = (job.hours || []).reduce((s, h) => s + (h.hours || 0), 0);
+  const loggedHoursAmount = _roundMoney(loggedHoursTotal * hourlyRate);
   const materialChargeTotal = (job.materials || []).reduce((s, m) => s + Number(m.chargeAmount ?? m.amount ?? 0), 0);
 
   const addOnTotal      = isHourly ? 0 : (job.addOns || []).reduce((s,a) => s + (a.amount||0), 0);
   const subtractionTotal= isHourly ? 0 : (job.subtractions || []).reduce((s,a) => s + (a.amount||0), 0);
   const contractTotal   = isHourly
-    ? _roundMoney(hoursTotal + materialChargeTotal)
+    ? _roundMoney(loggedHoursAmount + hoursTotal + materialChargeTotal)
     : (isLegacyHourly ? revenueTotal : (job.quote || 0)) + addOnTotal - subtractionTotal;
 
   let collectedGross = 0, estimatedFees = 0, collectedTxns = 0;
@@ -714,6 +717,11 @@ function calcJob(job) {
   const projectedProfitPool = Math.max(0, projectedNetRevenue - totalMats);
   const potentialEmpTotalOwed = projectedProfitPool * effectiveEmpShare + empMats;
   const potentialEmpBalance   = potentialEmpTotalOwed - advancesPaid - linkedDebtPaid;
+  const potentialOwnerProfit  = projectedProfitPool * effectiveOwnerShare;
+  const potentialOwnerTotal   = potentialOwnerProfit + ownerMats;
+  const potentialDebtContribution = job.repaymentMode
+    ? Math.max(0, projectedProfitPool * ((debtOwnerShare||0.50) - normalOwnerShare))
+    : 0;
   const ownerTotal      = ownerProfit + ownerMats;
   const totalHours      = (job.hours||[]).reduce((s,h)=>s+(h.hours||0),0);
 
@@ -722,7 +730,9 @@ function calcJob(job) {
     profitPool: _roundMoney(profitPool), empProfit: _roundMoney(empProfit), ownerProfit: _roundMoney(ownerProfit), debtContribution: _roundMoney(debtContribution),
     empTotalOwed: _roundMoney(empTotalOwed), advancesPaid: _roundMoney(advancesPaid), linkedDebtPaid: _roundMoney(linkedDebtPaid), empBalance: _roundMoney(empBalance),
     outstanding: _roundMoney(outstanding), projectedGross: _roundMoney(projectedGross), projectedFees: _roundMoney(projectedFees), projectedNetRevenue: _roundMoney(projectedNetRevenue), projectedProfitPool: _roundMoney(projectedProfitPool),
-    potentialEmpTotalOwed: _roundMoney(potentialEmpTotalOwed), potentialEmpBalance: _roundMoney(potentialEmpBalance), ownerTotal: _roundMoney(ownerTotal), totalHours };
+    potentialEmpTotalOwed: _roundMoney(potentialEmpTotalOwed), potentialEmpBalance: _roundMoney(potentialEmpBalance),
+    potentialOwnerProfit: _roundMoney(potentialOwnerProfit), potentialOwnerTotal: _roundMoney(potentialOwnerTotal), potentialDebtContribution: _roundMoney(potentialDebtContribution),
+    ownerTotal: _roundMoney(ownerTotal), totalHours };
 }
 
 function calcHW(hw) {
@@ -1045,11 +1055,19 @@ function renderDebtPanel() {
   if (!originalDebt) { debtEl.innerHTML = ''; return; }
 
   let jobRepaid = 0;
-  state.jobs.forEach(j => { jobRepaid += calcJob(j).debtContribution; });
+  let jobProjected = 0;
+  state.jobs.forEach(j => {
+    const c = calcJob(j);
+    jobRepaid += c.debtContribution;
+    jobProjected += Math.max(0, (c.potentialDebtContribution || 0) - (c.debtContribution || 0));
+  });
   const manualRepaid = (state.debtPayments || []).reduce((sum, p) => sum + (p.amount || 0), 0);
   const totalRepaid = jobRepaid + manualRepaid;
+  const totalProjected = totalRepaid + jobProjected;
   const remaining = Math.max(0, originalDebt - totalRepaid);
+  const remainingAfterProjected = Math.max(0, originalDebt - totalProjected);
   const pct = Math.min(100, (totalRepaid / originalDebt) * 100);
+  const pctProjected = Math.min(100, (totalProjected / originalDebt) * 100);
   const paid = remaining <= 0;
   const debtEmp = getEmp(s.debtEmployeeId);
   const en = esc(debtEmp?.name || 'Employee');
@@ -1075,6 +1093,8 @@ function renderDebtPanel() {
       }).join('')
     : '';
 
+  const baseW = pct.toFixed(1);
+  const projW = Math.max(0, pctProjected - pct).toFixed(1);
   debtEl.innerHTML = `
     <div class="debt-panel${paid?' paid':''}">
       <div class="debt-panel-header">
@@ -1098,12 +1118,25 @@ function renderDebtPanel() {
           <div class="debt-stat-label">Remaining</div>
           <div class="debt-stat-value" style="color:${paid?'var(--green)':'var(--red)'}">${fmt(remaining)}</div>
         </div>
+        <div>
+          <div class="debt-stat-label">Projected (Pending)</div>
+          <div class="debt-stat-value" style="color:rgba(255,193,7,0.95)">${fmt(jobProjected)}</div>
+        </div>
+        <div>
+          <div class="debt-stat-label">Projected Total</div>
+          <div class="debt-stat-value" style="color:rgba(255,193,7,0.95)">${fmt(totalProjected)}</div>
+        </div>
+        <div>
+          <div class="debt-stat-label">Remaining (Projected)</div>
+          <div class="debt-stat-value" style="color:${remainingAfterProjected<=0?'var(--green)':'rgba(255,193,7,0.95)'}">${fmt(remainingAfterProjected)}</div>
+        </div>
       </div>
       <div class="debt-progress-track">
-        <div class="debt-progress-fill" style="width:${pct.toFixed(1)}%"></div>
+        <div class="debt-progress-fill" style="width:${baseW}%"></div>
+        <div class="debt-progress-fill" style="width:${projW}%;background:rgba(255,193,7,0.95);position:relative;left:${baseW}%;top:-6px"></div>
       </div>
       <div class="debt-progress-label" style="margin-bottom:${paymentsHtml||!paid?'12px':'0'}">
-        <span>${pct.toFixed(1)}% repaid</span>
+        <span>${pct.toFixed(1)}% repaid | ${pctProjected.toFixed(1)}% projected</span>
         <span>Normal split ${normalPct}/${100-normalPct} | Repayment split ${repayPct}/${100-repayPct}</span>
       </div>
       ${paymentsHtml ? `<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:10px">${paymentsHtml}</div>` : ''}
@@ -2003,6 +2036,34 @@ function jobDetail(job, c) {
             ${c.linkedDebtPaid>0?`<div style="font-size:16px;color:var(--red);font-family:var(--mono)">- Debt repayment: ${fmt(c.linkedDebtPaid)}</div>`:''}
           </div>
           <div style="font-size:15px;color:var(--text3);font-family:var(--mono);margin-top:6px">Profit pool: ${fmt(c.profitPool)}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="settlement-box" style="border-color:rgba(255,193,7,0.35)">
+      <div class="settlement-title">Potential (if everything pending is collected)
+        <span style="color:var(--text3);font-size:13px;margin-left:8px;font-family:var(--mono)">preview</span>
+        ${job.repaymentMode?` <span style="color:rgba(255,193,7,0.95);font-size:14px;margin-left:8px">POTENTIAL REPAYMENT</span>`:''}
+      </div>
+      <div class="settlement-grid" style="${admin?'':'grid-template-columns:1fr'}">
+        <div class="admin-only">
+          <div class="settlement-col-title">Your potential</div>
+          <div class="settlement-big orange">${fmt(c.potentialOwnerProfit)}</div>
+          <div style="font-size:16px;color:var(--text3);font-family:var(--mono)">profit share</div>
+          ${job.repaymentMode&&c.potentialDebtContribution>0?`<div style="font-size:16px;color:rgba(255,193,7,0.95);font-family:var(--mono);margin-top:4px">${fmt(c.potentialDebtContribution)} to debt</div>`:''}
+          <div style="font-size:16px;color:var(--text2);font-family:var(--mono);margin-top:4px">+ ${fmt(c.ownerMats)} mats back</div>
+          <div style="font-size:17px;color:var(--green);font-family:var(--mono);font-weight:600;margin-top:6px;border-top:1px solid var(--border);padding-top:6px">= ${fmt(c.potentialOwnerTotal)} total</div>
+        </div>
+        <div>
+          <div class="settlement-col-title">${admin ? `${en} (potential)` : 'Your potential'}</div>
+          <div class="settlement-big ${c.potentialEmpBalance>0?'orange':'green'}">${fmt(Math.abs(c.potentialEmpBalance))}</div>
+          <div style="font-size:16px;color:var(--text3);font-family:var(--mono)">${c.potentialEmpBalance>0?'still owed':(admin?'he owes you':'you owe')}</div>
+          <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
+            <div style="font-size:16px;color:var(--text2);font-family:var(--mono)">Projected profit pool: ${fmt(c.projectedProfitPool)}</div>
+            <div style="font-size:16px;color:var(--text2);font-family:var(--mono);border-top:1px solid var(--border);padding-top:4px;margin-top:4px">= Total owed: ${fmt(c.potentialEmpTotalOwed)}</div>
+            <div style="font-size:16px;color:var(--text2);font-family:var(--mono)">- Paid out: ${fmt(c.advancesPaid)}</div>
+            ${c.linkedDebtPaid>0?`<div style="font-size:16px;color:var(--red);font-family:var(--mono)">- Debt repayment: ${fmt(c.linkedDebtPaid)}</div>`:''}
+          </div>
         </div>
       </div>
     </div>
