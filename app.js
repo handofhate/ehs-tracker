@@ -1447,10 +1447,9 @@ function jobBillingSummaryHtml(job, calc = null) {
   const summary = getJobBillingSummary(job, calc);
   const cfg = {
     pending: { label: 'Pending', cls: 'pending' },
-    invoiced: { label: 'Invoiced', cls: 'invoiced' },
-    paid: { label: 'Paid', cls: 'paid' }
+    invoiced: { label: 'Invoiced', cls: 'invoiced' }
   };
-  const parts = ['pending', 'invoiced', 'paid']
+  const parts = ['pending', 'invoiced']
     .filter(k => summary[k].count > 0)
     .map(k => {
       const s = summary[k];
