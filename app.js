@@ -1339,6 +1339,8 @@ function jobIconButton({ title, icon, onclick = '', accent = false, disabled = f
 function jobCard(job) {
   const c = calcJob(job);
   const isHourly = _jobType(job) === 'hourly';
+  const jobClient = job.clientId ? clientById(job.clientId) : clientByName(job.name);
+  const contactClient = job.contactClientId ? clientById(job.contactClientId) : clientByName(job.contactName);
   const fadedStatStyle = isHourly ? 'opacity:0.45' : '';
   const fadedValueStyle = isHourly ? 'color:var(--text3)!important' : '';
   const isZeroStat = (n) => Math.abs(Number(n || 0)) < 0.005;
@@ -1364,10 +1366,11 @@ function jobCard(job) {
         <div class="job-name-block">
           <div class="job-name" style="display:flex;align-items:center;gap:8px">
             ${esc(job.name)}
-            ${clientByName(job.name) ? `<button class="btn btn-ghost btn-sm job-icon-btn" style="width:24px;height:24px" onclick="event.stopPropagation();openClientQuick('${esc(job.name)}')" title="View in Clients" aria-label="View in Clients">${jobIconSvg('client')}</button>` : ''}
+            ${jobClient ? `<button class="btn btn-ghost btn-sm job-icon-btn" style="width:24px;height:24px" onclick="event.stopPropagation();openClientQuickById('${jobClient.id}')" title="View in Clients" aria-label="View in Clients">${jobIconSvg('client')}</button>` : ''}
           </div>
-          ${job.contactName ? `<div style="font-size:13px;color:var(--blue);margin-top:2px;font-family:var(--mono);display:flex;align-items:center;gap:6px">via ${esc(job.contactName)} <button class="btn btn-ghost btn-sm job-icon-btn" style="width:22px;height:22px" onclick="event.stopPropagation();openClientQuick('${esc(job.contactName)}')" title="View in Clients" aria-label="View in Clients">${jobIconSvg('client')}</button></div>` : ''}
+          ${job.contactName ? `<div style="font-size:13px;color:var(--blue);margin-top:2px;font-family:var(--mono);display:flex;align-items:center;gap:6px">via ${esc(job.contactName)} ${contactClient ? `<button class="btn btn-ghost btn-sm job-icon-btn" style="width:22px;height:22px" onclick="event.stopPropagation();openClientQuickById('${contactClient.id}')" title="View in Clients" aria-label="View in Clients">${jobIconSvg('client')}</button>` : ''}</div>` : ''}
           <div style="font-size:15px;color:var(--text3);margin-top:2px;font-family:var(--mono)">${job.date||''}</div>
+          ${jobBillingSummaryHtml(job, c)}
         </div>
         <div class="job-quick-stats job-quick-stats-grid">
           <div class="job-stat" style="${statTileStyle(job.quote, fadedStatStyle)}"><div class="job-stat-label">Quote</div><div class="job-stat-value" style="${isHourly ? fadedValueStyle : statValueStyle(job.quote)}">${fmt(job.quote)}</div></div>
@@ -1394,6 +1397,68 @@ function jobCard(job) {
     </div>
     ${isExp ? jobDetail(job, c) : ''}
   </div>`;
+}
+
+function _billingBucket(status, item) {
+  const s = status || item?.status || 'pending';
+  if (s === 'collected' || item?.billingState === 'paid') return 'paid';
+  if (s === 'invoiced' || item?.squareInvoiceId || item?.hourlySquareInvoiceId) return 'invoiced';
+  return 'pending';
+}
+
+function _addBillingRow(summary, status, amount, item = null) {
+  const amt = _roundMoney(amount);
+  if (Math.abs(amt) < 0.005) return;
+  const bucket = _billingBucket(status, item);
+  summary[bucket].count += 1;
+  summary[bucket].total = _roundMoney(summary[bucket].total + amt);
+}
+
+function getJobBillingSummary(job, calc = null) {
+  const summary = {
+    pending: { count: 0, total: 0 },
+    invoiced: { count: 0, total: 0 },
+    paid: { count: 0, total: 0 }
+  };
+  const c = calc || calcJob(job);
+  if (_jobType(job) === 'hourly') {
+    _addBillingRow(summary, job.hourlyStatus || 'pending', c.contractTotal || 0, {
+      status: job.hourlyStatus || 'pending',
+      squareInvoiceId: job.hourlySquareInvoiceId || ''
+    });
+    return summary;
+  }
+  (job.milestones || []).forEach(m => {
+    _addBillingRow(summary, m.status || 'pending', ((m.pct || 0) / 100) * (job.quote || 0), m);
+  });
+  (job.revenueItems || []).forEach(r => {
+    _addBillingRow(summary, r.status || 'pending', Number(r.amount || 0), r);
+  });
+  (job.addOns || []).forEach(a => {
+    _addBillingRow(summary, a.status || 'pending', a.amount || 0, a);
+  });
+  (job.subtractions || []).forEach(s => {
+    _addBillingRow(summary, s.status || 'pending', -(s.amount || 0), s);
+  });
+  return summary;
+}
+
+function jobBillingSummaryHtml(job, calc = null) {
+  const summary = getJobBillingSummary(job, calc);
+  const cfg = {
+    pending: { label: 'Pending', cls: 'pending' },
+    invoiced: { label: 'Invoiced', cls: 'invoiced' },
+    paid: { label: 'Paid', cls: 'paid' }
+  };
+  const parts = ['pending', 'invoiced', 'paid']
+    .filter(k => summary[k].count > 0)
+    .map(k => {
+      const s = summary[k];
+      const label = cfg[k].label;
+      const lineLabel = s.count === 1 ? 'line' : 'lines';
+      return `<span class="job-billing-pill ${cfg[k].cls}" title="${label}: ${s.count} ${lineLabel}, ${fmt(s.total)}"><span>${label}</span><strong>${s.count}</strong><em>${fmt(s.total)}</em></span>`;
+    });
+  return parts.length ? `<div class="job-billing-strip" aria-label="Invoice status summary">${parts.join('')}</div>` : '';
 }
 
 function badgeHtml(status, jobId, itemType, idx) {
@@ -5784,6 +5849,7 @@ function saveClientDetail() {
     ? { id: viewingClientId, squareId:'', refId:'', memo:'', emailSubStatus:'', firstVisit:today(), lastVisit:today(), txCount:0, lifetimeSpend:'', clientNotes:[] }
     : (state.clients||[]).find(cl=>cl.id===viewingClientId);
   if (!c) return;
+  const oldMatchNames = clientMatchNames(c);
   c.firstName   = document.getElementById('cd_firstName')?.value.trim()  || '';
   c.surname     = document.getElementById('cd_surname')?.value.trim()     || '';
   c.company     = document.getElementById('cd_company')?.value.trim()     || '';
@@ -5799,10 +5865,11 @@ function saveClientDetail() {
     if (!state.clients) state.clients = [];
     state.clients.push(c);
   }
+  _linkClientToMatchingRecords(c.id, [...oldMatchNames, ...clientMatchNames(c)]);
   clientDetailIsNew = false;
   pendingNewClientName = null;
   if (_noteCountdownInterval) { clearInterval(_noteCountdownInterval); _noteCountdownInterval = null; }
-  save(); closeModal('clientDetailModal'); renderClients();
+  save(); closeModal('clientDetailModal'); renderAll();
 }
 
 function cancelClientDetail() {
@@ -5925,6 +5992,42 @@ function clientByName(name) {
   }) || null;
 }
 
+function clientById(id) {
+  if (!id) return null;
+  return (state.clients || []).find(c => c.id === id) || null;
+}
+
+function clientDisplayName(c) {
+  if (!c) return '';
+  return [c.firstName, c.surname].filter(Boolean).join(' ') || c.company || c.email || '';
+}
+
+function clientMatchNames(c) {
+  if (!c) return [];
+  return [
+    [c.firstName, c.surname].filter(Boolean).join(' '),
+    c.company || '',
+    c.email || ''
+  ].map(v => v.trim()).filter(Boolean);
+}
+
+function _linkClientToMatchingRecords(clientId, names) {
+  const keys = new Set((names || []).map(n => n.toLowerCase().trim()).filter(Boolean));
+  if (!clientId || !keys.size) return;
+  const matches = (value) => keys.has(String(value || '').toLowerCase().trim());
+  (state.jobs || []).forEach(job => {
+    if (!job.clientId && matches(job.name)) job.clientId = clientId;
+    if (!job.contactClientId && matches(job.contactName)) job.contactClientId = clientId;
+  });
+  (state.homewatch || []).forEach(hw => {
+    if (!hw.clientId && matches(hw.name)) hw.clientId = clientId;
+  });
+  (state.appointments || []).forEach(a => {
+    if (!a.clientId && matches(a.clientName)) a.clientId = clientId;
+    if (!a.contactClientId && matches(a.contactName)) a.contactClientId = clientId;
+  });
+}
+
 function goToClient(name) {
   const match = clientByName(name);
   const tab = document.getElementById('clientsTab');
@@ -5947,8 +6050,14 @@ let _noteCountdownInterval = null;
 function openClientQuick(name) {
   const c = clientByName(name);
   if (!c) return;
+  _linkClientToMatchingRecords(c.id, [name, ...clientMatchNames(c)]);
+  openClientQuickById(c.id);
+}
+function openClientQuickById(id) {
+  const c = clientById(id);
+  if (!c) return;
   _cqClientId = c.id;
-  document.getElementById('cqName').textContent = [c.firstName, c.surname].filter(Boolean).join(' ') || c.company || c.email || name;
+  document.getElementById('cqName').textContent = clientDisplayName(c) || 'Client';
   const fmtV = (key) => {
     const v = c[key];
     if (v === undefined || v === null || v === '') return null;
