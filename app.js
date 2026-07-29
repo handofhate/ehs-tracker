@@ -86,6 +86,41 @@ function loadUserUiState() {
     expandedClients = new Set(JSON.parse(localStorage.getItem(_uiKey('expClients')) || '[]'));
   } catch(e) { expandedClients = new Set(); }
 }
+function _currentUserRecord() {
+  const id = currentUser?.id;
+  if (!id) return null;
+  return (state.users || []).find(u => u.id === id) || null;
+}
+function _sanitizeTheme(theme) {
+  return ['default', 'highContrast', 'simple'].includes(theme) ? theme : 'default';
+}
+function _themeForCurrentUser() {
+  const user = _currentUserRecord();
+  if (user?.uiPrefs?.theme) return _sanitizeTheme(user.uiPrefs.theme);
+  return user?.uiPrefs?.highContrast ? 'highContrast' : 'default';
+}
+function _syncThemeControls(theme) {
+  const activeTheme = _sanitizeTheme(theme);
+  document.querySelectorAll('[data-theme-option]').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.themeOption === activeTheme);
+    btn.setAttribute('aria-pressed', btn.dataset.themeOption === activeTheme ? 'true' : 'false');
+  });
+}
+function applyTheme(theme = _themeForCurrentUser()) {
+  const activeTheme = _sanitizeTheme(theme);
+  document.body.classList.toggle('high-contrast', activeTheme === 'highContrast');
+  document.body.classList.toggle('simple-theme', activeTheme === 'simple');
+  _syncThemeControls(activeTheme);
+}
+function setTheme(theme) {
+  const user = _currentUserRecord();
+  if (!user) return;
+  if (!user.uiPrefs || typeof user.uiPrefs !== 'object') user.uiPrefs = {};
+  user.uiPrefs.theme = _sanitizeTheme(theme);
+  delete user.uiPrefs.highContrast;
+  applyTheme(user.uiPrefs.theme);
+  save();
+}
 function saveEmpSummaryTimeframe() {
   try { localStorage.setItem(_uiKey('empSummaryTF'), empSummaryTimeframe); } catch(e) {}
 }
@@ -168,6 +203,9 @@ function migrateState(s) {
   (s.users).forEach(u => {
     if (!u.isAdmin && u.empShare === undefined) u.empShare = legacyEmpShare;
     if (!u.clientPrefs || typeof u.clientPrefs !== 'object') u.clientPrefs = {};
+    if (!u.uiPrefs || typeof u.uiPrefs !== 'object') u.uiPrefs = {};
+    if (!u.uiPrefs.theme) u.uiPrefs.theme = u.uiPrefs.highContrast ? 'highContrast' : 'default';
+    u.uiPrefs.theme = _sanitizeTheme(u.uiPrefs.theme);
   });
   const defaultEmp = (s.users).find(u => !u.isAdmin);
   if (!s.settings.debtEmployeeId && defaultEmp) s.settings.debtEmployeeId = defaultEmp.id;
@@ -545,6 +583,7 @@ function load() {
         // Refresh currentUser data in case PIN/name changed
         const fresh = state.users.find(u => u.id === currentUser.id);
         if (fresh) currentUser = { id: fresh.id, name: fresh.name, isAdmin: fresh.isAdmin };
+        applyTheme();
         renderAll();
       }
     }
@@ -4344,6 +4383,7 @@ function openSettings() {
   document.getElementById('dmList').innerHTML = '';
   dmCount = 0;
   (state.settings.defaultMilestones || []).forEach(m => addDmField(m.label, m.pct));
+  applyTheme();
   // Reset to Account tab
   settingsTab('employees', document.querySelector('#settingsModal .settings-nav-btn'));
   renderUserList();
@@ -4429,6 +4469,7 @@ function openMySettings() {
   const splitEl = document.getElementById('ms_split');
   const emp = getEmp(currentUser?.id);
   if (splitEl) splitEl.textContent = `${Math.round((emp?.empShare ?? 0.66) * 100)}% split`;
+  applyTheme();
   _populateMyClientPrefs();
   const firstTabBtn = document.querySelector('#mySettingsModal .settings-nav-btn');
   if (firstTabBtn) mySettingsTab('user', firstTabBtn);
@@ -4595,6 +4636,7 @@ function signOut() {
   selectedLoginUserId = null;
   sessionStorage.removeItem('ehs_user');
   localStorage.removeItem('ehs_user_persist');
+  applyTheme('default');
   showLogin();
 }
 
@@ -4620,6 +4662,7 @@ function applyUserView() {
   const isAdmin = currentUser && currentUser.isAdmin;
   loadExpandedState();
   loadUserUiState();
+  applyTheme();
   requestAnimationFrame(_initTabsScroll);
   // Header elements
   const lbl = document.getElementById('headerUserLabel');

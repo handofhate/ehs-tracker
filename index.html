@@ -29,8 +29,107 @@
     --mono: 'IBM Plex Mono', monospace;
     --sans: 'IBM Plex Sans', sans-serif;
   }
+  body.high-contrast {
+    --bg: #000;
+    --bg2: #050505;
+    --bg3: #101010;
+    --border: #8f8f8f;
+    --border2: #d8d8d8;
+    --text: #fff;
+    --text2: #f2f2f2;
+    --text3: #cfcfcf;
+    --accent: #ffd400;
+    --accent2: #ffea70;
+    --green: #00ff66;
+    --yellow: #ffe600;
+    --red: #ff4b4b;
+    --blue: #40b8ff;
+    --purple: #d88cff;
+  }
+  body.simple-theme {
+    --bg: #fff;
+    --bg2: #f7f7f7;
+    --bg3: #eeeeee;
+    --border: #b8b8b8;
+    --border2: #333;
+    --text: #000;
+    --text2: #222;
+    --text3: #555;
+    --accent: #9a5a00;
+    --accent2: #7b4700;
+    --green: #006b2e;
+    --yellow: #745c00;
+    --red: #b00020;
+    --blue: #004fc4;
+    --purple: #5b2aa8;
+  }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100vh; font-size: 18px; }
+  body.high-contrast .header,
+  body.high-contrast .summary-card,
+  body.high-contrast .job-card,
+  body.high-contrast .detail-section,
+  body.high-contrast .settlement-box,
+  body.high-contrast .debt-panel,
+  body.high-contrast .modal,
+  body.high-contrast .day-drawer,
+  body.high-contrast .appt-card,
+  body.high-contrast .cal-cell {
+    border-width: 2px;
+  }
+  body.high-contrast .btn-ghost,
+  body.high-contrast .form-input,
+  body.high-contrast .status-badge,
+  body.high-contrast .job-billing-pill,
+  body.high-contrast .repay-toggle,
+  body.high-contrast .owed-toggle,
+  body.high-contrast .sched-view-toggle {
+    border-width: 2px;
+  }
+  body.high-contrast .status-active,
+  body.high-contrast .status-complete,
+  body.high-contrast .badge-pending,
+  body.high-contrast .badge-invoiced,
+  body.high-contrast .badge-collected,
+  body.high-contrast .job-billing-pill.pending,
+  body.high-contrast .job-billing-pill.invoiced,
+  body.high-contrast .job-billing-pill.paid,
+  body.high-contrast .tag-mine,
+  body.high-contrast .tag-his,
+  body.high-contrast .user-row-badge,
+  body.high-contrast .debt-panel-status {
+    background: #000;
+    font-weight: 600;
+  }
+  body.high-contrast .cal-appt-pill,
+  body.high-contrast .cal-hw-pill,
+  body.high-contrast .user-pick-btn.selected,
+  body.high-contrast .mobile-menu-btn.open {
+    background: #000;
+    border: 1px solid currentColor;
+    font-weight: 600;
+  }
+  body.high-contrast .appt-card.past,
+  body.high-contrast .cal-cell.other-month {
+    opacity: 0.72;
+  }
+  body.simple-theme .status-active,
+  body.simple-theme .status-complete,
+  body.simple-theme .badge-pending,
+  body.simple-theme .badge-invoiced,
+  body.simple-theme .badge-collected,
+  body.simple-theme .job-billing-pill.pending,
+  body.simple-theme .job-billing-pill.invoiced,
+  body.simple-theme .job-billing-pill.paid,
+  body.simple-theme .tag-mine,
+  body.simple-theme .tag-his,
+  body.simple-theme .user-row-badge,
+  body.simple-theme .debt-panel-status,
+  body.simple-theme .cal-appt-pill,
+  body.simple-theme .cal-hw-pill {
+    background: #fff;
+    border-color: currentColor;
+  }
 
   .header { background: var(--bg2); border-bottom: 2px solid var(--accent); padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
   .header-title { font-family: var(--mono); font-size: 22px; font-weight: 600; letter-spacing: 0.05em; color: var(--accent); }
@@ -212,6 +311,13 @@
   .settings-panel { display: none; flex: 1; overflow-y: auto; padding: 20px 24px; }
   .settings-panel.active { display: block; }
   .settings-modal-footer { padding: 14px 24px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; align-items: center; flex-shrink: 0; }
+  .settings-theme-row { display: flex; flex-direction: column; gap: 12px; padding: 0 0 14px; border-bottom: 1px solid var(--border); }
+  .settings-theme-label { font-family: var(--mono); font-size: 14px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text); margin-bottom: 5px; }
+  .settings-theme-desc { color: var(--text3); font-size: 15px; line-height: 1.35; }
+  .theme-picker { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .theme-option { justify-content: center; min-height: 36px; }
+  .theme-option.active { background: var(--accent); border-color: var(--accent); color: #0f1117; }
+  body.simple-theme .theme-option.active { color: #fff; }
 
   .milestone-list { margin-top: 8px; }
   .milestone-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
@@ -835,6 +941,7 @@
           <button class="settings-nav-btn" onclick="settingsTab('debt',this)">Debt</button>
           <button class="settings-nav-btn" onclick="settingsTab('jobs',this)">Jobs</button>
           <button class="settings-nav-btn" onclick="settingsTab('clients',this)">Clients</button>
+          <button class="settings-nav-btn" onclick="settingsTab('appearance',this)">Appearance</button>
           <button class="settings-nav-btn" onclick="settingsTab('data',this)">Data</button>
         </nav>
         <span class="settings-nav-arr settings-nav-arr-r">&gt;</span>
@@ -943,6 +1050,19 @@
             <label class="form-label">Quick View Fields</label>
             <div class="form-hint" style="margin-bottom:8px">Choose which fields appear in the quick popup (pin button).</div>
             <div id="s_quickColsList" style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px"></div>
+          </div>
+        </div>
+        <div id="stab-appearance" class="settings-panel">
+          <div class="settings-theme-row">
+            <div>
+              <div class="settings-theme-label">Theme</div>
+              <div class="settings-theme-desc">Choose the display style for your login. Status colors keep the same meanings in every theme.</div>
+            </div>
+            <div class="theme-picker" data-theme-picker>
+              <button type="button" class="btn btn-ghost btn-sm theme-option" data-theme-option="default" onclick="setTheme('default')">Default</button>
+              <button type="button" class="btn btn-ghost btn-sm theme-option" data-theme-option="highContrast" onclick="setTheme('highContrast')">High Contrast</button>
+              <button type="button" class="btn btn-ghost btn-sm theme-option" data-theme-option="simple" onclick="setTheme('simple')">Simple</button>
+            </div>
           </div>
         </div>
         <div id="stab-data" class="settings-panel">
@@ -1546,6 +1666,17 @@
             </div>
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <button class="btn btn-ghost btn-sm" onclick="closeModal('mySettingsModal');openChangePin()">Change My PIN</button>
+            </div>
+          </div>
+          <div class="settings-theme-row" style="margin-top:18px">
+            <div>
+              <div class="settings-theme-label">Theme</div>
+              <div class="settings-theme-desc">Choose the display style for your login. Status colors keep the same meanings in every theme.</div>
+            </div>
+            <div class="theme-picker" data-theme-picker>
+              <button type="button" class="btn btn-ghost btn-sm theme-option" data-theme-option="default" onclick="setTheme('default')">Default</button>
+              <button type="button" class="btn btn-ghost btn-sm theme-option" data-theme-option="highContrast" onclick="setTheme('highContrast')">High Contrast</button>
+              <button type="button" class="btn btn-ghost btn-sm theme-option" data-theme-option="simple" onclick="setTheme('simple')">Simple</button>
             </div>
           </div>
         </div>
