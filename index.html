@@ -389,9 +389,14 @@
     .job-header { grid-template-columns: 16px minmax(0, 1fr) 74px; align-items: start; }
     .job-header-main-grid { display: grid; grid-template-columns: minmax(0, 1fr); row-gap: 10px; }
     .job-quick-stats { width: 100%; justify-self: stretch; }
-    .job-quick-stats-grid { grid-template-columns: repeat(5, minmax(86px, 1fr)); gap: 8px 14px; width: 100%; }
-    .job-emp-stats { grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(86px, 1fr)); gap: 8px 14px; }
+    .job-quick-stats-grid { grid-template-columns: repeat(5, minmax(86px, 1fr)) minmax(188px, 2fr); gap: 8px 12px; width: 100%; }
+    .job-emp-stats { grid-column: 6; grid-template-columns: repeat(2, minmax(86px, 1fr)); gap: 8px 12px; }
     .job-header-btns-stacked { align-self: start; }
+  }
+
+  @media (min-width: 601px) and (max-width: 1080px) {
+    .job-quick-stats-grid { grid-template-columns: repeat(5, minmax(86px, 1fr)); gap: 8px 14px; }
+    .job-emp-stats { grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(86px, 1fr)); gap: 8px 14px; }
   }
 
   @media (max-width: 600px) {
