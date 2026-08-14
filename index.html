@@ -386,17 +386,18 @@
   }
 
   @media (min-width: 601px) and (max-width: 1440px) {
-    .job-header { grid-template-columns: 16px minmax(190px, max-content) minmax(0, 1fr) 74px; align-items: center; column-gap: 28px; }
+    .job-header { grid-template-columns: 16px minmax(190px, max-content) max-content minmax(74px, 1fr); align-items: center; column-gap: 28px; }
     .job-header-main-grid { display: contents; }
-    .job-quick-stats { width: 100%; justify-self: stretch; max-width: 100%; }
-    .job-quick-stats-grid { grid-template-columns: repeat(5, minmax(96px, 1fr)) minmax(210px, 1.65fr); gap: 8px 18px; width: 100%; }
-    .job-emp-stats { grid-column: 6; grid-template-columns: repeat(2, minmax(96px, 1fr)); gap: 8px 18px; }
-    .job-header-btns-stacked { align-self: center; }
+    .job-quick-stats { width: auto; justify-self: start; max-width: 100%; }
+    .job-quick-stats-grid { grid-template-columns: repeat(5, minmax(92px, max-content)) minmax(206px, max-content); gap: 8px 22px; width: auto; }
+    .job-emp-stats { grid-column: 6; grid-template-columns: repeat(2, minmax(92px, max-content)); gap: 8px 22px; }
+    .job-header-btns-stacked { align-self: center; justify-self: end; width: 74px; }
   }
 
   @media (min-width: 601px) and (max-width: 1080px) {
     .job-header { grid-template-columns: 16px minmax(0, 1fr) 74px; align-items: start; }
     .job-header-main-grid { display: grid; grid-template-columns: minmax(0, 1fr); row-gap: 10px; }
+    .job-quick-stats { width: 100%; justify-self: stretch; }
     .job-quick-stats-grid { grid-template-columns: repeat(5, minmax(86px, 1fr)); gap: 8px 14px; }
     .job-emp-stats { grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(86px, 1fr)); gap: 8px 14px; }
     .job-header-btns-stacked { align-self: start; }
