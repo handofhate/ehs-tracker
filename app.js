@@ -1499,6 +1499,44 @@ function jobBillingSummaryHtml(job, calc = null) {
   return parts.length ? `<div class="job-billing-strip" aria-label="Invoice status summary">${parts.join('')}</div>` : '';
 }
 
+function jobClientChargeSummaryHtml(job, calc = null) {
+  const c = calc || calcJob(job);
+  const rows = [];
+  const unifiedLines = Array.isArray(job.unifiedLines) ? job.unifiedLines : [];
+
+  if (job.createdVia === 'unified-v2') {
+    const fixed = Number(job.quote || 0);
+    const hourly = (job.addOns || []).filter(a => a.isHours).reduce((sum, a) => sum + Number(a.amount || 0), 0);
+    const material = (job.addOns || []).filter(a => a.chargeType === 'materials').reduce((sum, a) => sum + Number(a.amount || 0), 0);
+    const other = (job.addOns || []).filter(a => !a.isHours && a.chargeType !== 'materials').reduce((sum, a) => sum + Number(a.amount || 0), 0);
+    if (fixed > 0) rows.push({ label:'Fixed labor', amount:fixed });
+    if (hourly > 0) rows.push({ label:'Hourly labor', amount:hourly });
+    if (material > 0) rows.push({ label:'Materials', amount:material });
+    if (other > 0) rows.push({ label:'Other charges', amount:other });
+    if (Number(c.subtractionTotal || 0) > 0) rows.push({ label:'Credits', amount:-Number(c.subtractionTotal || 0), negative:true });
+  } else if (unifiedLines.length) {
+    const totals = { fixed:0, hourly:0, material:0, other:0, credit:0 };
+    unifiedLines.forEach(line => {
+      const amount = Number(line.amount || 0);
+      if (line.type === 'material' && line.billClient === false) return;
+      if (totals[line.type] !== undefined) totals[line.type] += amount;
+    });
+    if (totals.fixed > 0) rows.push({ label:'Fixed labor', amount:totals.fixed });
+    if (totals.hourly > 0) rows.push({ label:'Hourly labor', amount:totals.hourly });
+    if (totals.material > 0) rows.push({ label:'Materials', amount:totals.material });
+    if (totals.other > 0) rows.push({ label:'Other charges', amount:totals.other });
+    if (totals.credit > 0) rows.push({ label:'Credits', amount:-totals.credit, negative:true });
+  } else {
+    if (Number(job.quote || 0) > 0) rows.push({ label:'Quoted work', amount:Number(job.quote || 0) });
+    if (Number(c.addOnTotal || 0) > 0) rows.push({ label:'Additions', amount:Number(c.addOnTotal || 0) });
+    if (Number(c.subtractionTotal || 0) > 0) rows.push({ label:'Credits', amount:-Number(c.subtractionTotal || 0), negative:true });
+  }
+
+  return `
+    ${rows.length ? rows.map(row => `<div class="line-item line-item-simple"><div class="line-item-label">${esc(row.label)}</div><div class="line-item-value${row.negative ? ' red' : ''}">${row.negative ? '-' : ''}${fmt(Math.abs(row.amount))}</div></div>`).join('') : '<div style="color:var(--text3);font-size:16px;padding:4px 0">No client charges yet.</div>'}
+    <div class="total-line"><span style="color:var(--text2)">Total client charges</span><span class="line-item-value" style="color:var(--purple)">${fmt(c.contractTotal)}</span></div>`;
+}
+
 function badgeHtml(status, jobId, itemType, idx) {
   const cfg = {
     pending:   { cls:'badge-pending',   label:'Pending'  },
@@ -1998,6 +2036,7 @@ function jobDetail(job, c) {
         <button class="btn btn-danger btn-sm btn-icon-only admin-only" onclick="removeItem('${job.id}','materials',${i})" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
       </div>
     </div>`).join('');
+  const clientChargeSummaryHtml = jobClientChargeSummaryHtml(job, c);
 
   const advHtml = (job.advances||[]).map((a,i) => `
     <div class="line-item">
@@ -2016,16 +2055,16 @@ function jobDetail(job, c) {
 
       <div class="detail-section">
         <div class="detail-section-header" style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
-          <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">${isHourly ? 'Hours' : 'Revenue'}</div>
+          <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">${isHourly ? 'Hours' : 'Client Charges'}</div>
           ${isHourly
             ? `<button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','hours')">+</button>`
-            : `<button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openPartialCollect('${job.id}')">+</button>`}
+            : `<button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openPartialCollect('${job.id}')" title="Record payment">+</button>`}
         </div>
         ${isHourly
           ? (hoursHtml || '<div style="color:var(--text3);font-size:16px;padding:4px 0">No hours entries yet.</div>')
           : isLegacyHourly
           ? (hourlyRevenueHtml || '<div style="color:var(--text3);font-size:16px;padding:4px 0">No revenue entries yet.</div>')
-          : `<div class="line-item line-item-simple mobile-base-quote-row"><div class="line-item-label">Base Quote</div><div class="line-item-value">${fmt(job.quote)}</div></div>${milestonesHtml}`
+          : `${clientChargeSummaryHtml}${milestonesHtml ? `<div class="detail-section-header" style="display:flex;align-items:center;gap:10px;margin:14px 0 8px;padding-bottom:8px;border-bottom:1px solid var(--border)"><div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Billing schedule</div></div>${milestonesHtml}` : ''}`
         }
         ${isHourly ? '' : partialHistoryHtml}
         ${isHourly ? '' : legacyPartialHtml}
@@ -2088,6 +2127,13 @@ function jobDetail(job, c) {
             <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','addon')">+</button>
           </div>
           ${addOnsHtml||'<div style="color:var(--text3);font-size:16px;padding:4px 0">None</div>'}
+          ${hoursAddOnEntries.length ? `
+            <div class="detail-section-header" style="display:flex;align-items:center;gap:10px;margin:14px 0 8px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+              <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Hours</div>
+              <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','hours')">+</button>
+            </div>
+            ${hoursHtml}
+          ` : ''}
         `}
         ${c.addOnTotal>0?`<div class="total-line"><span style="color:var(--text2)">Total</span><span class="line-item-value" style="color:var(--purple)">+${fmt(c.addOnTotal)}</span></div>`:''}
       </div>
@@ -3910,6 +3956,485 @@ function saveJob() {
   if (isNew || name.toLowerCase() !== originalName.toLowerCase()) checkNewClientPrompt(name);
 }
 
+// ─── UNIFIED QUICK JOB MODAL ────────────────────────────────────────────────
+let unifiedLineCount = 0;
+let unifiedMilestoneCount = 0;
+let unifiedNewClientMode = false;
+let unifiedClientAcIdx = -1;
+
+function _unifiedAttr(value) {
+  return esc(String(value ?? '')).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function _unifiedLineDefaultLabel(type) {
+  return { fixed:'Fixed labor', hourly:'Hourly labor', material:'Materials', other:'Other charge', credit:'Credit' }[type] || 'Labor';
+}
+
+function _unifiedLineTypeOptions(selected) {
+  const options = [
+    ['fixed', 'Fixed labor'],
+    ['hourly', 'Hourly labor'],
+    ['material', 'Materials'],
+    ['other', 'Other charge'],
+    ['credit', 'Credit']
+  ];
+  return options.map(([value, label]) => `<option value="${value}"${value === selected ? ' selected' : ''}>${label}</option>`).join('');
+}
+
+function _unifiedEmployeeId() {
+  const emps = state.users.filter(u => !u.isAdmin);
+  return emps.length > 1
+    ? (document.getElementById('uj_emp')?.value || emps[0]?.id || '')
+    : (emps[0]?.id || '');
+}
+
+function _unifiedEmployeeName() {
+  return getEmp(_unifiedEmployeeId())?.name || 'Employee';
+}
+
+function openUnifiedJobModal() {
+  if (!currentUser?.isAdmin) return;
+  unifiedNewClientMode = false;
+  unifiedClientAcIdx = -1;
+  unifiedLineCount = 0;
+  unifiedMilestoneCount = 0;
+  document.getElementById('uj_clientName').value = '';
+  document.getElementById('uj_clientId').value = '';
+  document.getElementById('uj_existingClientInfo').textContent = '';
+  document.getElementById('uj_newClientFields').style.display = 'none';
+  document.getElementById('uj_newClientBtn').textContent = 'NEW CLIENT';
+  document.getElementById('uj_newClientBtn').disabled = false;
+  ['uj_firstName','uj_surname','uj_company','uj_email','uj_phone','uj_address1','uj_address2','uj_city','uj_state','uj_postal'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  document.getElementById('uj_contactName').value = '';
+  document.getElementById('uj_date').value = today();
+  document.getElementById('uj_notes').value = '';
+  document.getElementById('uj_lineList').innerHTML = '';
+  document.getElementById('uj_milestoneList').innerHTML = '';
+  document.getElementById('uj_paymentMode').value = 'single';
+  populateEmpDropdown('uj_emp', 'uj_emp_wrap', null);
+  addUnifiedLine('fixed');
+  updateUnifiedJobDescriptionSummary();
+  setUnifiedPaymentMode('single');
+  document.getElementById('unifiedJobModal').classList.remove('hidden');
+}
+
+function addUnifiedLine(type = 'fixed', preset = {}) {
+  const safeType = ['fixed','hourly','material','other','credit'].includes(type) ? type : 'fixed';
+  unifiedLineCount++;
+  const id = unifiedLineCount;
+  const row = document.createElement('div');
+  row.className = 'unified-line-row';
+  row.id = `uj_line_${id}`;
+  row.dataset.lineId = String(id);
+  row._preset = { ...preset };
+  row.innerHTML = `
+    <div class="unified-line-head">
+      <select class="form-input" id="uj_type_${id}" onchange="renderUnifiedLine(${id})">${_unifiedLineTypeOptions(safeType)}</select>
+      <button type="button" class="btn btn-danger btn-sm btn-icon-only" onclick="removeUnifiedLine(${id})" title="Remove line" aria-label="Remove line">${jobIconSvg('trash')}</button>
+    </div>
+    <div id="uj_fields_${id}"></div>`;
+  document.getElementById('uj_lineList').appendChild(row);
+  renderUnifiedLine(id);
+}
+
+function renderUnifiedLine(id) {
+  const row = document.getElementById(`uj_line_${id}`);
+  if (!row) return;
+  const type = document.getElementById(`uj_type_${id}`)?.value || 'fixed';
+  const p = row._preset || {};
+  const description = p.description ?? (p.label && p.label !== _unifiedLineDefaultLabel(type) ? p.label : '');
+  const amount = p.amount ?? '';
+  const hours = p.hours ?? '';
+  const rate = p.rate ?? '';
+  const who = p.who === 'emp' ? 'emp' : 'owner';
+  const billClient = p.billClient !== false;
+  const empName = esc(_unifiedEmployeeName());
+  let html = '';
+
+  if (type === 'hourly') {
+    html = `
+      <div class="unified-line-fields">
+        <div class="form-group"><label class="form-label">Work description <span style="font-weight:400;color:var(--text3)">(optional)</span></label><input class="form-input" id="uj_desc_${id}" value="${_unifiedAttr(description)}" placeholder="What work was completed?" oninput="updateUnifiedJobDescriptionSummary()" /></div>
+        <div class="form-group"><label class="form-label">Hours</label><input class="form-input" id="uj_hours_${id}" type="number" min="0" step="0.25" value="${_unifiedAttr(hours)}" placeholder="0" oninput="updateUnifiedJobTotal()" /></div>
+        <div class="form-group"><label class="form-label">Rate ($/hr)</label><input class="form-input" id="uj_rate_${id}" type="number" min="0" step="0.01" value="${_unifiedAttr(rate)}" placeholder="0.00" oninput="updateUnifiedJobTotal()" /></div>
+      </div>
+      <div class="unified-line-total" id="uj_lineTotal_${id}"></div>`;
+  } else if (type === 'material') {
+    html = `
+      <div class="unified-line-fields">
+        <div class="form-group"><label class="form-label">Work description <span style="font-weight:400;color:var(--text3)">(optional)</span></label><input class="form-input" id="uj_desc_${id}" value="${_unifiedAttr(description)}" placeholder="What was purchased or used?" oninput="updateUnifiedJobDescriptionSummary()" /></div>
+        <div class="form-group"><label class="form-label">Amount ($)</label><input class="form-input" id="uj_amount_${id}" type="number" min="0" step="0.01" value="${_unifiedAttr(amount)}" placeholder="0.00" oninput="updateUnifiedJobTotal()" /></div>
+        <div class="form-group"><label class="form-label">Purchased by</label><select class="form-input" id="uj_who_${id}" onchange="updateUnifiedJobTotal()"><option value="owner"${who === 'owner' ? ' selected' : ''}>EHS</option><option value="emp"${who === 'emp' ? ' selected' : ''}>${empName}</option></select></div>
+      </div>
+      <div class="unified-checkbox"><input type="checkbox" id="uj_bill_${id}"${billClient ? ' checked' : ''} onchange="updateUnifiedJobTotal()" /><span>Bill this material to the client</span></div>`;
+  } else {
+    const isCredit = type === 'credit';
+    html = `
+      <div class="unified-line-fields unified-line-fields-two">
+        <div class="form-group"><label class="form-label">Work description <span style="font-weight:400;color:var(--text3)">(optional)</span></label><input class="form-input" id="uj_desc_${id}" value="${_unifiedAttr(description)}" placeholder="${isCredit ? 'Why is this credit applied?' : 'What work or charge was completed?'}" oninput="updateUnifiedJobDescriptionSummary()" /></div>
+        <div class="form-group"><label class="form-label">Amount ($)</label><input class="form-input" id="uj_amount_${id}" type="number" min="0" step="0.01" value="${_unifiedAttr(amount)}" placeholder="0.00" oninput="updateUnifiedJobTotal()" /></div>
+      </div>`;
+  }
+  document.getElementById(`uj_fields_${id}`).innerHTML = html;
+  updateUnifiedJobTotal();
+  updateUnifiedJobDescriptionSummary();
+}
+
+function removeUnifiedLine(id) {
+  document.getElementById(`uj_line_${id}`)?.remove();
+  updateUnifiedJobTotal();
+  updateUnifiedJobDescriptionSummary();
+}
+
+function readUnifiedLines() {
+  return [...document.querySelectorAll('#uj_lineList .unified-line-row')].map(row => {
+    const id = row.dataset.lineId;
+    const type = document.getElementById(`uj_type_${id}`)?.value || 'fixed';
+    const description = document.getElementById(`uj_desc_${id}`)?.value.trim() || '';
+    const label = description || _unifiedLineDefaultLabel(type);
+    const hours = _roundMoney(parseFloat(document.getElementById(`uj_hours_${id}`)?.value) || 0);
+    const rate = _roundMoney(parseFloat(document.getElementById(`uj_rate_${id}`)?.value) || 0);
+    const amount = type === 'hourly'
+      ? _roundMoney(hours * rate)
+      : _roundMoney(parseFloat(document.getElementById(`uj_amount_${id}`)?.value) || 0);
+    return {
+      id: uid(),
+      type,
+      label,
+      description,
+      amount,
+      hours,
+      rate,
+      who: document.getElementById(`uj_who_${id}`)?.value === 'emp' ? 'emp' : 'owner',
+      billClient: document.getElementById(`uj_bill_${id}`)?.checked !== false
+    };
+  });
+}
+
+function updateUnifiedJobDescriptionSummary() {
+  const summary = document.getElementById('uj_descriptionSummary');
+  if (!summary) return;
+  const descriptions = [...document.querySelectorAll('#uj_lineList .unified-line-row')]
+    .map(row => document.getElementById(`uj_desc_${row.dataset.lineId}`)?.value.trim() || '')
+    .filter(Boolean);
+  summary.textContent = descriptions.length
+    ? descriptions.join(', ')
+    : 'Line item descriptions will appear here as a comma-separated list.';
+  summary.classList.toggle('empty', !descriptions.length);
+}
+
+function updateUnifiedJobTotal() {
+  let fixed = 0, hourly = 0, billedMaterials = 0, internalMaterials = 0, other = 0, credits = 0;
+  document.querySelectorAll('#uj_lineList .unified-line-row').forEach(row => {
+    const id = row.dataset.lineId;
+    const type = document.getElementById(`uj_type_${id}`)?.value || 'fixed';
+    const hours = parseFloat(document.getElementById(`uj_hours_${id}`)?.value) || 0;
+    const rate = parseFloat(document.getElementById(`uj_rate_${id}`)?.value) || 0;
+    const amount = type === 'hourly'
+      ? _roundMoney(hours * rate)
+      : _roundMoney(parseFloat(document.getElementById(`uj_amount_${id}`)?.value) || 0);
+    const lineTotal = document.getElementById(`uj_lineTotal_${id}`);
+    if (lineTotal) lineTotal.textContent = type === 'hourly' ? `${hours || 0}h x ${fmt(rate)} = ${fmt(amount)}` : '';
+    if (type === 'fixed') fixed += amount;
+    else if (type === 'other') other += amount;
+    else if (type === 'hourly') hourly += amount;
+    else if (type === 'material') {
+      if (document.getElementById(`uj_bill_${id}`)?.checked !== false) billedMaterials += amount;
+      else internalMaterials += amount;
+    } else if (type === 'credit') credits += amount;
+  });
+  const clientTotal = _roundMoney(fixed + hourly + billedMaterials - credits);
+  const summary = document.getElementById('uj_totalSummary');
+  if (!summary) return;
+  const rows = [];
+  if (fixed > 0) rows.push(`<div class="unified-summary-row"><span>Fixed labor</span><strong>${fmt(fixed)}</strong></div>`);
+  if (hourly > 0) rows.push(`<div class="unified-summary-row"><span>Hourly labor</span><strong>${fmt(hourly)}</strong></div>`);
+  if (billedMaterials > 0) rows.push(`<div class="unified-summary-row"><span>Materials</span><strong>${fmt(billedMaterials)}</strong></div>`);
+  if (other > 0) rows.push(`<div class="unified-summary-row"><span>Other charges</span><strong>${fmt(other)}</strong></div>`);
+  if (credits > 0) rows.push(`<div class="unified-summary-row"><span>Credits</span><strong>-${fmt(credits)}</strong></div>`);
+  summary.innerHTML = `${rows.join('')}
+    <div class="unified-summary-row total"><span>Total client charges</span><strong>${fmt(clientTotal)}</strong></div>
+    ${internalMaterials > 0 ? `<div class="unified-summary-row" style="color:var(--text3);font-size:12px"><span>Materials not billed to client</span><strong>${fmt(internalMaterials)}</strong></div>` : ''}`;
+}
+
+function updateUnifiedNewClientButtonState() {
+  const input = document.getElementById('uj_clientName');
+  const btn = document.getElementById('uj_newClientBtn');
+  if (!input || !btn) return false;
+  const existing = clientById(document.getElementById('uj_clientId')?.value) || clientByName(input.value.trim());
+  btn.disabled = !!existing;
+  btn.textContent = 'NEW CLIENT';
+  if (existing && unifiedNewClientMode) {
+    unifiedNewClientMode = false;
+    const fields = document.getElementById('uj_newClientFields');
+    if (fields) fields.style.display = 'none';
+  }
+  return !!existing;
+}
+
+function toggleUnifiedNewClient() {
+  if (document.getElementById('uj_newClientBtn')?.disabled) return;
+  unifiedNewClientMode = !unifiedNewClientMode;
+  const fields = document.getElementById('uj_newClientFields');
+  const btn = document.getElementById('uj_newClientBtn');
+  if (unifiedNewClientMode) {
+    document.getElementById('uj_clientId').value = '';
+    hideUnifiedClientAC();
+    const parts = document.getElementById('uj_clientName').value.trim().split(/\s+/).filter(Boolean);
+    if (!document.getElementById('uj_firstName').value) document.getElementById('uj_firstName').value = parts[0] || '';
+    if (!document.getElementById('uj_surname').value) document.getElementById('uj_surname').value = parts.slice(1).join(' ');
+    fields.style.display = '';
+    btn.textContent = 'NEW CLIENT';
+    document.getElementById('uj_existingClientInfo').textContent = 'New client details will be saved with this job.';
+  } else {
+    fields.style.display = 'none';
+    btn.textContent = 'NEW CLIENT';
+    document.getElementById('uj_existingClientInfo').textContent = '';
+  }
+}
+
+function showUnifiedClientAC() {
+  const input = document.getElementById('uj_clientName');
+  const list = document.getElementById('uj_clientAcList');
+  if (!input || !list) return;
+  const selected = clientById(document.getElementById('uj_clientId').value);
+  if (selected && clientDisplayName(selected).toLowerCase() !== input.value.trim().toLowerCase()) {
+    document.getElementById('uj_clientId').value = '';
+    document.getElementById('uj_existingClientInfo').textContent = '';
+  }
+  updateUnifiedNewClientButtonState();
+  const q = input.value.toLowerCase().trim();
+  if (!q) { list.style.display = 'none'; return; }
+  const matches = (state.clients || []).filter(c => {
+    const haystack = [clientDisplayName(c), c.company, c.email].filter(Boolean).join(' ').toLowerCase();
+    return haystack.includes(q);
+  }).slice(0, 8);
+  unifiedClientAcIdx = -1;
+  list.innerHTML = matches.length ? matches.map(c => `
+    <div class="ac-item" data-id="${_unifiedAttr(c.id)}" onmousedown="pickUnifiedClient('${_unifiedAttr(c.id)}')">
+      <div>${esc(clientDisplayName(c))}</div>
+      ${c.email || c.city ? `<div style="font-size:11px;color:var(--text3)">${esc([c.city, c.email].filter(Boolean).join(' | '))}</div>` : ''}
+    </div>`).join('') : '';
+  list.style.display = matches.length ? 'block' : 'none';
+}
+
+function hideUnifiedClientAC() {
+  const list = document.getElementById('uj_clientAcList');
+  if (list) list.style.display = 'none';
+}
+
+function pickUnifiedClient(id) {
+  const c = clientById(id);
+  if (!c) return;
+  unifiedNewClientMode = false;
+  document.getElementById('uj_clientId').value = c.id;
+  document.getElementById('uj_clientName').value = clientDisplayName(c);
+  document.getElementById('uj_existingClientInfo').textContent = [c.email, c.phone].filter(Boolean).join(' | ') || 'Existing client selected.';
+  document.getElementById('uj_newClientFields').style.display = 'none';
+  updateUnifiedNewClientButtonState();
+  hideUnifiedClientAC();
+}
+
+function navigateUnifiedClientAC(e) {
+  const list = document.getElementById('uj_clientAcList');
+  if (!list || list.style.display === 'none') return;
+  const items = list.querySelectorAll('.ac-item');
+  if (e.key === 'ArrowDown') {
+    e.preventDefault(); unifiedClientAcIdx = Math.min(unifiedClientAcIdx + 1, items.length - 1);
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault(); unifiedClientAcIdx = Math.max(unifiedClientAcIdx - 1, -1);
+  } else if (e.key === 'Enter' && unifiedClientAcIdx >= 0) {
+    e.preventDefault(); pickUnifiedClient(items[unifiedClientAcIdx].dataset.id); return;
+  } else if (e.key === 'Escape') {
+    hideUnifiedClientAC(); return;
+  } else return;
+  items.forEach((el, i) => el.classList.toggle('ac-active', i === unifiedClientAcIdx));
+}
+
+function addUnifiedMilestoneField(label = '', pct = '') {
+  unifiedMilestoneCount++;
+  const id = unifiedMilestoneCount;
+  const div = document.createElement('div');
+  div.className = 'milestone-row';
+  div.id = `uj_mrow_${id}`;
+  div.innerHTML = `
+    <input class="form-input" placeholder="Label" value="${_unifiedAttr(label)}" id="uj_mllabel_${id}" style="flex:2" />
+    <input class="form-input" placeholder="%" type="number" min="0" value="${_unifiedAttr(pct)}" id="uj_mlpct_${id}" style="flex:1;max-width:80px" oninput="updateUnifiedMilestonePreview()" />
+    <button type="button" class="btn btn-danger btn-sm btn-icon-only" onclick="document.getElementById('uj_mrow_${id}').remove();updateUnifiedMilestonePreview()" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>`;
+  document.getElementById('uj_milestoneList').appendChild(div);
+  updateUnifiedMilestonePreview();
+}
+
+function updateUnifiedMilestonePreview() {
+  let total = 0;
+  document.querySelectorAll('#uj_milestoneList [id^="uj_mlpct_"]').forEach(el => { total += parseFloat(el.value) || 0; });
+  const err = document.getElementById('uj_milestoneError');
+  if (err) err.textContent = total > 0 && Math.abs(total - 100) > 0.01 ? `Milestones total ${total}%, must equal 100%.` : '';
+}
+
+function setUnifiedPaymentMode(mode) {
+  const select = document.getElementById('uj_paymentMode');
+  const dms = state.settings.defaultMilestones || [];
+  if (mode === 'default' && !dms.length) {
+    if (select) select.value = 'single';
+    mode = 'single';
+  }
+  const editor = document.getElementById('uj_milestoneEditor');
+  const hint = document.getElementById('uj_paymentHint');
+  const list = document.getElementById('uj_milestoneList');
+  if (!editor || !hint || !list) return;
+  list.innerHTML = '';
+  unifiedMilestoneCount = 0;
+  if (mode === 'single') {
+    editor.style.display = 'none';
+    hint.textContent = 'One invoice for the full client total.';
+    return;
+  }
+  editor.style.display = '';
+  hint.textContent = mode === 'default' ? 'Using the saved milestone template.' : 'Milestones must add up to 100%.';
+  if (mode === 'default') dms.forEach(m => addUnifiedMilestoneField(m.label, m.pct));
+  else addUnifiedMilestoneField();
+}
+
+function _readUnifiedMilestones() {
+  const mode = document.getElementById('uj_paymentMode')?.value || 'single';
+  if (mode === 'single') return [{ label:'Invoice', pct:100, status:'pending' }];
+  const milestones = [];
+  let total = 0;
+  document.querySelectorAll('#uj_milestoneList [id^="uj_mlpct_"]').forEach((el, i) => {
+    const id = el.id.slice('uj_mlpct_'.length);
+    const pct = _roundPct(parseFloat(el.value) || 0);
+    const label = document.getElementById(`uj_mllabel_${id}`)?.value.trim() || `Milestone ${i + 1}`;
+    if (pct > 0) milestones.push({ id:uid(), label, pct, status:'pending' });
+    total += pct;
+  });
+  if (!milestones.length || Math.abs(total - 100) > 0.01) {
+    showAlert(`Milestone percentages add up to ${total}%, not 100%.`);
+    return null;
+  }
+  return milestones;
+}
+
+async function saveUnifiedJob() {
+  if (!currentUser?.isAdmin || isSaving) return;
+  const name = document.getElementById('uj_clientName').value.trim();
+  const contactName = document.getElementById('uj_contactName').value.trim();
+  const date = document.getElementById('uj_date').value || today();
+  if (!name) { showAlert('Please enter a client name.'); return; }
+
+  let client = clientById(document.getElementById('uj_clientId').value) || clientByName(name);
+  if (!client && !unifiedNewClientMode) {
+    showAlert('Select an existing client, or click New client details before saving.');
+    return;
+  }
+  if (!client) {
+    const parts = name.split(/\s+/).filter(Boolean);
+    const firstName = document.getElementById('uj_firstName').value.trim() || parts[0] || '';
+    const surname = document.getElementById('uj_surname').value.trim() || parts.slice(1).join(' ');
+    const company = document.getElementById('uj_company').value.trim();
+    if (!firstName && !surname && !company) { showAlert('Enter at least a client name or company.'); return; }
+    client = {
+      id: uid(), squareId:'', refId:'', firstName, surname, company,
+      email: document.getElementById('uj_email').value.trim(),
+      phone: document.getElementById('uj_phone').value.trim(),
+      address1: document.getElementById('uj_address1').value.trim(),
+      address2: document.getElementById('uj_address2').value.trim(),
+      city: document.getElementById('uj_city').value.trim(),
+      state: document.getElementById('uj_state').value.trim(),
+      postal: document.getElementById('uj_postal').value.trim(),
+      birthday:'', memo:'', emailSubStatus:'',
+      firstVisit: date, lastVisit: date, txCount:0, lifetimeSpend:'', clientNotes:[]
+    };
+  }
+
+  const lines = readUnifiedLines();
+  if (!lines.length) { showAlert('Add at least one work or charge line.'); return; }
+  if (lines.some(line => line.amount <= 0)) { showAlert('Every work and charge line needs an amount greater than $0.'); return; }
+
+  const hourlyItems = lines.filter(line => line.type === 'hourly');
+  const hourlyOnly = hourlyItems.length > 0 && !lines.some(line => ['fixed','other','credit'].includes(line.type));
+  const quoteItems = lines
+    .filter(line => line.type === 'fixed')
+    .map(line => ({ id:line.id, label:line.label, description:line.description, amount:line.amount }));
+  const materials = lines.filter(line => line.type === 'material').map(line => ({
+    id: line.id,
+    label: line.label,
+    description: line.description,
+    amount: line.amount,
+    who: line.who,
+    billClient: !!line.billClient,
+    chargeAmount: line.billClient ? line.amount : 0,
+    costAmount: line.amount
+  }));
+  const subtractions = lines.filter(line => line.type === 'credit').map(line => ({
+    id:line.id, label:line.label, description:line.description, amount:line.amount, date, status:'pending', sourceItemId:null
+  }));
+  const addOns = [
+    ...hourlyItems.map(line => ({
+      id:line.id, label:line.label, description:line.description, amount:line.amount, date, status:'pending', isHours:true, hours:line.hours, rate:line.rate, chargeType:'hourly'
+    })),
+    ...lines.filter(line => line.type === 'other').map(line => ({
+      id:line.id, label:line.label, description:line.description, amount:line.amount, date, status:'pending', chargeType:'other'
+    })),
+    ...(!hourlyOnly ? lines.filter(line => line.type === 'material' && line.billClient).map(line => ({
+      id:uid(), label:line.label, description:line.description, amount:line.amount, date, status:'pending', chargeType:'materials', sourceItemId:line.id
+    })) : [])
+  ];
+  const quote = _roundMoney(quoteItems.reduce((sum, line) => sum + line.amount, 0));
+  const milestones = hourlyOnly || quote <= 0 ? [] : _readUnifiedMilestones();
+  if (milestones === null) return;
+  if (client.id && !clientById(client.id)) {
+    if (!state.clients) state.clients = [];
+    state.clients.push(client);
+  }
+  const hourlyRate = hourlyItems.length ? hourlyItems[0].rate : 0;
+  const notes = document.getElementById('uj_notes').value.trim();
+  const workSummary = lines.map(line => line.description).filter(Boolean).join(', ');
+  const jobId = uid();
+  const contactClient = clientByName(contactName);
+  const job = {
+    id: jobId,
+    name,
+    contactName,
+    clientId: client.id,
+    contactClientId: contactClient?.id || '',
+    quote,
+    date,
+    isItemized: quoteItems.length > 0,
+    quoteItems,
+    status:'active',
+    milestones,
+    addOns,
+    subtractions,
+    materials,
+    advances:[],
+    fees:[],
+    jobNotes: notes ? [{ id:uid(), text:notes, date, authorId:currentUser.id, authorName:currentUser.name }] : [],
+    workSummary,
+    hours:[],
+    partialCollections:[],
+    repaymentMode:false,
+    revenueItems:[],
+    jobType: hourlyOnly ? 'hourly' : 'quoted',
+    hourlyRate,
+    hourlyStatus:'pending',
+    hourlySquareInvoiceId:'',
+    employeeId:_unifiedEmployeeId(),
+    createdVia:'unified-v2',
+    unifiedLines: lines
+  };
+  state.jobs.push(job);
+  expandedJobs.clear();
+  expandedJobs.add(jobId);
+  saveExpandedState();
+  await save();
+  renderAll();
+  closeModal('unifiedJobModal');
+}
+
 // ─── ADD ITEM MODAL ───────────────────────────────────────────────────────────
 function openAddItem(jobId, type, itemId = null) {
   addItemContext = { jobId, type, itemId };
@@ -3917,6 +4442,10 @@ function openAddItem(jobId, type, itemId = null) {
   const isHourly = _jobType(job) === 'hourly';
   const en = esc(getEmp(job?.employeeId)?.name || 'Employee');
   const isEdit = !!itemId;
+  const existingMaterial = isEdit ? (job?.materials || []).find(x => x.id === itemId) : null;
+  const defaultBillClient = existingMaterial?.billClient !== undefined
+    ? !!existingMaterial.billClient
+    : (isHourly ? Number(existingMaterial?.chargeAmount ?? existingMaterial?.amount ?? 0) > 0 : true);
   const titles = {
     revenue: isEdit ? 'Edit Revenue Entry' : 'Add Revenue Entry',
     addon: isEdit ? 'Edit Addition' : 'Add Addition',
@@ -3978,7 +4507,8 @@ function openAddItem(jobId, type, itemId = null) {
       <div class="form-group"><label class="form-label">Amount ($)</label><input class="form-input" id="ai_amount" type="number" step="0.01" placeholder="0.00" /></div>
       <div class="form-group"><label class="form-label">Purchased by</label>
         <select class="form-input" id="ai_who"><option value="owner">EHS</option><option value="emp">${en}</option></select>
-      </div>`;
+      </div>
+      <div class="unified-checkbox"><input type="checkbox" id="ai_billClient"${defaultBillClient ? ' checked' : ''} /><span>Bill this material to the client</span></div>`;
   } else if (type==='advance') {
     html=`<div class="form-group"><label class="form-label">Description / Note</label><input class="form-input" id="ai_label" placeholder="e.g. Weekly pay" /></div>
       <div class="form-group">
@@ -4153,17 +4683,20 @@ function saveItem() {
   } else if (type==='material') {
     const who = document.getElementById('ai_who').value;
     const costAmount = amount;
+    const billClient = document.getElementById('ai_billClient')?.checked !== false;
+    const chargeAmount = billClient ? amount : 0;
     if (itemId) {
       const item = job.materials.find(x=>x.id===itemId);
       if (item) {
         item.label = label;
         item.amount = amount;
         item.who = who;
-        item.chargeAmount = amount;
+        item.billClient = billClient;
+        item.chargeAmount = chargeAmount;
         item.costAmount = costAmount;
       }
     } else {
-      job.materials.push({ id:uid(), label, amount, who, chargeAmount: amount, costAmount: costAmount });
+      job.materials.push({ id:uid(), label, amount, who, billClient, chargeAmount, costAmount: costAmount });
     }
   } else if (type==='advance') {
     const date = document.getElementById('ai_date')?.value||'';

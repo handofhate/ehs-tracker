@@ -322,6 +322,32 @@
   .milestone-list { margin-top: 8px; }
   .milestone-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
   .add-item-row { display: flex; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
+  .unified-line-row { background: var(--bg3); border: 1px solid var(--border); border-radius: 4px; padding: 10px; margin-bottom: 10px; }
+  .unified-line-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; width: 100%; }
+  .unified-line-head .form-input { flex: 1; min-width: 0; width: 100%; }
+  .unified-client-entry { display: flex; gap: 8px; align-items: flex-start; }
+  .unified-client-entry .ac-wrap { flex: 1; min-width: 0; }
+  .unified-client-entry > .btn { height: 42px; align-self: stretch; }
+  .unified-client-entry > .btn:disabled,
+  .unified-client-entry > .btn:disabled:hover { background: var(--bg3); border-color: var(--border); color: var(--text3); opacity: 0.6; cursor: not-allowed; }
+  .unified-modal-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 24px; }
+  .unified-modal-header .modal-title { margin-bottom: 0; }
+  .unified-start-date { width: 190px; flex: 0 0 190px; margin-bottom: 0; }
+  .unified-line-fields { display: grid; grid-template-columns: minmax(0, 2.4fr) minmax(0, 0.7fr) minmax(0, 0.9fr); gap: 8px; align-items: end; width: 100%; }
+  .unified-line-fields-two { grid-template-columns: minmax(0, 3fr) minmax(0, 1fr); }
+  .unified-line-fields .form-group { margin-bottom: 0; }
+  .unified-line-total { font-family: var(--mono); color: var(--accent); font-size: 15px; white-space: nowrap; padding-bottom: 10px; }
+  .unified-checkbox { display: flex; align-items: center; gap: 7px; min-height: 42px; padding: 0 4px 8px; font-family: var(--mono); font-size: 12px; color: var(--text2); }
+  .unified-checkbox input { width: 15px; height: 15px; cursor: pointer; accent-color: var(--accent); }
+  .unified-summary { background: var(--bg3); border: 1px solid var(--border2); border-radius: 4px; padding: 12px 14px; margin: 14px 0; font-family: var(--mono); font-size: 14px; }
+  .unified-summary-row { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; }
+  .unified-summary-row.total { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 8px; color: var(--accent); font-size: 17px; }
+  .unified-description-summary { background: var(--bg3); border: 1px solid var(--border2); border-radius: 4px; padding: 12px 14px; margin: 14px 0; font-family: var(--mono); font-size: 14px; color: var(--text2); line-height: 1.5; }
+  .unified-description-summary.empty { color: var(--text3); }
+  .unified-section-title { font-family: var(--mono); font-size: 13px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text3); margin: 20px 0 10px; }
+  .unified-client-note { font-family: var(--mono); font-size: 12px; color: var(--text3); margin-top: 6px; }
+  .unified-line-add-buttons { display: flex; gap: 6px; flex-wrap: nowrap; margin-bottom: 10px; }
+  .unified-line-add-buttons .btn { flex: 1 1 0; min-width: 0; padding: 6px 4px; font-size: 11px; letter-spacing: 0; white-space: nowrap; }
 
   .tabs-wrap { position: relative; overflow: hidden; }
   .tabs-arr { display: none; }
@@ -443,10 +469,11 @@
     .header-actions .btn-ghost.btn-sm,
     .header-actions .btn-primary { padding: 14px 14px; font-size: 20px; white-space: nowrap; text-align: left; }
     #newJobBtn { order: 1; }
-    #payOutBtn { order: 2; }
-    #splitPayBtn { order: 3; }
-    #splitLedgerBtn { order: 4; }
-    #undoRedoRow { order: 5; }
+    #newUnifiedJobBtn { order: 2; }
+    #payOutBtn { order: 3; }
+    #splitPayBtn { order: 4; }
+    #splitLedgerBtn { order: 5; }
+    #undoRedoRow { order: 6; }
     #settingsBtn, #settingsEmpBtn, #signOutBtn { order: 50; }
     .desktop-menu-divider { order: 49; margin: 18px 0 14px; }
     .desktop-menu-divider { display: none !important; }
@@ -573,6 +600,11 @@
 
     /* Forms */
     .form-row { grid-template-columns: 1fr; }
+    .unified-line-fields { grid-template-columns: 1fr; }
+    .unified-line-total { padding-bottom: 0; }
+    .unified-modal-header { gap: 8px; }
+    .unified-start-date { width: 160px; flex-basis: 160px; }
+    .unified-line-add-buttons .btn { padding-left: 2px; padding-right: 2px; font-size: 10px; }
     .modal { padding: 20px 16px; }
     .modal-title { font-size: 15px; margin-bottom: 18px; }
 
@@ -768,6 +800,7 @@
     <button class="btn btn-ghost btn-sm desktop-menu-trigger" id="desktopMenuBtn" onclick="toggleDesktopMenu()" aria-label="Open actions menu"><i class="ph ph-list"></i> Menu</button>
     <div class="desktop-menu-panel" id="desktopMenuPanel">
       <button class="btn btn-primary header-admin" id="newJobBtn" onclick="openNewJobModal()">+ New Job</button>
+      <button class="btn btn-ghost btn-sm header-admin" id="newUnifiedJobBtn" onclick="openUnifiedJobModal()">+ Quick Job</button>
       <button class="btn btn-ghost btn-sm header-admin" id="payOutBtn" onclick="openPayOut()">$ Pay Out</button>
       <button class="btn btn-ghost btn-sm header-admin" id="splitPayBtn" onclick="openSplitPay()"><i class="ph ph-split-horizontal"></i> Split Pay</button>
       <button class="btn btn-ghost btn-sm header-admin" id="splitLedgerBtn" onclick="openSplitLedger()"><i class="ph ph-book-open-text"></i> Ledger</button>
@@ -924,6 +957,93 @@
     </div>
   </div>
 </div>
+
+<!-- UNIFIED QUICK JOB MODAL -->
+<div id="unifiedJobModal" class="modal-overlay hidden">
+  <div class="modal modal-wide">
+    <div class="unified-modal-header">
+      <div class="modal-title">NEW JOB</div>
+      <div class="form-group unified-start-date"><input class="form-input" id="uj_date" type="date" aria-label="Start date" /></div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Client Name</label>
+      <div class="unified-client-entry">
+        <div class="ac-wrap">
+          <input class="form-input" id="uj_clientName" placeholder="Select an existing client or enter a new one" autocomplete="off" oninput="showUnifiedClientAC()" onkeydown="navigateUnifiedClientAC(event)" onblur="setTimeout(()=>hideUnifiedClientAC(),150)" />
+          <input type="hidden" id="uj_clientId" />
+          <div id="uj_clientAcList" class="ac-list" style="display:none"></div>
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm" id="uj_newClientBtn" onclick="toggleUnifiedNewClient()">NEW CLIENT</button>
+      </div>
+      <div id="uj_existingClientInfo" class="unified-client-note"></div>
+    </div>
+    <div id="uj_newClientFields" style="display:none;border:1px solid var(--border);border-radius:4px;padding:10px 12px;margin-bottom:16px">
+      <div class="unified-client-note" style="margin:0 0 10px">These details will be saved with the job and added to Clients.</div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">First Name</label><input class="form-input" id="uj_firstName" /></div>
+        <div class="form-group"><label class="form-label">Last Name</label><input class="form-input" id="uj_surname" /></div>
+      </div>
+      <div class="form-group"><label class="form-label">Company</label><input class="form-input" id="uj_company" /></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Email</label><input class="form-input" id="uj_email" type="email" /></div>
+        <div class="form-group"><label class="form-label">Phone</label><input class="form-input" id="uj_phone" type="tel" /></div>
+      </div>
+      <div class="form-group"><label class="form-label">Address</label><input class="form-input" id="uj_address1" placeholder="Street address" style="margin-bottom:6px" /><input class="form-input" id="uj_address2" placeholder="Suite, unit, etc." /></div>
+      <div class="form-row" style="margin-bottom:0">
+        <div class="form-group"><label class="form-label">City</label><input class="form-input" id="uj_city" /></div>
+        <div class="form-group"><label class="form-label">State</label><input class="form-input" id="uj_state" maxlength="2" /></div>
+        <div class="form-group"><label class="form-label">Zip</label><input class="form-input" id="uj_postal" /></div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Contact Name <span style="font-weight:400;color:var(--text3)">(optional - if different from client)</span></label>
+      <input class="form-input" id="uj_contactName" placeholder="e.g. property manager or contractor" />
+    </div>
+    <div class="form-group" id="uj_emp_wrap"><label class="form-label">Assign to Employee</label><select class="form-input" id="uj_emp"></select></div>
+
+    <div class="form-group">
+      <label class="form-label">Work / invoice notes <span style="font-weight:400;color:var(--text3)">(optional)</span></label>
+      <textarea class="form-input" id="uj_notes" placeholder="Describe the completed work. These notes are saved on the job for reference when creating the invoice."></textarea>
+    </div>
+
+    <div class="unified-section-title">Work and charges</div>
+    <div id="uj_lineList"></div>
+    <div class="unified-line-add-buttons">
+      <button type="button" class="btn btn-ghost btn-sm" onclick="addUnifiedLine('fixed')">+ Fixed</button>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="addUnifiedLine('hourly')">+ Hourly</button>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="addUnifiedLine('material')">+ Materials</button>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="addUnifiedLine('other')">+ Other</button>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="addUnifiedLine('credit')">+ Credit</button>
+    </div>
+
+    <div class="unified-section-title">Work summary</div>
+    <div id="uj_descriptionSummary" class="unified-description-summary empty">Line item descriptions will appear here as a comma-separated list.</div>
+
+    <div class="unified-section-title">Charge summary</div>
+    <div id="uj_totalSummary" class="unified-summary"></div>
+
+    <div class="unified-section-title">Payment structure</div>
+    <div class="form-group">
+      <select class="form-input" id="uj_paymentMode" onchange="setUnifiedPaymentMode(this.value)">
+        <option value="single">Single invoice</option>
+        <option value="default">Use saved defaults</option>
+        <option value="custom">Custom milestones</option>
+      </select>
+      <div id="uj_paymentHint" class="unified-client-note">One invoice for the full client total.</div>
+      <div id="uj_milestoneEditor" style="display:none;margin-top:10px">
+        <div id="uj_milestoneList"></div>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="addUnifiedMilestoneField()">+ Add milestone</button>
+        <div id="uj_milestoneError" style="color:var(--red);font-size:13px;margin-top:5px"></div>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('unifiedJobModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveUnifiedJob()">Save Job</button>
+    </div>
+  </div>
+</div>
+
 <div class="mobile-menu-backdrop" id="mobileMenuBackdrop" onclick="closeMobileMenu()"></div>
 <!-- ADD ITEM MODAL -->
 <div id="addItemModal" class="modal-overlay hidden">
