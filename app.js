@@ -1482,21 +1482,64 @@ function getJobBillingSummary(job, calc = null) {
   return summary;
 }
 
+function _jobBillingEntries(job) {
+  if (!job) return [];
+  if (_jobType(job) === 'hourly') {
+    const amount = calcJob(job).contractTotal || 0;
+    return Math.abs(Number(amount)) >= 0.005 ? [{ item: job, hourly: true, amount }] : [];
+  }
+  const quote = Number(job.quote || 0);
+  return [
+    ...(job.milestones || []).map(item => ({ item, amount: ((item.pct || 0) / 100) * quote })),
+    ...(job.revenueItems || []).map(item => ({ item, amount: Number(item.amount || 0) })),
+    ...(job.addOns || []).map(item => ({ item, amount: Number(item.amount || 0) })),
+    ...(job.subtractions || []).map(item => ({ item, amount: -Number(item.amount || 0) }))
+  ].filter(entry => Math.abs(Number(entry.amount || 0)) >= 0.005);
+}
+
+function setAllBillingStatus(jobId, status) {
+  if (!currentUser?.isAdmin || !['pending', 'invoiced', 'collected'].includes(status)) return;
+  const job = state.jobs.find(j => j.id === jobId);
+  if (!job) return;
+  _jobBillingEntries(job).forEach(({ item, hourly }) => {
+    if (hourly) {
+      job.hourlyStatus = status;
+      if (status === 'pending') job.hourlySquareInvoiceId = '';
+    } else {
+      item.status = status;
+    }
+  });
+  save();
+  renderJobs();
+}
+
 function jobBillingSummaryHtml(job, calc = null) {
   const summary = getJobBillingSummary(job, calc);
   const cfg = {
     pending: { label: 'Pending', cls: 'pending' },
-    invoiced: { label: 'Invoiced', cls: 'invoiced' }
+    invoiced: { label: 'Invoiced', cls: 'invoiced' },
+    paid: { label: 'Paid', cls: 'paid' }
   };
-  const parts = ['pending', 'invoiced']
+  const parts = ['pending', 'invoiced', 'paid']
     .filter(k => summary[k].count > 0)
     .map(k => {
       const s = summary[k];
       const label = cfg[k].label;
       const lineLabel = s.count === 1 ? 'line' : 'lines';
-      return `<span class="job-billing-pill ${cfg[k].cls}" title="${label}: ${s.count} ${lineLabel}, ${fmt(s.total)}"><span>${label}</span><strong>${s.count}</strong><em>${fmt(s.total)}</em></span>`;
+      return `<span class="job-billing-pill ${cfg[k].cls}" title="${label}: ${s.count} ${lineLabel}"><strong>${s.count}</strong><span>${label}</span></span>`;
     });
-  return parts.length ? `<div class="job-billing-strip" aria-label="Invoice status summary">${parts.join('')}</div>` : '';
+  if (!parts.length) return '';
+  const bulkAction = currentUser?.isAdmin
+    ? `<details class="job-billing-menu" onclick="event.stopPropagation()">
+        <summary class="job-billing-action" title="Set every invoiceable line to one status">Set all</summary>
+        <div class="job-billing-menu-popover" role="menu" aria-label="Set all billing statuses">
+          <button type="button" role="menuitem" onclick="event.stopPropagation();setAllBillingStatus('${job.id}','pending')">Pending</button>
+          <button type="button" role="menuitem" onclick="event.stopPropagation();setAllBillingStatus('${job.id}','invoiced')">Invoiced</button>
+          <button type="button" role="menuitem" onclick="event.stopPropagation();setAllBillingStatus('${job.id}','collected')">Paid</button>
+        </div>
+      </details>`
+    : '';
+  return `<div class="job-billing-strip" aria-label="Invoice status summary">${parts.join('')}${bulkAction}</div>`;
 }
 
 function jobClientChargeSummaryHtml(job, calc = null) {
@@ -1967,7 +2010,7 @@ function jobDetail(job, c) {
             <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
               <div class="line-item-value ${st==='collected' ? 'green' : 'dim'}">${fmt(ga.amount)}</div>
               ${showStatusBadge ? badgeHtml(st,job.id,'addOns',gi) : ''}
-              <button class="btn btn-ghost btn-sm admin-only job-icon-btn" onclick="openAddItem('${job.id}','${editType}','${ga.id}')" title="Edit" aria-label="Edit">${jobIconSvg('edit')}</button>
+              <button class="btn btn-ghost btn-sm admin-only job-icon-btn" onclick="openAddItem('${job.id}','${ga.chargeType === 'materials' && ga.sourceItemId ? 'material' : editType}','${ga.chargeType === 'materials' && ga.sourceItemId ? ga.sourceItemId : ga.id}')" title="Edit" aria-label="Edit">${jobIconSvg('edit')}</button>
               <button class="btn btn-danger btn-sm btn-icon-only admin-only" onclick="removeItem('${job.id}','addOns',${gi})" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
             </div>
           </div>`;
@@ -1993,7 +2036,7 @@ function jobDetail(job, c) {
         <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
           <div class="line-item-value ${st==='collected' ? 'green' : 'dim'}">${fmt(a.amount)}</div>
           ${showStatusBadge ? badgeHtml(st,job.id,'addOns',i) : ''}
-          <button class="btn btn-ghost btn-sm admin-only job-icon-btn" onclick="openAddItem('${job.id}','${editType}','${a.id}')" title="Edit" aria-label="Edit">${jobIconSvg('edit')}</button>
+          <button class="btn btn-ghost btn-sm admin-only job-icon-btn" onclick="openAddItem('${job.id}','${a.chargeType === 'materials' && a.sourceItemId ? 'material' : editType}','${a.chargeType === 'materials' && a.sourceItemId ? a.sourceItemId : a.id}')" title="Edit" aria-label="Edit">${jobIconSvg('edit')}</button>
           <button class="btn btn-danger btn-sm btn-icon-only admin-only" onclick="removeItem('${job.id}','addOns',${i})" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
         </div>
       </div>`;
@@ -3470,6 +3513,16 @@ function removeItem(jobId, key, idx) {
     showAlert('This subtraction was applied by a partial payment and cannot be deleted.');
     return;
   }
+  if (key === 'addOns' && item?.chargeType === 'materials' && item.sourceItemId) {
+    const material = (j.materials || []).find(m => m.id === item.sourceItemId);
+    if (material) {
+      material.billClient = false;
+      material.chargeAmount = 0;
+    }
+  }
+  if (key === 'materials' && item?.id) {
+    j.addOns = (j.addOns || []).filter(a => !(a.chargeType === 'materials' && a.sourceItemId === item.id));
+  }
   j[key].splice(idx,1); save(); renderJobs();
 }
 
@@ -3742,6 +3795,10 @@ function openNewJobModal() {
 function editJob(id) {
   const job = state.jobs.find(j=>j.id===id);
   if (!job) return;
+  if (job.createdVia === 'unified-v2') {
+    openUnifiedJobModal(id);
+    return;
+  }
   const jobType = _jobType(job);
   editingJobId = id;
   document.getElementById('jobModalTitle').textContent = 'Edit Job';
@@ -3961,6 +4018,9 @@ let unifiedLineCount = 0;
 let unifiedMilestoneCount = 0;
 let unifiedNewClientMode = false;
 let unifiedClientAcIdx = -1;
+let unifiedEditJobId = null;
+let unifiedEditPrimaryNoteId = '';
+let unifiedEditFinancialLocked = false;
 
 function _unifiedAttr(value) {
   return esc(String(value ?? '')).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -3992,12 +4052,141 @@ function _unifiedEmployeeName() {
   return getEmp(_unifiedEmployeeId())?.name || 'Employee';
 }
 
-function openUnifiedJobModal() {
+function _unifiedJobHasFinancialHistory(job) {
+  if (!job) return false;
+  if ((job.partialCollections || []).length || hasPartialFinancialState(job)) return true;
+  if ((job.advances || []).length || (job.fees || []).length) return true;
+  if (job.hourlySquareInvoiceId || ['invoiced', 'collected'].includes(job.hourlyStatus)) return true;
+  const items = [
+    ...(job.quoteItems || []),
+    ...(job.materials || []),
+    ...(job.milestones || []),
+    ...(job.revenueItems || []),
+    ...(job.addOns || []),
+    ...(job.subtractions || [])
+  ];
+  return items.some(item =>
+    ['invoiced', 'collected'].includes(item?.status) ||
+    item?.squareInvoiceId || item?.squareOrderId || item?.billingState === 'paid' ||
+    item?.partialState || item?.partialGroupId || item?.partialMode || item?.partialDate
+  );
+}
+
+function _unifiedPrimaryNote(job) {
+  const notes = job?.jobNotes || [];
+  const tagged = notes.find(note => note?.source === 'unified-job');
+  if (tagged || unifiedEditFinancialLocked) return tagged || null;
+  return notes.length === 1 ? notes[0] : (notes[0]?.date === job?.date ? notes[0] : null);
+}
+
+function _unifiedMilestoneSource(job) {
+  if (unifiedEditFinancialLocked && (job?.partialCollections || []).length) {
+    const original = job.partialCollections[0]?.snapshotBefore?.milestones;
+    if (Array.isArray(original) && original.length) return original;
+  }
+  return Array.isArray(job?.milestones) ? job.milestones : [];
+}
+
+function _unifiedLineDescription(base, record, type) {
+  if (record?.description !== undefined) return record.description || '';
+  if (base?.description !== undefined) return base.description || '';
+  return record?.label && record.label !== _unifiedLineDefaultLabel(type) ? record.label : '';
+}
+
+function _unifiedEditLinePresets(job) {
+  const stored = Array.isArray(job?.unifiedLines) ? job.unifiedLines : [];
+  const lines = [];
+  const find = (items, id) => (items || []).find(item => item?.id === id);
+  const findAddOn = id => find(job?.addOns, id);
+  const findMaterialCharge = id => (job?.addOns || []).find(item => item?.chargeType === 'materials' && item?.sourceItemId === id);
+
+  stored.forEach(base => {
+    const type = ['fixed', 'hourly', 'material', 'other', 'credit'].includes(base?.type) ? base.type : 'fixed';
+    const id = base?.id || '';
+    let record = null;
+    if (type === 'fixed') record = find(job?.quoteItems, id);
+    if (type === 'hourly' || type === 'other') record = findAddOn(id);
+    if (type === 'material') record = find(job?.materials, id);
+    if (type === 'credit') record = find(job?.subtractions, id);
+    // A deleted original line should stay deleted when the unified editor opens.
+    if (!record) return;
+
+    const preset = { ...base, id, type, description: _unifiedLineDescription(base, record, type) };
+    if (!unifiedEditFinancialLocked) {
+      if (type === 'fixed') preset.amount = _roundMoney(record.amount);
+      if (type === 'hourly') {
+        preset.amount = _roundMoney(record.amount);
+        preset.hours = _roundMoney(record.hours);
+        preset.rate = _roundMoney(record.rate);
+      }
+      if (type === 'other' || type === 'credit') preset.amount = _roundMoney(record.amount);
+      if (type === 'material') {
+        preset.amount = _roundMoney(record.clientAmount ?? record.chargeAmount ?? record.amount);
+        preset.clientAmount = preset.amount;
+        preset.reimbursementAmount = _roundMoney(record.reimbursementAmount ?? record.costAmount ?? record.amount);
+        preset.who = record.who;
+        preset.billClient = record.billClient !== false;
+      }
+    }
+    if (type === 'material' && unifiedEditFinancialLocked) {
+      preset.amount = _roundMoney(base.amount);
+      preset.clientAmount = preset.amount;
+      preset.reimbursementAmount = _roundMoney(base.reimbursementAmount ?? base.amount);
+      preset.who = base.who || record.who;
+      preset.billClient = base.billClient !== false;
+    }
+    lines.push(preset);
+  });
+
+  if (lines.length || stored.length) return lines;
+
+  // Graceful fallback for an early unified record that predates unifiedLines.
+  (job?.quoteItems || []).forEach(item => lines.push({ id:item.id, type:'fixed', label:item.label, description:_unifiedLineDescription({}, item, 'fixed'), amount:_roundMoney(item.amount) }));
+  (job?.addOns || []).forEach(item => {
+    if (item.chargeType === 'materials') return;
+    const type = item.isHours ? 'hourly' : 'other';
+    lines.push({ id:item.id, type, label:item.label, description:_unifiedLineDescription({}, item, type), amount:_roundMoney(item.amount), hours:_roundMoney(item.hours), rate:_roundMoney(item.rate) });
+  });
+  (job?.materials || []).forEach(item => lines.push({
+    id:item.id, type:'material', label:item.label, description:_unifiedLineDescription({}, item, 'material'),
+    amount:_roundMoney(item.clientAmount ?? item.chargeAmount ?? item.amount),
+    reimbursementAmount:_roundMoney(item.reimbursementAmount ?? item.costAmount ?? item.amount),
+    who:item.who, billClient:item.billClient !== false
+  }));
+  (job?.subtractions || []).forEach(item => lines.push({ id:item.id, type:'credit', label:item.label, description:_unifiedLineDescription({}, item, 'credit'), amount:_roundMoney(item.amount) }));
+  return lines;
+}
+
+function applyUnifiedEditLock() {
+  const locked = unifiedEditFinancialLocked;
+  const selectors = [
+    '#uj_clientName', '#uj_newClientBtn', '#uj_date', '#uj_emp',
+    '#uj_paymentMode', '#uj_lineList select[id^="uj_type_"]',
+    '#uj_lineList input[id^="uj_amount_"]', '#uj_lineList input[id^="uj_hours_"]',
+    '#uj_lineList input[id^="uj_rate_"]', '#uj_lineList input[id^="uj_reimbursementAmount_"]',
+    '#uj_lineList select[id^="uj_who_"]', '#uj_lineList input[id^="uj_bill_"]',
+    '#uj_lineList .unified-line-head button', '.unified-line-add-buttons button',
+    '#uj_milestoneList input', '#uj_milestoneList button', '#uj_milestoneEditor > button'
+  ];
+  document.querySelectorAll(selectors.join(',')).forEach(el => { el.disabled = locked; });
+  document.querySelectorAll('#uj_newClientFields input').forEach(el => { el.disabled = locked; });
+  const note = document.getElementById('uj_editLockNote');
+  if (note) note.style.display = locked ? '' : 'none';
+}
+
+function openUnifiedJobModal(jobId = null) {
   if (!currentUser?.isAdmin) return;
+  const job = jobId ? state.jobs.find(item => item.id === jobId) : null;
+  if (jobId && (!job || job.createdVia !== 'unified-v2')) return;
+  unifiedEditJobId = job?.id || null;
+  unifiedEditFinancialLocked = _unifiedJobHasFinancialHistory(job);
+  unifiedEditPrimaryNoteId = '';
   unifiedNewClientMode = false;
   unifiedClientAcIdx = -1;
   unifiedLineCount = 0;
   unifiedMilestoneCount = 0;
+  document.getElementById('uj_modalTitle').textContent = job ? 'EDIT JOB' : 'NEW JOB';
+  document.getElementById('uj_saveBtn').textContent = job ? 'Save Changes' : 'Save Job';
   document.getElementById('uj_clientName').value = '';
   document.getElementById('uj_clientId').value = '';
   document.getElementById('uj_existingClientInfo').textContent = '';
@@ -4008,16 +4197,36 @@ function openUnifiedJobModal() {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
-  document.getElementById('uj_contactName').value = '';
-  document.getElementById('uj_date').value = today();
-  document.getElementById('uj_notes').value = '';
+  const editClient = job && (clientById(job.clientId) || clientByName(job.name));
+  if (editClient) {
+    document.getElementById('uj_clientId').value = editClient.id;
+    document.getElementById('uj_clientName').value = clientDisplayName(editClient);
+    document.getElementById('uj_existingClientInfo').textContent = [editClient.email, editClient.phone].filter(Boolean).join(' | ') || 'Existing client selected.';
+  } else if (job) {
+    unifiedNewClientMode = true;
+    document.getElementById('uj_clientName').value = job.name || '';
+    document.getElementById('uj_newClientFields').style.display = '';
+    document.getElementById('uj_existingClientInfo').textContent = 'New client details will be saved with this job.';
+  }
+  updateUnifiedNewClientButtonState();
+  document.getElementById('uj_contactName').value = job?.contactName || '';
+  document.getElementById('uj_date').value = job?.date || today();
+  const primaryNote = _unifiedPrimaryNote(job);
+  unifiedEditPrimaryNoteId = primaryNote?.id || '';
+  document.getElementById('uj_notes').value = primaryNote?.text || '';
   document.getElementById('uj_lineList').innerHTML = '';
   document.getElementById('uj_milestoneList').innerHTML = '';
   document.getElementById('uj_paymentMode').value = 'single';
-  populateEmpDropdown('uj_emp', 'uj_emp_wrap', null);
-  addUnifiedLine('fixed');
+  populateEmpDropdown('uj_emp', 'uj_emp_wrap', job?.employeeId || null);
+  const linePresets = job ? _unifiedEditLinePresets(job) : [];
+  if (linePresets.length) linePresets.forEach(line => addUnifiedLine(line.type, line));
+  else addUnifiedLine('fixed');
   updateUnifiedJobDescriptionSummary();
-  setUnifiedPaymentMode('single');
+  const milestoneSource = _unifiedMilestoneSource(job);
+  const paymentMode = job && milestoneSource.length > 1 ? 'custom' : 'single';
+  document.getElementById('uj_paymentMode').value = paymentMode;
+  setUnifiedPaymentMode(paymentMode, milestoneSource);
+  applyUnifiedEditLock();
   document.getElementById('unifiedJobModal').classList.remove('hidden');
 }
 
@@ -4047,6 +4256,8 @@ function renderUnifiedLine(id) {
   const p = row._preset || {};
   const description = p.description ?? (p.label && p.label !== _unifiedLineDefaultLabel(type) ? p.label : '');
   const amount = p.amount ?? '';
+  const clientAmount = p.clientAmount ?? amount;
+  const reimbursementAmount = p.reimbursementAmount ?? (p.clientAmount !== undefined ? amount : '');
   const hours = p.hours ?? '';
   const rate = p.rate ?? '';
   const who = p.who === 'emp' ? 'emp' : 'owner';
@@ -4057,7 +4268,7 @@ function renderUnifiedLine(id) {
   if (type === 'hourly') {
     html = `
       <div class="unified-line-fields">
-        <div class="form-group"><label class="form-label">Work description <span style="font-weight:400;color:var(--text3)">(optional)</span></label><input class="form-input" id="uj_desc_${id}" value="${_unifiedAttr(description)}" placeholder="What work was completed?" oninput="updateUnifiedJobDescriptionSummary()" /></div>
+        <div class="form-group"><label class="form-label">Description <span style="font-weight:400;color:var(--text3)">(optional)</span></label><input class="form-input" id="uj_desc_${id}" value="${_unifiedAttr(description)}" placeholder="What work was completed?" oninput="updateUnifiedJobDescriptionSummary()" /></div>
         <div class="form-group"><label class="form-label">Hours</label><input class="form-input" id="uj_hours_${id}" type="number" min="0" step="0.25" value="${_unifiedAttr(hours)}" placeholder="0" oninput="updateUnifiedJobTotal()" /></div>
         <div class="form-group"><label class="form-label">Rate ($/hr)</label><input class="form-input" id="uj_rate_${id}" type="number" min="0" step="0.01" value="${_unifiedAttr(rate)}" placeholder="0.00" oninput="updateUnifiedJobTotal()" /></div>
       </div>
@@ -4065,22 +4276,31 @@ function renderUnifiedLine(id) {
   } else if (type === 'material') {
     html = `
       <div class="unified-line-fields">
-        <div class="form-group"><label class="form-label">Work description <span style="font-weight:400;color:var(--text3)">(optional)</span></label><input class="form-input" id="uj_desc_${id}" value="${_unifiedAttr(description)}" placeholder="What was purchased or used?" oninput="updateUnifiedJobDescriptionSummary()" /></div>
-        <div class="form-group"><label class="form-label">Amount ($)</label><input class="form-input" id="uj_amount_${id}" type="number" min="0" step="0.01" value="${_unifiedAttr(amount)}" placeholder="0.00" oninput="updateUnifiedJobTotal()" /></div>
+        <div class="form-group"><label class="form-label">Description <span style="font-weight:400;color:var(--text3)">(optional)</span></label><input class="form-input" id="uj_desc_${id}" value="${_unifiedAttr(description)}" placeholder="What was purchased or used?" oninput="updateUnifiedJobDescriptionSummary()" /></div>
+        <div class="form-group"><label class="form-label">Cost ($)</label><input class="form-input" id="uj_amount_${id}" type="number" min="0" step="0.01" value="${_unifiedAttr(clientAmount)}" placeholder="0.00" oninput="updateUnifiedJobTotal()" /></div>
         <div class="form-group"><label class="form-label">Purchased by</label><select class="form-input" id="uj_who_${id}" onchange="updateUnifiedJobTotal()"><option value="owner"${who === 'owner' ? ' selected' : ''}>EHS</option><option value="emp"${who === 'emp' ? ' selected' : ''}>${empName}</option></select></div>
       </div>
-      <div class="unified-checkbox"><input type="checkbox" id="uj_bill_${id}"${billClient ? ' checked' : ''} onchange="updateUnifiedJobTotal()" /><span>Bill this material to the client</span></div>`;
+      <div class="unified-checkbox"><input type="checkbox" id="uj_bill_${id}"${billClient ? ' checked' : ''} onchange="updateUnifiedJobTotal()" /><span>Bill this material to the client</span></div>
+      <details class="unified-material-advanced"${reimbursementAmount !== '' ? ' open' : ''}>
+        <summary>Reimburse different amount (optional)</summary>
+        <div class="form-group">
+          <label class="form-label" for="uj_reimbursementAmount_${id}">Reimbursement / cost ($)</label>
+          <input class="form-input" id="uj_reimbursementAmount_${id}" type="number" min="0" step="0.01" value="${_unifiedAttr(reimbursementAmount)}" placeholder="Same as client charge" oninput="updateUnifiedJobTotal()" />
+          <div class="form-hint">Leave blank to reimburse the same amount charged to the client.</div>
+        </div>
+      </details>`;
   } else {
     const isCredit = type === 'credit';
     html = `
       <div class="unified-line-fields unified-line-fields-two">
-        <div class="form-group"><label class="form-label">Work description <span style="font-weight:400;color:var(--text3)">(optional)</span></label><input class="form-input" id="uj_desc_${id}" value="${_unifiedAttr(description)}" placeholder="${isCredit ? 'Why is this credit applied?' : 'What work or charge was completed?'}" oninput="updateUnifiedJobDescriptionSummary()" /></div>
+        <div class="form-group"><label class="form-label">Description <span style="font-weight:400;color:var(--text3)">(optional)</span></label><input class="form-input" id="uj_desc_${id}" value="${_unifiedAttr(description)}" placeholder="${isCredit ? 'Why is this credit applied?' : 'What work or charge was completed?'}" oninput="updateUnifiedJobDescriptionSummary()" /></div>
         <div class="form-group"><label class="form-label">Amount ($)</label><input class="form-input" id="uj_amount_${id}" type="number" min="0" step="0.01" value="${_unifiedAttr(amount)}" placeholder="0.00" oninput="updateUnifiedJobTotal()" /></div>
       </div>`;
   }
   document.getElementById(`uj_fields_${id}`).innerHTML = html;
   updateUnifiedJobTotal();
   updateUnifiedJobDescriptionSummary();
+  applyUnifiedEditLock();
 }
 
 function removeUnifiedLine(id) {
@@ -4092,6 +4312,7 @@ function removeUnifiedLine(id) {
 function readUnifiedLines() {
   return [...document.querySelectorAll('#uj_lineList .unified-line-row')].map(row => {
     const id = row.dataset.lineId;
+    const preset = row._preset || {};
     const type = document.getElementById(`uj_type_${id}`)?.value || 'fixed';
     const description = document.getElementById(`uj_desc_${id}`)?.value.trim() || '';
     const label = description || _unifiedLineDefaultLabel(type);
@@ -4100,14 +4321,19 @@ function readUnifiedLines() {
     const amount = type === 'hourly'
       ? _roundMoney(hours * rate)
       : _roundMoney(parseFloat(document.getElementById(`uj_amount_${id}`)?.value) || 0);
+    const reimbursementAmountInput = document.getElementById(`uj_reimbursementAmount_${id}`)?.value.trim() || '';
+    const reimbursementAmount = type === 'material'
+      ? _roundMoney(reimbursementAmountInput === '' ? amount : parseFloat(reimbursementAmountInput) || 0)
+      : 0;
     return {
-      id: uid(),
+      id: preset.id || uid(),
       type,
       label,
       description,
       amount,
       hours,
       rate,
+      reimbursementAmount,
       who: document.getElementById(`uj_who_${id}`)?.value === 'emp' ? 'emp' : 'owner',
       billClient: document.getElementById(`uj_bill_${id}`)?.checked !== false
     };
@@ -4136,6 +4362,10 @@ function updateUnifiedJobTotal() {
     const amount = type === 'hourly'
       ? _roundMoney(hours * rate)
       : _roundMoney(parseFloat(document.getElementById(`uj_amount_${id}`)?.value) || 0);
+    const reimbursementAmountInput = document.getElementById(`uj_reimbursementAmount_${id}`)?.value.trim() || '';
+    const reimbursementAmount = type === 'material'
+      ? _roundMoney(reimbursementAmountInput === '' ? amount : parseFloat(reimbursementAmountInput) || 0)
+      : 0;
     const lineTotal = document.getElementById(`uj_lineTotal_${id}`);
     if (lineTotal) lineTotal.textContent = type === 'hourly' ? `${hours || 0}h x ${fmt(rate)} = ${fmt(amount)}` : '';
     if (type === 'fixed') fixed += amount;
@@ -4143,10 +4373,10 @@ function updateUnifiedJobTotal() {
     else if (type === 'hourly') hourly += amount;
     else if (type === 'material') {
       if (document.getElementById(`uj_bill_${id}`)?.checked !== false) billedMaterials += amount;
-      else internalMaterials += amount;
+      else internalMaterials += reimbursementAmount;
     } else if (type === 'credit') credits += amount;
   });
-  const clientTotal = _roundMoney(fixed + hourly + billedMaterials - credits);
+  const clientTotal = _roundMoney(fixed + hourly + billedMaterials + other - credits);
   const summary = document.getElementById('uj_totalSummary');
   if (!summary) return;
   const rows = [];
@@ -4254,12 +4484,13 @@ function navigateUnifiedClientAC(e) {
   items.forEach((el, i) => el.classList.toggle('ac-active', i === unifiedClientAcIdx));
 }
 
-function addUnifiedMilestoneField(label = '', pct = '') {
+function addUnifiedMilestoneField(label = '', pct = '', preset = {}) {
   unifiedMilestoneCount++;
   const id = unifiedMilestoneCount;
   const div = document.createElement('div');
   div.className = 'milestone-row';
   div.id = `uj_mrow_${id}`;
+  div._preset = { ...preset };
   div.innerHTML = `
     <input class="form-input" placeholder="Label" value="${_unifiedAttr(label)}" id="uj_mllabel_${id}" style="flex:2" />
     <input class="form-input" placeholder="%" type="number" min="0" value="${_unifiedAttr(pct)}" id="uj_mlpct_${id}" style="flex:1;max-width:80px" oninput="updateUnifiedMilestonePreview()" />
@@ -4275,7 +4506,7 @@ function updateUnifiedMilestonePreview() {
   if (err) err.textContent = total > 0 && Math.abs(total - 100) > 0.01 ? `Milestones total ${total}%, must equal 100%.` : '';
 }
 
-function setUnifiedPaymentMode(mode) {
+function setUnifiedPaymentMode(mode, editMilestones = null) {
   const select = document.getElementById('uj_paymentMode');
   const dms = state.settings.defaultMilestones || [];
   if (mode === 'default' && !dms.length) {
@@ -4295,20 +4526,27 @@ function setUnifiedPaymentMode(mode) {
   }
   editor.style.display = '';
   hint.textContent = mode === 'default' ? 'Using the saved milestone template.' : 'Milestones must add up to 100%.';
-  if (mode === 'default') dms.forEach(m => addUnifiedMilestoneField(m.label, m.pct));
+  if (Array.isArray(editMilestones)) editMilestones.forEach(m => addUnifiedMilestoneField(m.label, m.pct, m));
+  else if (mode === 'default') dms.forEach(m => addUnifiedMilestoneField(m.label, m.pct));
   else addUnifiedMilestoneField();
+  applyUnifiedEditLock();
 }
 
-function _readUnifiedMilestones() {
+function _readUnifiedMilestones(existing = null) {
   const mode = document.getElementById('uj_paymentMode')?.value || 'single';
-  if (mode === 'single') return [{ label:'Invoice', pct:100, status:'pending' }];
+  if (mode === 'single') {
+    const prior = Array.isArray(existing) && existing.length === 1 ? existing[0] : null;
+    return [{ ...(prior ? JSON.parse(JSON.stringify(prior)) : {}), id:prior?.id || uid(), label:'Invoice', pct:100, status:prior?.status || 'pending' }];
+  }
   const milestones = [];
   let total = 0;
   document.querySelectorAll('#uj_milestoneList [id^="uj_mlpct_"]').forEach((el, i) => {
     const id = el.id.slice('uj_mlpct_'.length);
+    const row = el.closest('.milestone-row');
+    const preset = row?._preset || {};
     const pct = _roundPct(parseFloat(el.value) || 0);
     const label = document.getElementById(`uj_mllabel_${id}`)?.value.trim() || `Milestone ${i + 1}`;
-    if (pct > 0) milestones.push({ id:uid(), label, pct, status:'pending' });
+    if (pct > 0) milestones.push({ ...preset, id:preset.id || uid(), label, pct, status:preset.status || 'pending' });
     total += pct;
   });
   if (!milestones.length || Math.abs(total - 100) > 0.01) {
@@ -4318,15 +4556,196 @@ function _readUnifiedMilestones() {
   return milestones;
 }
 
+function _unifiedClone(value) {
+  return value === undefined || value === null ? {} : JSON.parse(JSON.stringify(value));
+}
+
+function _unifiedFindRecord(job, id) {
+  if (!job || !id) return null;
+  const groups = [
+    ['quoteItems', job.quoteItems],
+    ['materials', job.materials],
+    ['subtractions', job.subtractions],
+    ['addOns', job.addOns]
+  ];
+  for (const [kind, items] of groups) {
+    const item = (items || []).find(entry => entry?.id === id);
+    if (item) return { kind, item };
+  }
+  return null;
+}
+
+function _unifiedBuildCollections(job, lines, date, hourlyOnly) {
+  const source = job || {};
+  const storedLines = Array.isArray(source.unifiedLines) ? source.unifiedLines : [];
+  const originalIds = new Set(storedLines.map(line => line?.id).filter(Boolean));
+  if (!originalIds.size) lines.forEach(line => { if (line?.id) originalIds.add(line.id); });
+  const originalMaterialIds = new Set(storedLines.filter(line => line?.type === 'material').map(line => line.id).filter(Boolean));
+  if (!originalMaterialIds.size) lines.filter(line => line?.type === 'material').forEach(line => originalMaterialIds.add(line.id));
+  const previousTypeById = new Map(storedLines.map(line => [line?.id, line?.type]));
+  const find = (items, id) => (items || []).find(item => item?.id === id);
+  const findLinkedMaterialCharge = id => (source.addOns || []).find(item => item?.chargeType === 'materials' && item?.sourceItemId === id);
+  const cleanCopy = value => _unifiedClone(value);
+
+  const extraQuoteItems = (source.quoteItems || [])
+    .filter(item => !originalIds.has(item?.id))
+    .map(cleanCopy);
+  const extraMaterials = (source.materials || [])
+    .filter(item => !originalIds.has(item?.id))
+    .map(cleanCopy);
+  const extraSubtractions = (source.subtractions || [])
+    .filter(item => !originalIds.has(item?.id))
+    .map(cleanCopy);
+  const extraAddOns = (source.addOns || [])
+    .filter(item => !originalIds.has(item?.id) && !(item?.chargeType === 'materials' && originalMaterialIds.has(item?.sourceItemId)))
+    .map(cleanCopy);
+  const quoteItems = [];
+  const materials = [];
+  const addOns = [];
+  const subtractions = [];
+
+  lines.forEach(line => {
+    const type = line.type;
+    const previousType = previousTypeById.get(line.id);
+    const priorDirect = _unifiedFindRecord(source, line.id)?.item;
+    const priorAddOn = find(source.addOns, line.id) || (previousType === 'material' ? findLinkedMaterialCharge(line.id) : null);
+
+    if (type === 'fixed') {
+      quoteItems.push({ ...(priorDirect ? cleanCopy(priorDirect) : {}), id:line.id, label:line.label, description:line.description, amount:line.amount });
+      return;
+    }
+    if (type === 'material') {
+      const priorMaterial = find(source.materials, line.id);
+      materials.push({
+        ...(priorMaterial ? cleanCopy(priorMaterial) : {}),
+        id:line.id,
+        label:line.label,
+        description:line.description,
+        amount:line.reimbursementAmount,
+        who:line.who,
+        billClient:!!line.billClient,
+        clientAmount:line.amount,
+        reimbursementAmount:line.reimbursementAmount,
+        chargeAmount:line.billClient ? line.amount : 0,
+        costAmount:line.reimbursementAmount
+      });
+      if (!hourlyOnly && line.billClient) {
+        addOns.push({
+          ...(priorAddOn ? cleanCopy(priorAddOn) : {}),
+          id:priorAddOn?.id || uid(),
+          label:line.label,
+          description:line.description,
+          amount:line.amount,
+          date:priorAddOn?.date || date,
+          status:priorAddOn?.status || 'pending',
+          isHours:false,
+          hours:0,
+          rate:0,
+          chargeType:'materials',
+          sourceItemId:line.id
+        });
+      }
+      return;
+    }
+    if (type === 'hourly' || type === 'other') {
+      const next = {
+        ...(priorAddOn ? cleanCopy(priorAddOn) : {}),
+        id:line.id,
+        label:line.label,
+        description:line.description,
+        amount:line.amount,
+        date:priorAddOn?.date || date,
+        status:priorAddOn?.status || 'pending',
+        isHours:type === 'hourly',
+        hours:type === 'hourly' ? line.hours : 0,
+        rate:type === 'hourly' ? line.rate : 0,
+        chargeType:type === 'hourly' ? 'hourly' : 'other'
+      };
+      delete next.sourceItemId;
+      addOns.push(next);
+      return;
+    }
+    if (type === 'credit') {
+      subtractions.push({
+        ...(priorDirect ? cleanCopy(priorDirect) : {}),
+        id:line.id,
+        label:line.label,
+        description:line.description,
+        amount:line.amount,
+        date:priorDirect?.date || date,
+        status:priorDirect?.status || 'pending',
+        sourceItemId:null
+      });
+    }
+  });
+
+  quoteItems.push(...extraQuoteItems);
+  materials.push(...extraMaterials);
+  addOns.push(...extraAddOns);
+  subtractions.push(...extraSubtractions);
+
+  return { quoteItems, materials, addOns, subtractions };
+}
+
+function _updateUnifiedPrimaryNote(job, text, date) {
+  if (!job) return;
+  if (!Array.isArray(job.jobNotes)) job.jobNotes = [];
+  const index = unifiedEditPrimaryNoteId
+    ? job.jobNotes.findIndex(note => note?.id === unifiedEditPrimaryNoteId)
+    : -1;
+  if (index >= 0) {
+    if (text) {
+      job.jobNotes[index].text = text;
+      job.jobNotes[index].date = date;
+    } else {
+      job.jobNotes.splice(index, 1);
+    }
+    return;
+  }
+  if (text) {
+    job.jobNotes.push({ id:uid(), text, date, authorId:currentUser?.id || '', authorName:currentUser?.name || 'Admin', source:'unified-job' });
+  }
+}
+
+function _applyUnifiedLockedEdits(job, lines, { name, contactName, date, client, notes }) {
+  const next = _unifiedClone(job);
+  next.name = name;
+  next.contactName = contactName;
+  next.date = date;
+  next.clientId = client?.id || next.clientId || '';
+  next.contactClientId = clientByName(contactName)?.id || '';
+  next.unifiedLines = lines;
+  next.workSummary = lines.map(line => line.description).filter(Boolean).join(', ');
+  _updateUnifiedPrimaryNote(next, notes, date);
+
+  lines.forEach(line => {
+    const updateDescription = item => {
+      if (!item) return;
+      item.label = line.label;
+      item.description = line.description;
+    };
+    (next.quoteItems || []).filter(item => item.id === line.id).forEach(updateDescription);
+    (next.materials || []).filter(item => item.id === line.id).forEach(updateDescription);
+    (next.subtractions || []).filter(item => item.id === line.id || item.partialGroupId === line.id).forEach(updateDescription);
+    (next.addOns || []).filter(item => item.id === line.id || item.partialGroupId === line.id || item.sourceItemId === line.id).forEach(updateDescription);
+  });
+  return next;
+}
+
 async function saveUnifiedJob() {
   if (!currentUser?.isAdmin || isSaving) return;
+  const editingJob = unifiedEditJobId ? state.jobs.find(item => item.id === unifiedEditJobId) : null;
+  if (unifiedEditJobId && !editingJob) return;
   const name = document.getElementById('uj_clientName').value.trim();
   const contactName = document.getElementById('uj_contactName').value.trim();
   const date = document.getElementById('uj_date').value || today();
   if (!name) { showAlert('Please enter a client name.'); return; }
 
   let client = clientById(document.getElementById('uj_clientId').value) || clientByName(name);
-  if (!client && !unifiedNewClientMode) {
+  if (!client && editingJob && unifiedEditFinancialLocked) {
+    // A missing historical client record must not be recreated or relinked by a safe edit.
+    client = { id: editingJob.clientId || '' };
+  } else if (!client && !unifiedNewClientMode) {
     showAlert('Select an existing client, or click New client details before saving.');
     return;
   }
@@ -4352,39 +4771,24 @@ async function saveUnifiedJob() {
 
   const lines = readUnifiedLines();
   if (!lines.length) { showAlert('Add at least one work or charge line.'); return; }
-  if (lines.some(line => line.amount <= 0)) { showAlert('Every work and charge line needs an amount greater than $0.'); return; }
+  if (lines.some(line => line.type !== 'material' && line.amount <= 0)) { showAlert('Every work and charge line needs an amount greater than $0.'); return; }
+  if (lines.some(line => line.type === 'material' && line.reimbursementAmount <= 0)) {
+    showAlert('Materials need a reimbursement / cost amount greater than $0.');
+    return;
+  }
+  if (lines.some(line => line.type === 'material' && line.billClient && line.amount <= 0)) {
+    showAlert('Billed materials need a client charge greater than $0, or turn off billing for that material.');
+    return;
+  }
 
   const hourlyItems = lines.filter(line => line.type === 'hourly');
   const hourlyOnly = hourlyItems.length > 0 && !lines.some(line => ['fixed','other','credit'].includes(line.type));
-  const quoteItems = lines
-    .filter(line => line.type === 'fixed')
-    .map(line => ({ id:line.id, label:line.label, description:line.description, amount:line.amount }));
-  const materials = lines.filter(line => line.type === 'material').map(line => ({
-    id: line.id,
-    label: line.label,
-    description: line.description,
-    amount: line.amount,
-    who: line.who,
-    billClient: !!line.billClient,
-    chargeAmount: line.billClient ? line.amount : 0,
-    costAmount: line.amount
-  }));
-  const subtractions = lines.filter(line => line.type === 'credit').map(line => ({
-    id:line.id, label:line.label, description:line.description, amount:line.amount, date, status:'pending', sourceItemId:null
-  }));
-  const addOns = [
-    ...hourlyItems.map(line => ({
-      id:line.id, label:line.label, description:line.description, amount:line.amount, date, status:'pending', isHours:true, hours:line.hours, rate:line.rate, chargeType:'hourly'
-    })),
-    ...lines.filter(line => line.type === 'other').map(line => ({
-      id:line.id, label:line.label, description:line.description, amount:line.amount, date, status:'pending', chargeType:'other'
-    })),
-    ...(!hourlyOnly ? lines.filter(line => line.type === 'material' && line.billClient).map(line => ({
-      id:uid(), label:line.label, description:line.description, amount:line.amount, date, status:'pending', chargeType:'materials', sourceItemId:line.id
-    })) : [])
-  ];
+  const collections = _unifiedBuildCollections(editingJob, lines, date, hourlyOnly);
+  const { quoteItems, materials, addOns, subtractions } = collections;
   const quote = _roundMoney(quoteItems.reduce((sum, line) => sum + line.amount, 0));
-  const milestones = hourlyOnly || quote <= 0 ? [] : _readUnifiedMilestones();
+  const milestones = hourlyOnly || quote <= 0
+    ? []
+    : _readUnifiedMilestones(editingJob ? editingJob.milestones : null);
   if (milestones === null) return;
   if (client.id && !clientById(client.id)) {
     if (!state.clients) state.clients = [];
@@ -4393,45 +4797,66 @@ async function saveUnifiedJob() {
   const hourlyRate = hourlyItems.length ? hourlyItems[0].rate : 0;
   const notes = document.getElementById('uj_notes').value.trim();
   const workSummary = lines.map(line => line.description).filter(Boolean).join(', ');
-  const jobId = uid();
   const contactClient = clientByName(contactName);
-  const job = {
+  if (editingJob && unifiedEditFinancialLocked) {
+    const idx = state.jobs.findIndex(item => item.id === editingJob.id);
+    state.jobs[idx] = _applyUnifiedLockedEdits(editingJob, lines, { name, contactName, date, client, notes });
+    await save();
+    renderAll();
+    unifiedEditJobId = null;
+    closeModal('unifiedJobModal');
+    return;
+  }
+
+  const jobId = editingJob?.id || uid();
+  const job = editingJob ? _unifiedClone(editingJob) : {
     id: jobId,
-    name,
-    contactName,
-    clientId: client.id,
-    contactClientId: contactClient?.id || '',
-    quote,
-    date,
-    isItemized: quoteItems.length > 0,
-    quoteItems,
     status:'active',
-    milestones,
-    addOns,
-    subtractions,
-    materials,
     advances:[],
     fees:[],
-    jobNotes: notes ? [{ id:uid(), text:notes, date, authorId:currentUser.id, authorName:currentUser.name }] : [],
-    workSummary,
+    jobNotes:[],
     hours:[],
     partialCollections:[],
     repaymentMode:false,
     revenueItems:[],
-    jobType: hourlyOnly ? 'hourly' : 'quoted',
-    hourlyRate,
     hourlyStatus:'pending',
     hourlySquareInvoiceId:'',
-    employeeId:_unifiedEmployeeId(),
-    createdVia:'unified-v2',
-    unifiedLines: lines
+    createdVia:'unified-v2'
   };
-  state.jobs.push(job);
-  expandedJobs.clear();
-  expandedJobs.add(jobId);
-  saveExpandedState();
+  job.name = name;
+  job.contactName = contactName;
+  job.clientId = client.id;
+  job.contactClientId = contactClient?.id || '';
+  job.quote = quote;
+  job.date = date;
+  job.isItemized = quoteItems.length > 0;
+  job.quoteItems = quoteItems;
+  job.milestones = milestones;
+  job.addOns = addOns;
+  job.subtractions = subtractions;
+  job.materials = materials;
+  job.workSummary = workSummary;
+  job.jobType = hourlyOnly ? 'hourly' : 'quoted';
+  job.hourlyRate = hourlyRate;
+  job.employeeId = _unifiedEmployeeId();
+  job.createdVia = 'unified-v2';
+  job.unifiedLines = lines;
+  _updateUnifiedPrimaryNote(job, notes, date);
+  if (editingJob) {
+    state.jobs[state.jobs.findIndex(item => item.id === editingJob.id)] = job;
+  } else {
+    state.jobs.push(job);
+  }
+  if (!editingJob) {
+    expandedJobs.clear();
+    expandedJobs.add(jobId);
+    saveExpandedState();
+  }
   await save();
   renderAll();
+  unifiedEditJobId = null;
+  unifiedEditPrimaryNoteId = '';
+  unifiedEditFinancialLocked = false;
   closeModal('unifiedJobModal');
 }
 
@@ -4443,6 +4868,13 @@ function openAddItem(jobId, type, itemId = null) {
   const en = esc(getEmp(job?.employeeId)?.name || 'Employee');
   const isEdit = !!itemId;
   const existingMaterial = isEdit ? (job?.materials || []).find(x => x.id === itemId) : null;
+  const existingClientAmount = existingMaterial
+    ? (existingMaterial.clientAmount ?? existingMaterial.chargeAmount ?? existingMaterial.amount ?? '')
+    : '';
+  const existingReimbursementAmount = existingMaterial
+    ? (existingMaterial.reimbursementAmount ?? existingMaterial.costAmount ?? existingMaterial.amount ?? '')
+    : '';
+  const materialBillingLinked = isHourly || job?.createdVia === 'unified-v2';
   const defaultBillClient = existingMaterial?.billClient !== undefined
     ? !!existingMaterial.billClient
     : (isHourly ? Number(existingMaterial?.chargeAmount ?? existingMaterial?.amount ?? 0) > 0 : true);
@@ -4503,12 +4935,25 @@ function openAddItem(jobId, type, itemId = null) {
         <div class="form-group"><label class="form-label">Date</label><input class="form-input" id="ai_date" type="date" value="${today()}" /></div>
       </div>`;
   } else if (type==='material') {
+    const materialAmountField = materialBillingLinked
+      ? `<div class="form-group"><label class="form-label">Cost ($)</label><input class="form-input" id="ai_amount" type="number" min="0" step="0.01" value="${_unifiedAttr(existingClientAmount)}" placeholder="0.00" /></div>`
+      : `<div class="form-group"><label class="form-label">Cost ($)</label><input class="form-input" id="ai_amount" type="number" min="0" step="0.01" placeholder="0.00" /></div>`;
+    const materialReimbursementField = materialBillingLinked ? `
+      <details class="unified-material-advanced"${existingReimbursementAmount !== '' ? ' open' : ''}>
+        <summary>Reimburse different amount (optional)</summary>
+        <div class="form-group">
+          <label class="form-label" for="ai_reimbursementAmount">Reimbursement / cost ($)</label>
+          <input class="form-input" id="ai_reimbursementAmount" type="number" min="0" step="0.01" value="${_unifiedAttr(existingReimbursementAmount)}" placeholder="Same as client charge" />
+          <div class="form-hint">Leave blank to reimburse the same amount charged to the client.</div>
+        </div>
+      </details>` : '';
     html=`<div class="form-group"><label class="form-label">Description</label><input class="form-input" id="ai_label" placeholder="e.g. Home Depot - lumber" /></div>
-      <div class="form-group"><label class="form-label">Amount ($)</label><input class="form-input" id="ai_amount" type="number" step="0.01" placeholder="0.00" /></div>
+      ${materialAmountField}
       <div class="form-group"><label class="form-label">Purchased by</label>
         <select class="form-input" id="ai_who"><option value="owner">EHS</option><option value="emp">${en}</option></select>
       </div>
-      <div class="unified-checkbox"><input type="checkbox" id="ai_billClient"${defaultBillClient ? ' checked' : ''} /><span>Bill this material to the client</span></div>`;
+      <div class="unified-checkbox"><input type="checkbox" id="ai_billClient"${defaultBillClient ? ' checked' : ''} /><span>Bill this material to the client</span></div>
+      ${materialReimbursementField}`;
   } else if (type==='advance') {
     html=`<div class="form-group"><label class="form-label">Description / Note</label><input class="form-input" id="ai_label" placeholder="e.g. Weekly pay" /></div>
       <div class="form-group">
@@ -4540,14 +4985,22 @@ function openAddItem(jobId, type, itemId = null) {
     }
     if (item) {
       document.getElementById('ai_label').value = item.label || '';
-      document.getElementById('ai_amount').value = item.amount || '';
+      document.getElementById('ai_amount').value = type === 'material'
+        ? (item.clientAmount ?? item.chargeAmount ?? item.amount ?? '')
+        : (item.amount || '');
       if (type==='revenue'||type==='addon'||type==='hours'||type==='subtraction'||type==='advance') document.getElementById('ai_date').value = item.date || '';
       if (type==='hours') {
         document.getElementById('ai_hours').value = item.hours || '';
         document.getElementById('ai_rate').value = item.rate || '';
         updateHoursAddItemTotal();
       }
-      if (type==='material') document.getElementById('ai_who').value = item.who || 'owner';
+      if (type==='material') {
+        document.getElementById('ai_who').value = item.who || 'owner';
+        const reimbursementAmountEl = document.getElementById('ai_reimbursementAmount');
+        if (reimbursementAmountEl) reimbursementAmountEl.value = item.reimbursementAmount ?? item.costAmount ?? item.amount ?? '';
+        const billClientEl = document.getElementById('ai_billClient');
+        if (billClientEl) billClientEl.checked = item.billClient !== false;
+      }
       if (type==='advance') document.getElementById('ai_paytype').value = item.payType || '';
       if (type === 'addon' && item.partialGroupId) {
         const parentAmt = item.partialParentAmount || item.amount || 0;
@@ -4597,6 +5050,25 @@ function updateHoursAddItemTotal() {
   const amountEl = document.getElementById('ai_amount');
   if (amountEl) amountEl.value = amt > 0 ? amt.toFixed(2) : '';
 }
+
+function _syncUnifiedMaterialCharge(job, material) {
+  if (!job || job.createdVia !== 'unified-v2' || _jobType(job) === 'hourly' || !material?.id) return;
+  if (!job.addOns) job.addOns = [];
+  const linked = job.addOns.find(a => a.chargeType === 'materials' && a.sourceItemId === material.id);
+  if (material.billClient) {
+    const addOn = linked || { id: uid(), status: 'pending', isHours: false, hours: 0, rate: 0, chargeType: 'materials', sourceItemId: material.id };
+    addOn.label = material.label;
+    addOn.description = material.description || material.label;
+    addOn.amount = _roundMoney(material.clientAmount ?? material.chargeAmount ?? material.amount ?? 0);
+    addOn.date = addOn.date || job.date || today();
+    addOn.chargeType = 'materials';
+    addOn.sourceItemId = material.id;
+    if (!linked) job.addOns.push(addOn);
+  } else if (linked && (linked.status || 'pending') === 'pending') {
+    job.addOns = job.addOns.filter(a => a !== linked);
+  }
+}
+
 function saveItem() {
   if (!addItemContext) return;
   const { jobId, type, itemId } = addItemContext;
@@ -4615,7 +5087,7 @@ function saveItem() {
       showAlert('Please enter valid hours and hourly rate.');
       return;
     }
-  } else if (type !== 'advance' && amount <= 0) {
+  } else if (type !== 'advance' && type !== 'material' && amount <= 0) {
     showAlert('Please enter a valid amount.');
     return;
   }
@@ -4682,21 +5154,37 @@ function saveItem() {
     }
   } else if (type==='material') {
     const who = document.getElementById('ai_who').value;
-    const costAmount = amount;
+    const clientChargeAmount = amount;
     const billClient = document.getElementById('ai_billClient')?.checked !== false;
-    const chargeAmount = billClient ? amount : 0;
+    const reimbursementAmountInput = document.getElementById('ai_reimbursementAmount')?.value.trim() || '';
+    const reimbursementAmount = _roundMoney(reimbursementAmountInput === '' ? clientChargeAmount : parseFloat(reimbursementAmountInput) || 0);
+    if (reimbursementAmount <= 0) {
+      showAlert('Materials need a reimbursement / cost amount greater than $0.');
+      return;
+    }
+    if (billClient && clientChargeAmount <= 0) {
+      showAlert('Billed materials need a client charge greater than $0, or turn off billing for that material.');
+      return;
+    }
+    const chargeAmount = billClient ? clientChargeAmount : 0;
     if (itemId) {
       const item = job.materials.find(x=>x.id===itemId);
       if (item) {
         item.label = label;
-        item.amount = amount;
+        item.description = label;
+        item.amount = reimbursementAmount;
         item.who = who;
         item.billClient = billClient;
+        item.clientAmount = clientChargeAmount;
+        item.reimbursementAmount = reimbursementAmount;
         item.chargeAmount = chargeAmount;
-        item.costAmount = costAmount;
+        item.costAmount = reimbursementAmount;
+        _syncUnifiedMaterialCharge(job, item);
       }
     } else {
-      job.materials.push({ id:uid(), label, amount, who, billClient, chargeAmount, costAmount: costAmount });
+      const material = { id:uid(), label, description:label, amount:reimbursementAmount, who, billClient, clientAmount:clientChargeAmount, reimbursementAmount, chargeAmount, costAmount:reimbursementAmount };
+      job.materials.push(material);
+      _syncUnifiedMaterialCharge(job, material);
     }
   } else if (type==='advance') {
     const date = document.getElementById('ai_date')?.value||'';
@@ -5101,6 +5589,10 @@ document.querySelectorAll('.modal-overlay').forEach(el=>{
   let _mdOnOverlay = false;
   el.addEventListener('mousedown', e=>{ _mdOnOverlay = e.target === el; });
   el.addEventListener('click', e=>{ if(_mdOnOverlay && e.target===el) el.classList.add('hidden'); });
+});
+document.addEventListener('click', e=>{
+  if (e.target.closest('.job-billing-menu')) return;
+  document.querySelectorAll('.job-billing-menu[open]').forEach(menu => menu.removeAttribute('open'));
 });
 
 
