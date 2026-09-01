@@ -1392,6 +1392,9 @@ function jobCard(job) {
     if (isZeroStat(n)) return 'color:var(--text3)!important';
     return normalColor ? `color:${normalColor}` : '';
   };
+  // Hourly jobs do not use the quoted-work field, so temporarily show their
+  // calculated total in the Quote tile rather than displaying $0.00.
+  const quoteHeaderAmount = isHourly ? c.contractTotal : job.quote;
   const isExp = expandedJobs.has(job.id);
   const sc    = job.status === 'complete' ? 'complete' : 'active';
   const nc    = (job.jobNotes||[]).length;
@@ -1412,7 +1415,7 @@ function jobCard(job) {
           ${jobBillingSummaryHtml(job, c)}
         </div>
         <div class="job-quick-stats job-quick-stats-grid">
-          <div class="job-stat" style="${statTileStyle(job.quote, fadedStatStyle)}"><div class="job-stat-label">Quote</div><div class="job-stat-value" style="${isHourly ? fadedValueStyle : statValueStyle(job.quote)}">${fmt(job.quote)}</div></div>
+          <div class="job-stat" style="${statTileStyle(quoteHeaderAmount, isHourly ? '' : fadedStatStyle)}"><div class="job-stat-label">Quote</div><div class="job-stat-value" style="${statValueStyle(quoteHeaderAmount)}">${fmt(quoteHeaderAmount)}</div></div>
           <div class="job-stat" style="${statTileStyle(c.addOnTotal-c.subtractionTotal, fadedStatStyle)}"><div class="job-stat-label">Adjust</div><div class="job-stat-value" style="${isHourly ? fadedValueStyle : statValueStyle(c.addOnTotal-c.subtractionTotal, c.addOnTotal-c.subtractionTotal>=0?'var(--purple)':'var(--red)')}">${fmt(c.addOnTotal-c.subtractionTotal)}</div></div>
           <div class="job-stat" style="${statTileStyle(c.contractTotal)}"><div class="job-stat-label">Contract</div><div class="job-stat-value" style="${statValueStyle(c.contractTotal)}">${fmt(c.contractTotal)}</div></div>
           <div class="job-stat" style="${statTileStyle(c.collectedGross)}"><div class="job-stat-label">Collected</div><div class="job-stat-value" style="${statValueStyle(c.collectedGross, 'var(--green)')}">${fmt(c.collectedGross)}</div></div>
