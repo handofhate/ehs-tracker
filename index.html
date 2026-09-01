@@ -192,29 +192,39 @@
   .owed-toggle.on { background: var(--accent); }
   .owed-toggle-thumb { width: 12px; height: 12px; border-radius: 50%; background: #fff; transform: translateX(0); transition: transform 0.15s ease; }
   .owed-toggle.on .owed-toggle-thumb { transform: translateX(14px); }
-.po-mode-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
-.po-mode-btn { justify-content: center; text-align: center; }
-.po-mode-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
-
   .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
   .section-title { font-family: var(--mono); font-size: 15px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--text3); }
 
   .job-card { position: relative; background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; margin-bottom: 12px; overflow: hidden; transition: border-color 0.15s; }
-  .job-card:has(.job-billing-menu[open]) { overflow: visible; z-index: 10; }
+  .job-card:has(.job-billing-menu[open]), .job-card:has(.job-emp-pay-menu[open]) { overflow: visible; z-index: 10; }
   .job-card:hover { border-color: var(--border2); }
   .job-card.active { border-left: 3px solid var(--accent); }
   .job-card.complete { border-left: 3px solid var(--green); }
+  .job-card.billing-pending { border-left-color: var(--blue); }
+  .job-card.billing-invoiced { border-left-color: var(--yellow); }
+  .job-card.billing-paid { border-left-color: var(--green); }
 
-  .job-header { display: grid; grid-template-columns: 16px minmax(170px, 0.78fr) auto 74px; align-items: center; column-gap: 10px; padding: 16px 20px; cursor: pointer; }
+  .job-header { --job-header-gap: clamp(8px, 1.2vw, 18px); --job-total-width: 114px; --job-outstanding-width: 99px; --job-employee-pay-width: 108px; display: grid; grid-template-columns: 16px clamp(220px, 18vw, 280px) minmax(0, 2fr) var(--job-total-width) minmax(0, 1fr) var(--job-outstanding-width) minmax(0, 1fr) var(--job-employee-pay-width) minmax(0, 2fr) 74px; align-items: center; column-gap: 0; padding: 16px 20px; cursor: pointer; }
   .job-header-main { min-width: 0; }
   .job-name { font-size: 20px; font-weight: 500; flex: 1; min-width: 0; }
+  .job-contact-line { min-height: 22px; margin-top: 2px; display: flex; align-items: center; gap: 6px; color: var(--blue); font-family: var(--mono); font-size: 13px; }
+  .job-contact-line.placeholder { visibility: hidden; }
   .job-status { font-family: var(--mono); font-size: 14px; text-transform: uppercase; letter-spacing: 0.1em; padding: 3px 8px; border-radius: 2px; white-space: nowrap; }
   .status-active { background: rgba(245,166,35,0.15); color: var(--accent); }
   .status-complete { background: rgba(76,175,130,0.15); color: var(--green); }
-  .job-quick-stats { display: block; justify-self: start; width: max-content; max-width: 100%; }
+  .job-quick-stats { display: contents; }
   .job-stat { text-align: right; min-width: 0; cursor: pointer; }
-  .job-stat-label { font-size: 12px; color: var(--text3); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .job-stat-value { font-family: var(--mono); font-size: 17px; font-weight: 500; white-space: nowrap; }
+  .job-stat-label { font-size: 15px; color: var(--text3); font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .job-stat-value { font-family: var(--mono); font-size: 21px; font-weight: 500; white-space: nowrap; }
+  .job-emp-pay-menu { position: relative; display: block; }
+  .job-emp-pay-summary { display: block; list-style: none; cursor: pointer; }
+  .job-emp-pay-summary::-webkit-details-marker { display: none; }
+  .job-emp-pay-popover { position: absolute; z-index: 1100; top: calc(100% + 8px); right: 0; width: 238px; padding: 10px 12px; background: var(--bg2); border: 1px solid var(--border2); border-radius: 3px; box-shadow: 0 8px 22px rgba(0,0,0,0.3); text-align: left; }
+  .job-emp-pay-popover-title { margin-bottom: 8px; padding-bottom: 7px; border-bottom: 1px solid var(--border); color: var(--text3); font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; }
+  .job-emp-pay-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 4px 0; color: var(--text2); font-family: var(--mono); font-size: 13px; white-space: nowrap; }
+  .job-emp-pay-row strong { color: var(--text); font-weight: 500; }
+  .job-emp-pay-row.current { margin-top: 5px; padding-top: 8px; border-top: 1px solid var(--border); color: var(--text); }
+  .job-emp-pay-row.current strong { color: var(--accent); }
   .job-header-btns { display: flex; align-items: center; justify-content: flex-end; }
   .hw-header { display: flex; align-items: center; padding: 16px 20px; gap: 12px; }
   .hw-header .job-header-main { display: flex; align-items: center; gap: 16px; flex: 1; cursor: pointer; min-width: 0; }
@@ -223,10 +233,13 @@
   .job-emp-rail { writing-mode: vertical-rl; transform: rotate(180deg); justify-self: start; align-self: stretch; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--purple); opacity: 0.9; white-space: nowrap; overflow: hidden; margin-left: -4px; }
   .job-name-block { min-width: 0; }
   .job-status-wrap { display: none; }
-  .job-quick-stats-grid { display: grid; grid-template-columns: repeat(5, minmax(108px, max-content)) minmax(250px, max-content); column-gap: 22px; align-items: end; justify-content: start; }
-  .job-emp-stats { grid-column: 6; display: grid; grid-template-columns: repeat(2, minmax(108px, max-content)); column-gap: 22px; row-gap: 4px; justify-content: start; }
+  .job-quick-stats-grid { display: contents; }
+  /* Desktop header columns: A = client/date/status, B = total, C = outstanding, D = employee pay, E = actions. */
+  .job-quick-stats-grid > .job-stat:nth-child(1) { grid-column: 4; }
+  .job-quick-stats-grid > .job-stat:nth-child(2) { grid-column: 6; }
+  .job-quick-stats-grid > .job-stat:nth-child(3) { grid-column: 8; }
   .job-emp-name { display: none; }
-  .job-header-btns-stacked { display: flex; align-items: center; justify-content: flex-end; width: 100%; }
+  .job-header-btns-stacked { display: flex; align-items: center; justify-content: flex-end; width: 100%; grid-column: 10; }
   .job-action-pad { width: 74px; display: grid; grid-template-columns: repeat(2, 34px); grid-template-rows: repeat(2, 34px); gap: 6px; justify-content: end; }
   .job-icon-btn { width: 34px; height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; position: relative; }
   .job-icon-btn svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -427,26 +440,16 @@
     .hw-pay-amount { white-space: nowrap; }
   }
 
-  @media (min-width: 601px) and (max-width: 1440px) {
-    .job-header { grid-template-columns: 16px minmax(190px, max-content) minmax(22px, 0.9fr) max-content minmax(22px, 0.9fr) 74px; align-items: center; column-gap: 0; }
-    .job-header-main-grid { display: contents; }
-    .job-name-block { grid-column: 2; }
-    .job-quick-stats { width: auto; justify-self: start; max-width: 100%; }
-    .job-quick-stats-grid { grid-column: 4; }
-    .job-quick-stats-grid { grid-template-columns: repeat(5, minmax(96px, max-content)) minmax(216px, max-content); gap: 8px 24px; width: auto; }
-    .job-emp-stats { grid-column: 6; grid-template-columns: repeat(2, minmax(96px, max-content)); gap: 8px 24px; }
-    .job-header-btns-stacked { grid-column: 6; align-self: center; justify-self: end; width: 74px; }
-  }
-
-  @media (min-width: 601px) and (max-width: 1080px) {
-    .job-header { grid-template-columns: 16px minmax(0, 1fr) 74px; align-items: start; }
-    .job-header-main-grid { display: grid; grid-template-columns: minmax(0, 1fr); row-gap: 10px; }
-    .job-name-block { grid-column: 1; }
-    .job-quick-stats { width: 100%; justify-self: stretch; }
-    .job-quick-stats-grid { grid-column: 1; }
-    .job-quick-stats-grid { grid-template-columns: repeat(5, minmax(86px, 1fr)); gap: 8px 14px; }
-    .job-emp-stats { grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(86px, 1fr)); gap: 8px 14px; }
-    .job-header-btns-stacked { grid-column: 3; align-self: start; }
+  @media (min-width: 601px) and (max-width: 1050px) {
+    .job-header { --job-header-gap: clamp(6px, 1.2vw, 12px); grid-template-columns: 16px minmax(0, 1fr) 74px; align-items: start; row-gap: 8px; }
+    .job-header-main-grid { display: grid; grid-column: 2; grid-row: 1 / span 2; grid-template-columns: minmax(0, 1fr); row-gap: 10px; }
+    .job-name-block { grid-column: 1; grid-row: 1; }
+    .job-quick-stats { display: block; grid-column: 1; grid-row: 2; width: 100%; }
+    .job-quick-stats-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px var(--job-header-gap); width: 100%; }
+    .job-quick-stats-grid > .job-stat:nth-child(1),
+    .job-quick-stats-grid > .job-stat:nth-child(2),
+    .job-quick-stats-grid > .job-stat:nth-child(3) { grid-column: auto; grid-row: auto; }
+    .job-header-btns-stacked { grid-column: 3; grid-row: 1 / span 2; align-self: start; width: 74px; }
   }
 
   @media (max-width: 600px) {
@@ -531,23 +534,18 @@
     .repay-toggle { font-size: 15px; }
     /* Job status + emp name Ã¢â‚¬â€ upper-right on mobile */
     .job-status-wrap { display: none; }
-    .job-header-main-grid { display: grid; grid-template-columns: 1fr auto; column-gap: 12px; row-gap: 8px; align-items: start; }
+    .job-header-main-grid { display: grid; grid-template-columns: 1fr auto; column-gap: 22px; row-gap: 8px; align-items: start; }
     .job-emp-rail { display: none; }
     .job-name-block { grid-column: 1; grid-row: 1; min-width: 0; }
     .job-billing-strip { margin-top: 6px; gap: 4px; }
     .job-billing-pill { height: 20px; padding: 2px 6px; font-size: 10px; }
     .job-billing-pill strong { font-size: 11px; }
     .job-billing-menu, .job-billing-menu > summary, .job-billing-action { height: 20px; }
-    .job-quick-stats-grid { display: contents; }
+    .job-quick-stats-grid { display: contents; margin: 0; }
     .job-quick-stats-grid > .job-stat:nth-child(1) { grid-column: 2; grid-row: 1; text-align: right; align-self: start; }
     .job-quick-stats-grid > .job-stat:nth-child(2) { grid-column: 1; grid-row: 2; }
     .job-quick-stats-grid > .job-stat:nth-child(3) { grid-column: 2; grid-row: 2; text-align: right; }
-    .job-quick-stats-grid > .job-stat:nth-child(4) { grid-column: 1; grid-row: 3; }
-    .job-quick-stats-grid > .job-stat:nth-child(5) { grid-column: 2; grid-row: 3; text-align: right; }
-    .job-emp-stats { grid-column: 1 / -1; grid-row: 4; display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; }
-    .job-emp-stats .job-stat:nth-child(1) { grid-column: 1; text-align: left; }
-    .job-emp-stats .job-stat:nth-child(2) { grid-column: 2; text-align: right; }
-    .job-header-btns-stacked { width: 100%; justify-content: center; border-top: 1px solid var(--border); padding-top: 8px; margin-top: 2px; }
+    .job-header-btns-stacked { grid-column: 1; grid-row: auto; width: 100%; justify-content: center; border-top: 1px solid var(--border); padding-top: 8px; margin-top: 2px; }
     .job-action-pad { width: auto; grid-template-columns: repeat(4, 34px); grid-template-rows: 34px; justify-content: center; }
     .hw-header { padding: 12px 14px; gap: 8px; flex-wrap: wrap; }
     .hw-header .job-header-main { gap: 8px; flex-wrap: wrap; position: relative; }
@@ -1455,7 +1453,7 @@
       </div>
       <div style="margin-bottom:14px">
         <div style="color:var(--accent);font-size:14px;margin-bottom:4px">v1.20 - Apr 2026</div>
-        <div>- New Pay Out workflow with employee picker plus Pay Now / Pay To Zero modes</div>
+        <div>- Pay Out workflow now uses one Pay Owed amount based on completed work, regardless of client payment status</div>
         <div>- Split Pay and Pay Out ledger modal with jump-to-job/homewatch links</div>
         <div>- Desktop header actions moved into a cleaner menu; mobile slideout menu added</div>
         <div>- Employee settings redesigned with USER / CLIENTS tabs and split percentage badge</div>
@@ -1676,19 +1674,12 @@
         <input class="form-input" id="po_date" type="date" />
       </div>
     </div>
-    <div style="margin-top:4px;margin-bottom:10px">
-      <div class="form-label" style="margin:0 0 8px 0">Payout Mode</div>
-      <div class="po-mode-row">
-        <button type="button" id="po_mode_now" class="btn btn-ghost po-mode-btn" onclick="setPayOutMode('pay_now')">Pay Now</button>
-        <button type="button" id="po_mode_zero" class="btn btn-ghost po-mode-btn" onclick="setPayOutMode('pay_to_zero')">Pay To Zero</button>
-      </div>
-    </div>
     <div id="po_totals" style="background:var(--bg3);border:1px solid var(--border2);border-radius:3px;padding:12px 16px;font-family:var(--mono);font-size:14px;display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-bottom:10px"></div>
     <div id="po_rows" style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:3px;padding:0 12px"></div>
-    <div class="form-hint" id="po_hint" style="margin-top:8px">Pay Now ignores negative rows so prepaid jobs do not reduce what is paid today.</div>
+    <div class="form-hint" id="po_hint" style="margin-top:8px">Pay owed is based on completed work, regardless of client payment status.</div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('payOutModal')">Cancel</button>
-      <button class="btn btn-primary" id="po_applyBtn" onclick="applyPayOutToSplitPay()">Use Pay Now in Split Pay</button>
+      <button class="btn btn-primary" id="po_applyBtn" onclick="applyPayOutToSplitPay()">Use Pay Owed in Split Pay</button>
     </div>
   </div>
 </div>

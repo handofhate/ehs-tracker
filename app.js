@@ -32,7 +32,9 @@ let state = {
 };
 let editingJobId = null;
 let addItemContext = null;
-let payOutCtx = { employeeId: '', mode: 'pay_now' };
+let payOutCtx = { employeeId: '' };
+let splitPayIncludeAll = false;
+let splitPayEmployeeId = '';
 let expandedJobs = new Set(); // local only - never saved to Firestore
 let expandedHW   = new Set(); // local only - never saved to Firestore
 let expandedClients = new Set();
@@ -1277,7 +1279,7 @@ function renderEmpSummary() {
   const pausedHW = (state.homewatch||[]).filter(hw => hw.status === 'paused' && hw.employeeId === myId);
   const allHW    = (state.homewatch||[]).filter(hw => hw.employeeId === myId);
 
-  // Currently owed (collected but not yet paid out — includes paused clients with collected invoices)
+  // Employee pay is based on completed work, regardless of whether the client has paid yet.
   let tOwed = 0;
   active.forEach(j => { tOwed += calcJob(j).empBalance; });
   allHW.forEach(hw => { tOwed += calcHW(hw).empBalance; });
@@ -1296,7 +1298,7 @@ function renderEmpSummary() {
   });
   tPotential = _roundMoney(tPotential);
 
-  // Recent pay (advances paid to employee within selected timeframe)
+  // Recent pay (all recorded employee payments within the selected timeframe)
   let cutoffStr = null;
   if (empSummaryTimeframe !== 'all') {
     const d = new Date();
@@ -1325,17 +1327,27 @@ function renderEmpSummary() {
         <select onchange="setEmpSummaryTimeframe(this.value)" style="font-size:12px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:1px 4px">${tfOpts}</select>
       </div>
       <div class="summary-value green">${fmt(tRecentPay)}</div>
-      <div class="summary-sub">advances received</div>
+      <div class="summary-sub">received</div>
     </div>
-    <div class="summary-card"><div class="summary-label">Currently Owed</div><div class="summary-value ${tOwed>0?'orange':'green'}">${fmt(Math.max(0,tOwed))}</div><div class="summary-sub">from collected work</div></div>
-    <div class="summary-card"><div class="summary-label">Potential Pay</div><div class="summary-value orange">${fmt(Math.max(0,tPotential))}</div><div class="summary-sub">if all active work completes</div></div>`;
+    <div class="summary-card"><div class="summary-label">Currently Owed</div><div class="summary-value ${tPotential>0?'orange':tPotential<0?'red':'green'}">${fmt(tPotential)}</div><div class="summary-sub">from completed work</div></div>`;
 }
 
 // ─── RENDER JOBS ─────────────────────────────────────────────────────────────
+function newestJobsFirst(jobs) {
+  return jobs
+    .map((job, index) => ({ job, index }))
+    .sort((a, b) => {
+      const dateOrder = String(b.job.date || '').localeCompare(String(a.job.date || ''));
+      return dateOrder || (b.index - a.index);
+    })
+    .map(({ job }) => job);
+}
+
 function renderJobs() {
   renderSummary();
   const isAdmin = currentUser?.isAdmin;
-  const allJobs = isAdmin ? state.jobs : state.jobs.filter(j => j.employeeId === currentUser?.id);
+  const visibleJobs = isAdmin ? state.jobs : state.jobs.filter(j => j.employeeId === currentUser?.id);
+  const allJobs = newestJobsFirst(visibleJobs);
   const active   = allJobs.filter(j => j.status !== 'complete');
   const complete = allJobs.filter(j => j.status === 'complete');
   document.getElementById('activeCount').textContent = `${active.length} active job${active.length!==1?'s':''}`;
@@ -1375,6 +1387,14 @@ function jobIconButton({ title, icon, onclick = '', accent = false, disabled = f
   return `<button class="${cls}" type="button"${disabled ? ' disabled' : ''}${disabled ? '' : ` onclick="${onclick}"`} title="${title}" aria-label="${title}">${jobIconSvg(icon)}</button>`;
 }
 
+function jobContactLineHtml(job, contactClient) {
+  if (!job.contactName) return '<div class="job-contact-line placeholder" aria-hidden="true"></div>';
+  const contactButton = contactClient
+    ? '<button class="btn btn-ghost btn-sm job-icon-btn" style="width:22px;height:22px" onclick="event.stopPropagation();openClientQuickById(\'' + contactClient.id + '\')" title="View in Clients" aria-label="View in Clients">' + jobIconSvg('client') + '</button>'
+    : '';
+  return '<div class="job-contact-line">via ' + esc(job.contactName) + ' ' + contactButton + '</div>';
+}
+
 function jobCard(job) {
   const c = calcJob(job);
   const isHourly = _jobType(job) === 'hourly';
@@ -1392,16 +1412,16 @@ function jobCard(job) {
     if (isZeroStat(n)) return 'color:var(--text3)!important';
     return normalColor ? `color:${normalColor}` : '';
   };
-  // Hourly jobs do not use the quoted-work field, so temporarily show their
-  // calculated total in the Quote tile rather than displaying $0.00.
-  const quoteHeaderAmount = isHourly ? c.contractTotal : job.quote;
+  const employeePayTotal = c.potentialEmpTotalOwed;
+  const employeePayBalance = c.potentialEmpBalance;
   const isExp = expandedJobs.has(job.id);
   const sc    = job.status === 'complete' ? 'complete' : 'active';
   const nc    = (job.jobNotes||[]).length;
   const th    = c.totalHours;
   const jobEmpName = currentUser?.isAdmin ? (getEmp(job.employeeId)?.name || '') : '';
+  const billingClass = jobBillingStatusClass(job, c);
   return `
-  <div class="job-card ${sc} ${isExp?'expanded':''}" id="job_${job.id}" onclick="toggleCardMobile(event, 'job', '${job.id}')">
+  <div class="job-card ${sc} ${isExp?'expanded':''} ${billingClass}" id="job_${job.id}" onclick="toggleCardMobile(event, 'job', '${job.id}')">
     <div class="job-header" onclick="toggleHeaderRow(event, 'job', '${job.id}')">
       ${jobEmpName ? `<div class="job-emp-rail">${esc(jobEmpName)}</div>` : '<div class="job-emp-rail"></div>'}
       <div class="job-header-main job-header-main-grid">
@@ -1410,19 +1430,27 @@ function jobCard(job) {
             ${esc(job.name)}
             ${jobClient ? `<button class="btn btn-ghost btn-sm job-icon-btn" style="width:24px;height:24px" onclick="event.stopPropagation();openClientQuickById('${jobClient.id}')" title="View in Clients" aria-label="View in Clients">${jobIconSvg('client')}</button>` : ''}
           </div>
-          ${job.contactName ? `<div style="font-size:13px;color:var(--blue);margin-top:2px;font-family:var(--mono);display:flex;align-items:center;gap:6px">via ${esc(job.contactName)} ${contactClient ? `<button class="btn btn-ghost btn-sm job-icon-btn" style="width:22px;height:22px" onclick="event.stopPropagation();openClientQuickById('${contactClient.id}')" title="View in Clients" aria-label="View in Clients">${jobIconSvg('client')}</button>` : ''}</div>` : ''}
+          ${jobContactLineHtml(job, contactClient)}
           <div style="font-size:15px;color:var(--text3);margin-top:2px;font-family:var(--mono)">${job.date||''}</div>
           ${jobBillingSummaryHtml(job, c)}
         </div>
         <div class="job-quick-stats job-quick-stats-grid">
-          <div class="job-stat" style="${statTileStyle(quoteHeaderAmount, isHourly ? '' : fadedStatStyle)}"><div class="job-stat-label">Quote</div><div class="job-stat-value" style="${statValueStyle(quoteHeaderAmount)}">${fmt(quoteHeaderAmount)}</div></div>
-          <div class="job-stat" style="${statTileStyle(c.addOnTotal-c.subtractionTotal, fadedStatStyle)}"><div class="job-stat-label">Adjust</div><div class="job-stat-value" style="${isHourly ? fadedValueStyle : statValueStyle(c.addOnTotal-c.subtractionTotal, c.addOnTotal-c.subtractionTotal>=0?'var(--purple)':'var(--red)')}">${fmt(c.addOnTotal-c.subtractionTotal)}</div></div>
-          <div class="job-stat" style="${statTileStyle(c.contractTotal)}"><div class="job-stat-label">Contract</div><div class="job-stat-value" style="${statValueStyle(c.contractTotal)}">${fmt(c.contractTotal)}</div></div>
-          <div class="job-stat" style="${statTileStyle(c.collectedGross)}"><div class="job-stat-label">Collected</div><div class="job-stat-value" style="${statValueStyle(c.collectedGross, 'var(--green)')}">${fmt(c.collectedGross)}</div></div>
+          <div class="job-stat" style="${statTileStyle(c.contractTotal)}"><div class="job-stat-label">Total</div><div class="job-stat-value" style="${statValueStyle(c.contractTotal)}">${fmt(c.contractTotal)}</div></div>
           <div class="job-stat" style="${statTileStyle(c.outstanding)}"><div class="job-stat-label">Outstanding</div><div class="job-stat-value" style="${statValueStyle(c.outstanding, c.outstanding>0?'var(--blue)':'var(--text2)')}">${fmt(c.outstanding)}</div></div>
-          <div class="job-emp-stats">
-            <div class="job-stat" style="${statTileStyle(c.empBalance)}"><div class="job-stat-label">Emp. Balance</div><div class="job-stat-value" style="${statValueStyle(c.empBalance, 'var(--accent)')}">${fmt(c.empBalance)}</div></div>
-            <div class="job-stat" style="${statTileStyle(c.potentialEmpBalance)}"><div class="job-stat-label">Potential</div><div class="job-stat-value" style="${statValueStyle(c.potentialEmpBalance, c.potentialEmpBalance>0?'var(--yellow)':'var(--text2)')}">${fmt(c.potentialEmpBalance)}</div></div>
+          <div class="job-stat job-emp-pay-stat">
+            <details class="job-emp-pay-menu" onclick="event.stopPropagation();closeOtherJobPopovers('pay')">
+              <summary class="job-emp-pay-summary">
+                <div class="job-stat-label">Employee Pay</div>
+                <div class="job-stat-value" style="${statValueStyle(employeePayBalance, employeePayBalance < 0 ? 'var(--red)' : 'var(--accent)')}">${fmt(employeePayBalance)}</div>
+              </summary>
+              <div class="job-emp-pay-popover" onclick="event.stopPropagation()">
+                <div class="job-emp-pay-popover-title">Employee Pay</div>
+                <div class="job-emp-pay-row"><span>Total pay for job</span><strong>${fmt(employeePayTotal)}</strong></div>
+                <div class="job-emp-pay-row"><span>Already paid</span><strong>${fmt(c.advancesPaid)}</strong></div>
+                ${c.linkedDebtPaid > 0 ? `<div class="job-emp-pay-row"><span>Applied to debt</span><strong>${fmt(c.linkedDebtPaid)}</strong></div>` : ''}
+                <div class="job-emp-pay-row current"><span>Currently owed</span><strong style="color:${employeePayBalance < 0 ? 'var(--red)' : 'var(--accent)'}">${fmt(employeePayBalance)}</strong></div>
+              </div>
+            </details>
           </div>
         </div>
       </div>
@@ -1533,7 +1561,7 @@ function jobBillingSummaryHtml(job, calc = null) {
     });
   if (!parts.length) return '';
   const bulkAction = currentUser?.isAdmin
-    ? `<details class="job-billing-menu" onclick="event.stopPropagation()">
+    ? `<details class="job-billing-menu" onclick="event.stopPropagation();closeOtherJobPopovers('billing')">
         <summary class="job-billing-action" title="Set every invoiceable line to one status">Set all</summary>
         <div class="job-billing-menu-popover" role="menu" aria-label="Set all billing statuses">
           <button type="button" role="menuitem" onclick="event.stopPropagation();setAllBillingStatus('${job.id}','pending')">Pending</button>
@@ -1543,6 +1571,14 @@ function jobBillingSummaryHtml(job, calc = null) {
       </details>`
     : '';
   return `<div class="job-billing-strip" aria-label="Invoice status summary">${parts.join('')}${bulkAction}</div>`;
+}
+
+function jobBillingStatusClass(job, calc = null) {
+  const summary = getJobBillingSummary(job, calc);
+  if (summary.invoiced.count > 0) return 'billing-invoiced';
+  if (summary.pending.count > 0) return 'billing-pending';
+  if (summary.paid.count > 0) return 'billing-paid';
+  return '';
 }
 
 function jobClientChargeSummaryHtml(job, calc = null) {
@@ -1624,20 +1660,33 @@ function toggleCardMobile(event, type, id) {
   if (window.innerWidth > 600) return;
   if (event.target.closest('.job-detail')) return;
   if (event.target.closest('button, a, input, select, textarea, .job-chevron')) return;
+  if (jobPopoverIsOpen()) { closeJobPopovers(); return; }
   if (type === 'hw') toggleHW(id);
   else toggleJob(id);
 }
 function toggleHeaderDesktop(event, type, id) {
   if (window.innerWidth <= 600) return;
   if (event.target.closest('button, a, input, select, textarea, .job-chevron')) return;
+  if (jobPopoverIsOpen()) { closeJobPopovers(); return; }
   if (type === 'hw') toggleHW(id);
   else toggleJob(id);
 }
 function toggleHeaderRow(event, type, id) {
   if (event.target.closest('button, a, input, select, textarea, .job-chevron')) return;
   event.stopPropagation();
+  if (jobPopoverIsOpen()) { closeJobPopovers(); return; }
   if (type === 'hw') toggleHW(id);
   else toggleJob(id);
+}
+function jobPopoverIsOpen() {
+  return !!document.querySelector('.job-billing-menu[open], .job-emp-pay-menu[open]');
+}
+function closeJobPopovers() {
+  document.querySelectorAll('.job-billing-menu[open], .job-emp-pay-menu[open]').forEach(menu => menu.removeAttribute('open'));
+}
+function closeOtherJobPopovers(kind) {
+  const selector = kind === 'billing' ? '.job-emp-pay-menu[open]' : '.job-billing-menu[open]';
+  document.querySelectorAll(selector).forEach(menu => menu.removeAttribute('open'));
 }
 function cyclePayType(jobId, idx) {
   const job = state.jobs.find(j=>j.id===jobId);
@@ -2498,52 +2547,33 @@ function renderSplitLedger() {
 function _buildPayOutRows(employeeId) {
   if (!employeeId) return [];
   const rows = [];
-  state.jobs.filter(j => j.status !== 'complete' && j.employeeId === employeeId).forEach(j => {
+  state.jobs.filter(j => j.employeeId === employeeId).forEach(j => {
     const c = calcJob(j);
     rows.push({
-      id: `sp_job_${j.id}`,
+      id: 'sp_job_' + j.id,
       label: j.name || 'Job',
       kind: 'job',
-      owedNow: Number(c.empBalance || 0),
-      potential: Number(c.potentialEmpBalance || 0)
+      workPayBalance: Number(c.potentialEmpBalance || 0)
     });
   });
-  (state.homewatch || []).filter(hw => hw.status !== 'paused' && hw.employeeId === employeeId).forEach(hw => {
+  (state.homewatch || []).filter(hw => hw.employeeId === employeeId).forEach(hw => {
     const c = calcHW(hw);
     rows.push({
-      id: `sp_hw_${hw.id}`,
+      id: 'sp_hw_' + hw.id,
       label: hw.name || 'HomeWatch',
       kind: 'hw',
-      owedNow: Number(c.empBalance || 0),
-      potential: Number(c.potentialEmpBalance || 0)
+      workPayBalance: Number(c.potentialEmpBalance || 0)
     });
   });
   return rows;
 }
 function _calcPayOutPlan(employeeId) {
-  const rows = _buildPayOutRows(employeeId).map(r => {
-    const owedPayable = Math.max(0, Number(r.owedNow || 0));
-    const payToZeroTarget = Number(r.potential || 0);
-    return {
-      ...r,
-      owedPayable: _roundMoney(owedPayable),
-      payNowTarget: _roundMoney(owedPayable),
-      payToZeroTarget: _roundMoney(payToZeroTarget)
-    };
-  });
-  const payNowTotal = _roundMoney(rows.reduce((s, r) => s + r.payNowTarget, 0));
-  const payToZeroTotal = _roundMoney(rows.reduce((s, r) => s + r.payToZeroTarget, 0));
-  return {
-    rows,
-    payNowTotal,
-    payToZeroTotal,
-    potentialAddOn: _roundMoney(payToZeroTotal - payNowTotal)
-  };
-}
-function setPayOutMode(mode) {
-  if (mode !== 'pay_now' && mode !== 'pay_to_zero') return;
-  payOutCtx.mode = mode;
-  renderPayOut();
+  const rows = _buildPayOutRows(employeeId).map(r => ({
+    ...r,
+    payoutTarget: _roundMoney(r.workPayBalance)
+  }));
+  const payoutTotal = _roundMoney(rows.reduce((s, r) => s + r.payoutTarget, 0));
+  return { rows, payoutTotal };
 }
 function openPayOut() {
   if (!currentUser?.isAdmin) return;
@@ -2554,7 +2584,6 @@ function openPayOut() {
   if (!payOutCtx.employeeId || !employees.some(e => e.id === payOutCtx.employeeId)) {
     payOutCtx.employeeId = employees[0].id;
   }
-  if (payOutCtx.mode !== 'pay_now' && payOutCtx.mode !== 'pay_to_zero') payOutCtx.mode = 'pay_now';
   select.innerHTML = employees.map(e => `<option value="${e.id}"${e.id === payOutCtx.employeeId ? ' selected' : ''}>${esc(e.name || 'Employee')}</option>`).join('');
   document.getElementById('po_date').value = today();
   renderPayOut();
@@ -2564,54 +2593,41 @@ function renderPayOut() {
   const select = document.getElementById('po_employee');
   if (!select) return;
   payOutCtx.employeeId = select.value || payOutCtx.employeeId || '';
-  const mode = payOutCtx.mode === 'pay_to_zero' ? 'pay_to_zero' : 'pay_now';
-  const includePotential = mode === 'pay_to_zero';
   const plan = _calcPayOutPlan(payOutCtx.employeeId);
-  const selectedTotal = includePotential ? plan.payToZeroTotal : plan.payNowTotal;
-  const payNowBtn = document.getElementById('po_mode_now');
-  const payToZeroBtn = document.getElementById('po_mode_zero');
-  if (payNowBtn) payNowBtn.classList.toggle('active', mode === 'pay_now');
-  if (payToZeroBtn) payToZeroBtn.classList.toggle('active', mode === 'pay_to_zero');
   const totalsEl = document.getElementById('po_totals');
   if (totalsEl) {
-    totalsEl.innerHTML = `
-      <span>Pay Now (completed only) <strong>${fmt(plan.payNowTotal)}</strong></span>
-      <span>Pay To Zero (include potential) <strong>${fmt(plan.payToZeroTotal)}</strong></span>
-      <span>Potential Add-on <strong>${fmt(plan.potentialAddOn)}</strong></span>
-      <span>Selected Payout <strong style="color:${selectedTotal < -0.005 ? 'var(--red)' : 'var(--green)'}">${fmt(selectedTotal)}</strong></span>`;
+    const totalColor = plan.payoutTotal < -0.005 ? 'var(--red)' : 'var(--green)';
+    totalsEl.innerHTML =
+      '<span>Pay owed from completed work <strong style="color:' + totalColor + '">' + fmt(plan.payoutTotal) + '</strong></span>';
   }
   const rowsEl = document.getElementById('po_rows');
   const hintEl = document.getElementById('po_hint');
   if (hintEl) {
-    hintEl.textContent = includePotential
-      ? 'Pay To Zero includes negative rows so payouts fully reconcile overpaid vs future balances.'
-      : 'Pay Now ignores negative rows so prepaid jobs do not reduce what is paid today.';
+    hintEl.textContent = 'Based on completed work, regardless of client payment status. Negative balances are included to account for overpayments.';
   }
   const applyBtn = document.getElementById('po_applyBtn');
   if (applyBtn) {
-    applyBtn.textContent = includePotential ? 'Use Pay To Zero in Split Pay' : 'Use Pay Now in Split Pay';
-    applyBtn.disabled = selectedTotal <= 0.005;
+    applyBtn.textContent = 'Use Pay Owed in Split Pay';
+    applyBtn.disabled = plan.payoutTotal <= 0.005;
   }
   if (rowsEl) {
-    const shown = plan.rows.filter(r => includePotential ? Math.abs(r.payToZeroTarget) > 0.005 : r.payNowTarget > 0.005);
+    const shown = plan.rows.filter(r => Math.abs(r.payoutTarget) > 0.005);
     rowsEl.innerHTML = shown.length
-      ? shown.map(r => `
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
-            <div style="min-width:0">
-              <div style="font-size:15px">${esc(r.label)}</div>
-              <div style="font-family:var(--mono);font-size:12px;color:var(--text3)">
-                owed ${fmt(r.owedNow)}${includePotential ? ` | potential ${fmt(r.potential)}` : ''}
-              </div>
-            </div>
-            <div style="font-family:var(--mono);font-size:14px;color:${(includePotential ? r.payToZeroTarget : r.payNowTarget) < -0.005 ? 'var(--red)' : 'var(--green)'};white-space:nowrap">${fmt(includePotential ? r.payToZeroTarget : r.payNowTarget)}</div>
-          </div>`).join('')
-      : '<div style="color:var(--text3);font-size:15px;padding:12px 0">No payable rows for this payout mode.</div>';
+      ? shown.map(r =>
+          '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">' +
+            '<div style="min-width:0">' +
+              '<div style="font-size:15px">' + esc(r.label) + '</div>' +
+              '<div style="font-family:var(--mono);font-size:12px;color:var(--text3)">Pay owed: ' + fmt(r.workPayBalance) + '</div>' +
+            '</div>' +
+            '<div style="font-family:var(--mono);font-size:14px;color:' + (r.payoutTarget < -0.005 ? 'var(--red)' : 'var(--green)') + ';white-space:nowrap">' + fmt(r.payoutTarget) + '</div>' +
+          '</div>'
+        ).join('')
+      : '<div style="color:var(--text3);font-size:15px;padding:12px 0">No employee pay balances are currently owed.</div>';
   }
 }
 function applyPayOutToSplitPay() {
-  const includePotential = payOutCtx.mode === 'pay_to_zero';
   const plan = _calcPayOutPlan(payOutCtx.employeeId);
-  const targetTotal = includePotential ? plan.payToZeroTotal : plan.payNowTotal;
+  const targetTotal = plan.payoutTotal;
   if (targetTotal <= 0.005) {
     showAlert('Nothing to pay out for this selection.');
     return;
@@ -2619,22 +2635,22 @@ function applyPayOutToSplitPay() {
   const emp = getEmp(payOutCtx.employeeId);
   const allocById = {};
   plan.rows.forEach(r => {
-    if (includePotential) {
-      if (Math.abs(r.payToZeroTarget) > 0.005) allocById[r.id] = r.payToZeroTarget;
-      return;
-    }
-    if (r.payNowTarget > 0.005) allocById[r.id] = r.payNowTarget;
+    if (Math.abs(r.payoutTarget) > 0.005) allocById[r.id] = r.payoutTarget;
   });
   openSplitPay({
-    trackAdvances: includePotential,
+    employeeId: payOutCtx.employeeId,
+    includeAll: true,
+    trackAdvances: false,
     total: targetTotal,
     date: document.getElementById('po_date')?.value || today(),
-    label: `Pay Out${emp?.name ? ` - ${emp.name}` : ''}${includePotential ? ' (pay to zero)' : ' (pay now)'}`,
+    label: 'Pay Owed' + (emp?.name ? ' - ' + emp.name : ''),
     allocById
   });
   closeModal('payOutModal');
 }
 function openSplitPay(preset = null) {
+  splitPayIncludeAll = !!preset?.includeAll;
+  splitPayEmployeeId = preset?.employeeId || '';
   document.getElementById('sp_total').value = '';
   document.getElementById('sp_date').value  = today();
   document.getElementById('sp_label').value = '';
@@ -2667,23 +2683,31 @@ function toggleSplitAdvances() {
   renderSplitPayAlloc();
 }
 function renderSplitPayAlloc() {
-  const activeJobs = state.jobs.filter(j => j.status !== 'complete');
-  const activeHW   = (state.homewatch || []).filter(hw => hw.status !== 'paused');
+  const activeJobs = state.jobs.filter(j => (!splitPayEmployeeId || j.employeeId === splitPayEmployeeId) && (splitPayIncludeAll || j.status !== 'complete'));
+  const activeHW   = (state.homewatch || []).filter(hw => (!splitPayEmployeeId || hw.employeeId === splitPayEmployeeId) && (splitPayIncludeAll || hw.status !== 'paused'));
   const allocEl    = document.getElementById('sp_allocList');
   const track = document.getElementById('sp_toggleTrack');
   const thumb = document.getElementById('sp_toggleThumb');
   const allowAdvances = track?.dataset.on === 'true';
+  const payoutContext = splitPayIncludeAll && !!splitPayEmployeeId;
+  const visibleJobs = payoutContext
+    ? activeJobs.filter(j => Math.abs(Number(calcJob(j).potentialEmpBalance || 0)) > 0.005)
+    : activeJobs;
+  const visibleHW = payoutContext
+    ? activeHW.filter(hw => Math.abs(Number(calcHW(hw).potentialEmpBalance || 0)) > 0.005)
+    : activeHW;
   if (track) track.style.background = allowAdvances ? 'var(--accent)' : 'var(--border2)';
   if (thumb) thumb.style.transform = allowAdvances ? 'translateX(18px)' : 'translateX(0)';
   const row = (id, name, bal, potentialBal) => {
     const owedColor = bal > 0.005 ? 'var(--accent)' : bal < -0.005 ? 'var(--red)' : 'var(--text3)';
     const advance = potentialBal - bal;
-    const advanceStr = allowAdvances && advance > 0.005
+    const balanceLabel = payoutContext ? 'pay owed' : 'owed';
+    const advanceStr = allowAdvances && !payoutContext && advance > 0.005
       ? ` &nbsp;<span style="color:var(--text3)">+${fmt(advance)} potential</span>` : '';
     return `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
       <div style="flex:1;min-width:0">
         <div style="font-size:17px;font-weight:500">${name}</div>
-        <div style="font-family:var(--mono);font-size:13px;color:${owedColor}">owed: ${fmt(bal)}${advanceStr}</div>
+        <div style="font-family:var(--mono);font-size:13px;color:${owedColor}">${balanceLabel}: ${fmt(bal)}${advanceStr}</div>
       </div>
       <select class="form-input sp-type-select" id="${id}_type" style="display:none;width:100px;font-size:12px;padding:4px 6px;flex-shrink:0">
         <option value="">General</option>
@@ -2697,13 +2721,13 @@ function renderSplitPayAlloc() {
     </div>`;
   };
   let html = '';
-  if (activeJobs.length) {
-    if (activeHW.length) html += `<div style="font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);padding:4px 0 6px">Jobs</div>`;
-    html += activeJobs.map(j => { const c = calcJob(j); return row(`sp_job_${j.id}`, esc(j.name), c.empBalance, c.potentialEmpBalance); }).join('');
+  if (visibleJobs.length) {
+    if (visibleHW.length) html += `<div style="font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);padding:4px 0 6px">Jobs</div>`;
+    html += visibleJobs.map(j => { const c = calcJob(j); const balance = payoutContext ? c.potentialEmpBalance : c.empBalance; return row(`sp_job_${j.id}`, esc(j.name), balance, c.potentialEmpBalance); }).join('');
   }
-  if (activeHW.length) {
-    html += `<div style="font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);padding:${activeJobs.length?'12px':'4px'} 0 6px">HomeWatch</div>`;
-    html += activeHW.map(hw => { const c = calcHW(hw); return row(`sp_hw_${hw.id}`, esc(hw.name), c.empBalance, c.potentialEmpBalance); }).join('');
+  if (visibleHW.length) {
+    html += `<div style="font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);padding:${visibleJobs.length?'12px':'4px'} 0 6px">HomeWatch</div>`;
+    html += visibleHW.map(hw => { const c = calcHW(hw); const balance = payoutContext ? c.potentialEmpBalance : c.empBalance; return row(`sp_hw_${hw.id}`, esc(hw.name), balance, c.potentialEmpBalance); }).join('');
   }
   allocEl.innerHTML = html || '<div style="color:var(--text3);font-size:16px;padding:8px 0">No active jobs or HomeWatch clients.</div>';
   updateSplitTotals();
@@ -5796,8 +5820,12 @@ document.querySelectorAll('.modal-overlay').forEach(el=>{
   el.addEventListener('click', e=>{ if(_mdOnOverlay && e.target===el) el.classList.add('hidden'); });
 });
 document.addEventListener('click', e=>{
-  if (e.target.closest('.job-billing-menu')) return;
-  document.querySelectorAll('.job-billing-menu[open]').forEach(menu => menu.removeAttribute('open'));
+  if (!e.target.closest('.job-billing-menu')) {
+    document.querySelectorAll('.job-billing-menu[open]').forEach(menu => menu.removeAttribute('open'));
+  }
+  if (!e.target.closest('.job-emp-pay-menu')) {
+    document.querySelectorAll('.job-emp-pay-menu[open]').forEach(menu => menu.removeAttribute('open'));
+  }
 });
 
 
