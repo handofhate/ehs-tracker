@@ -4052,11 +4052,54 @@ function _unifiedEmployeeName() {
   return getEmp(_unifiedEmployeeId())?.name || 'Employee';
 }
 
+function _unifiedItemHasFinancialHistory(item) {
+  if (!item) return false;
+  return ['invoiced', 'collected', 'paid'].includes(item.status) ||
+    ['paid', 'invoiced'].includes(item.billingState) ||
+    item.squareInvoiceId || item.squareOrderId || item.squarePaymentId ||
+    (Array.isArray(item.squarePaymentIds) && item.squarePaymentIds.length > 0) ||
+    item.partialState || item.partialGroupId || item.partialMode || item.partialDate ||
+    item.appliedByPartial;
+}
+
+function _unifiedMaterialBillingLocked(job, materialId) {
+  const material = (job?.materials || []).find(item => item?.id === materialId);
+  const linkedCharge = (job?.addOns || []).find(item => item?.chargeType === 'materials' && item?.sourceItemId === materialId);
+  return _unifiedItemHasFinancialHistory(material) || _unifiedItemHasFinancialHistory(linkedCharge);
+}
+
+function _unifiedStoredLines(job) {
+  if (Array.isArray(job?.unifiedLines) && job.unifiedLines.length) return job.unifiedLines;
+  return [
+    ...(job?.quoteItems || []).map(item => ({ id:item.id, type:'fixed', label:item.label, description:item.description, amount:item.amount })),
+    ...(job?.addOns || []).filter(item => item?.chargeType !== 'materials').map(item => ({
+      id:item.id,
+      type:item.isHours ? 'hourly' : 'other',
+      label:item.label,
+      description:item.description,
+      amount:item.amount,
+      hours:item.hours,
+      rate:item.rate
+    })),
+    ...(job?.materials || []).map(item => ({
+      id:item.id,
+      type:'material',
+      label:item.label,
+      description:item.description,
+      amount:item.clientAmount ?? item.chargeAmount ?? item.amount,
+      reimbursementAmount:item.reimbursementAmount ?? item.costAmount ?? item.amount,
+      who:item.who,
+      billClient:item.billClient !== false
+    })),
+    ...(job?.subtractions || []).map(item => ({ id:item.id, type:'credit', label:item.label, description:item.description, amount:item.amount }))
+  ].filter(line => line.id);
+}
+
 function _unifiedJobHasFinancialHistory(job) {
   if (!job) return false;
   if ((job.partialCollections || []).length || hasPartialFinancialState(job)) return true;
   if ((job.advances || []).length || (job.fees || []).length) return true;
-  if (job.hourlySquareInvoiceId || ['invoiced', 'collected'].includes(job.hourlyStatus)) return true;
+  if (job.hourlySquareInvoiceId || ['invoiced', 'collected', 'paid'].includes(job.hourlyStatus)) return true;
   const items = [
     ...(job.quoteItems || []),
     ...(job.materials || []),
@@ -4065,11 +4108,7 @@ function _unifiedJobHasFinancialHistory(job) {
     ...(job.addOns || []),
     ...(job.subtractions || [])
   ];
-  return items.some(item =>
-    ['invoiced', 'collected'].includes(item?.status) ||
-    item?.squareInvoiceId || item?.squareOrderId || item?.billingState === 'paid' ||
-    item?.partialState || item?.partialGroupId || item?.partialMode || item?.partialDate
-  );
+  return items.some(_unifiedItemHasFinancialHistory);
 }
 
 function _unifiedPrimaryNote(job) {
@@ -4094,7 +4133,7 @@ function _unifiedLineDescription(base, record, type) {
 }
 
 function _unifiedEditLinePresets(job) {
-  const stored = Array.isArray(job?.unifiedLines) ? job.unifiedLines : [];
+  const stored = _unifiedStoredLines(job);
   const lines = [];
   const find = (items, id) => (items || []).find(item => item?.id === id);
   const findAddOn = id => find(job?.addOns, id);
@@ -4104,7 +4143,7 @@ function _unifiedEditLinePresets(job) {
     const type = ['fixed', 'hourly', 'material', 'other', 'credit'].includes(base?.type) ? base.type : 'fixed';
     const id = base?.id || '';
     let record = null;
-    if (type === 'fixed') record = find(job?.quoteItems, id);
+    if (type === 'fixed') record = find(job?.quoteItems, id) || (base?.unifiedAddition ? findAddOn(id) : null);
     if (type === 'hourly' || type === 'other') record = findAddOn(id);
     if (type === 'material') record = find(job?.materials, id);
     if (type === 'credit') record = find(job?.subtractions, id);
@@ -4112,7 +4151,10 @@ function _unifiedEditLinePresets(job) {
     if (!record) return;
 
     const preset = { ...base, id, type, description: _unifiedLineDescription(base, record, type) };
-    if (!unifiedEditFinancialLocked) {
+    const materialBillingLocked = type === 'material' && unifiedEditFinancialLocked
+      ? _unifiedMaterialBillingLocked(job, id)
+      : false;
+    if (!unifiedEditFinancialLocked || (type === 'material' && !materialBillingLocked)) {
       if (type === 'fixed') preset.amount = _roundMoney(record.amount);
       if (type === 'hourly') {
         preset.amount = _roundMoney(record.amount);
@@ -4123,55 +4165,81 @@ function _unifiedEditLinePresets(job) {
       if (type === 'material') {
         preset.amount = _roundMoney(record.clientAmount ?? record.chargeAmount ?? record.amount);
         preset.clientAmount = preset.amount;
-        preset.reimbursementAmount = _roundMoney(record.reimbursementAmount ?? record.costAmount ?? record.amount);
-        preset.who = record.who;
-        preset.billClient = record.billClient !== false;
       }
     }
+    if (type === 'material') {
+      // Reimbursement and purchaser remain editable because they affect settlement,
+      // not the amount already billed to the client.
+      preset.reimbursementAmount = _roundMoney(record.reimbursementAmount ?? record.costAmount ?? record.amount);
+      preset.who = record.who;
+      preset.billClient = materialBillingLocked ? base.billClient !== false : record.billClient !== false;
+    }
     if (type === 'material' && unifiedEditFinancialLocked) {
-      preset.amount = _roundMoney(base.amount);
-      preset.clientAmount = preset.amount;
-      preset.reimbursementAmount = _roundMoney(base.reimbursementAmount ?? base.amount);
-      preset.who = base.who || record.who;
-      preset.billClient = base.billClient !== false;
+      if (materialBillingLocked) {
+        preset.amount = _roundMoney(base.amount);
+        preset.clientAmount = preset.amount;
+      }
     }
     lines.push(preset);
   });
 
-  if (lines.length || stored.length) return lines;
-
-  // Graceful fallback for an early unified record that predates unifiedLines.
-  (job?.quoteItems || []).forEach(item => lines.push({ id:item.id, type:'fixed', label:item.label, description:_unifiedLineDescription({}, item, 'fixed'), amount:_roundMoney(item.amount) }));
-  (job?.addOns || []).forEach(item => {
-    if (item.chargeType === 'materials') return;
-    const type = item.isHours ? 'hourly' : 'other';
-    lines.push({ id:item.id, type, label:item.label, description:_unifiedLineDescription({}, item, type), amount:_roundMoney(item.amount), hours:_roundMoney(item.hours), rate:_roundMoney(item.rate) });
-  });
-  (job?.materials || []).forEach(item => lines.push({
-    id:item.id, type:'material', label:item.label, description:_unifiedLineDescription({}, item, 'material'),
-    amount:_roundMoney(item.clientAmount ?? item.chargeAmount ?? item.amount),
-    reimbursementAmount:_roundMoney(item.reimbursementAmount ?? item.costAmount ?? item.amount),
-    who:item.who, billClient:item.billClient !== false
-  }));
-  (job?.subtractions || []).forEach(item => lines.push({ id:item.id, type:'credit', label:item.label, description:_unifiedLineDescription({}, item, 'credit'), amount:_roundMoney(item.amount) }));
   return lines;
 }
 
 function applyUnifiedEditLock() {
   const locked = unifiedEditFinancialLocked;
-  const selectors = [
-    '#uj_clientName', '#uj_newClientBtn', '#uj_date', '#uj_emp',
-    '#uj_paymentMode', '#uj_lineList select[id^="uj_type_"]',
-    '#uj_lineList input[id^="uj_amount_"]', '#uj_lineList input[id^="uj_hours_"]',
-    '#uj_lineList input[id^="uj_rate_"]', '#uj_lineList input[id^="uj_reimbursementAmount_"]',
-    '#uj_lineList select[id^="uj_who_"]', '#uj_lineList input[id^="uj_bill_"]',
-    '#uj_lineList .unified-line-head button', '.unified-line-add-buttons button',
-    '#uj_milestoneList input', '#uj_milestoneList button', '#uj_milestoneEditor > button'
-  ];
-  document.querySelectorAll(selectors.join(',')).forEach(el => { el.disabled = locked; });
+  const job = unifiedEditJobId ? state.jobs.find(item => item.id === unifiedEditJobId) : null;
+  const protectedHourly = locked && _jobType(job) === 'hourly';
+  document.querySelectorAll('#uj_clientName, #uj_newClientBtn, #uj_date, #uj_emp, #uj_paymentMode').forEach(el => { el.disabled = locked; });
+  document.querySelectorAll('#uj_milestoneList input, #uj_milestoneList button, #uj_milestoneEditor > button').forEach(el => { el.disabled = locked; });
+
+  document.querySelectorAll('#uj_lineList .unified-line-row').forEach(row => {
+    const id = row.dataset.lineId;
+    const preset = row._preset || {};
+    const original = row.dataset.originalLine === 'true' || !!preset.id;
+    const rowLocked = locked && original;
+    const material = document.getElementById(`uj_type_${id}`)?.value === 'material';
+    const materialBillingLocked = rowLocked && material && _unifiedMaterialBillingLocked(job, preset.id);
+    const typeEl = document.getElementById(`uj_type_${id}`);
+    const deleteEl = row.querySelector('.unified-line-head button');
+    if (typeEl) typeEl.disabled = rowLocked;
+    if (deleteEl) deleteEl.disabled = rowLocked;
+    const amountEl = document.getElementById(`uj_amount_${id}`);
+    const hoursEl = document.getElementById(`uj_hours_${id}`);
+    const rateEl = document.getElementById(`uj_rate_${id}`);
+    const reimbursementEl = document.getElementById(`uj_reimbursementAmount_${id}`);
+    const whoEl = document.getElementById(`uj_who_${id}`);
+    const billEl = document.getElementById(`uj_bill_${id}`);
+    if (amountEl) amountEl.disabled = rowLocked && (!material || materialBillingLocked);
+    if (hoursEl) hoursEl.disabled = rowLocked;
+    if (rateEl) rateEl.disabled = rowLocked;
+    if (reimbursementEl) reimbursementEl.disabled = rowLocked && !material;
+    if (whoEl) whoEl.disabled = rowLocked && !material;
+    if (billEl) billEl.disabled = rowLocked && (!material || materialBillingLocked);
+
+    if (typeEl) {
+      const allowedTypes = protectedHourly && !original ? ['hourly', 'material'] : null;
+      [...typeEl.options].forEach(option => { option.disabled = !!allowedTypes && !allowedTypes.includes(option.value); });
+    }
+  });
+
+  document.querySelectorAll('.unified-line-add-buttons button').forEach(button => {
+    if (!button.dataset.unifiedDefaultLabel) button.dataset.unifiedDefaultLabel = button.textContent;
+    const onclick = button.getAttribute('onclick') || '';
+    const requestedType = onclick.match(/addUnifiedLine\('([^']+)'\)/)?.[1] || '';
+    button.disabled = protectedHourly && !['hourly', 'material'].includes(requestedType);
+    button.title = button.disabled ? 'Hourly jobs can add hours or materials only.' : '';
+    if (requestedType === 'fixed') button.textContent = locked ? '+ Labor addition' : button.dataset.unifiedDefaultLabel;
+  });
+
   document.querySelectorAll('#uj_newClientFields input').forEach(el => { el.disabled = locked; });
   const note = document.getElementById('uj_editLockNote');
-  if (note) note.style.display = locked ? '' : 'none';
+  if (note) {
+    note.style.display = locked ? '' : 'none';
+    note.textContent = locked
+      ? 'This job has invoice or payment history. Original client billing and payment structure are protected. Material reimbursement and purchaser changes remain editable, may update employee settlement, and are recorded in the material history. New work is saved as additions.'
+      : '';
+  }
 }
 
 function openUnifiedJobModal(jobId = null) {
@@ -4238,6 +4306,7 @@ function addUnifiedLine(type = 'fixed', preset = {}) {
   row.className = 'unified-line-row';
   row.id = `uj_line_${id}`;
   row.dataset.lineId = String(id);
+  row.dataset.originalLine = preset.id ? 'true' : 'false';
   row._preset = { ...preset };
   row.innerHTML = `
     <div class="unified-line-head">
@@ -4335,7 +4404,8 @@ function readUnifiedLines() {
       rate,
       reimbursementAmount,
       who: document.getElementById(`uj_who_${id}`)?.value === 'emp' ? 'emp' : 'owner',
-      billClient: document.getElementById(`uj_bill_${id}`)?.checked !== false
+      billClient: document.getElementById(`uj_bill_${id}`)?.checked !== false,
+      unifiedAddition: !!preset.unifiedAddition
     };
   });
 }
@@ -4577,7 +4647,7 @@ function _unifiedFindRecord(job, id) {
 
 function _unifiedBuildCollections(job, lines, date, hourlyOnly) {
   const source = job || {};
-  const storedLines = Array.isArray(source.unifiedLines) ? source.unifiedLines : [];
+  const storedLines = _unifiedStoredLines(source);
   const originalIds = new Set(storedLines.map(line => line?.id).filter(Boolean));
   if (!originalIds.size) lines.forEach(line => { if (line?.id) originalIds.add(line.id); });
   const originalMaterialIds = new Set(storedLines.filter(line => line?.type === 'material').map(line => line.id).filter(Boolean));
@@ -4611,6 +4681,22 @@ function _unifiedBuildCollections(job, lines, date, hourlyOnly) {
     const priorAddOn = find(source.addOns, line.id) || (previousType === 'material' ? findLinkedMaterialCharge(line.id) : null);
 
     if (type === 'fixed') {
+      if (line.unifiedAddition) {
+        addOns.push({
+          ...(priorAddOn ? cleanCopy(priorAddOn) : {}),
+          id: line.id,
+          label: line.label,
+          description: line.description,
+          amount: line.amount,
+          date: priorAddOn?.date || date,
+          status: priorAddOn?.status || 'pending',
+          isHours: false,
+          hours: 0,
+          rate: 0,
+          chargeType: 'other'
+        });
+        return;
+      }
       quoteItems.push({ ...(priorDirect ? cleanCopy(priorDirect) : {}), id:line.id, label:line.label, description:line.description, amount:line.amount });
       return;
     }
@@ -4707,27 +4793,133 @@ function _updateUnifiedPrimaryNote(job, text, date) {
   }
 }
 
-function _applyUnifiedLockedEdits(job, lines, { name, contactName, date, client, notes }) {
+function _recordUnifiedMaterialSettlementChange(material, before) {
+  if (!material) return;
+  const beforeAmount = _roundMoney(before?.reimbursementAmount ?? before?.costAmount ?? before?.amount ?? 0);
+  const afterAmount = _roundMoney(material.reimbursementAmount ?? material.costAmount ?? material.amount ?? 0);
+  const beforeWho = before?.who || 'owner';
+  const afterWho = material.who || 'owner';
+  if (Math.abs(beforeAmount - afterAmount) < 0.005 && beforeWho === afterWho) return;
+  if (!Array.isArray(material.reimbursementHistory)) material.reimbursementHistory = [];
+  material.reimbursementHistory.push({
+    id: uid(),
+    changedAt: new Date().toISOString(),
+    previousAmount: beforeAmount,
+    amount: afterAmount,
+    previousWho: beforeWho,
+    who: afterWho,
+    source: 'unified-edit'
+  });
+}
+
+function _applyUnifiedProtectedEdits(job, lines, { contactName, date, notes }) {
   const next = _unifiedClone(job);
-  next.name = name;
+  const originalLines = _unifiedStoredLines(job);
+  const originalIds = new Set(originalLines.map(line => line?.id).filter(Boolean));
+  const originalById = new Map(originalLines.map(line => [line.id, line]));
+  const storedLines = lines.map(line => {
+    const stored = { ...line };
+    const prior = originalById.get(line.id);
+    if (!originalIds.has(line.id) && line.type === 'fixed') {
+      stored.unifiedAddition = true;
+    } else if (prior && line.type === 'material') {
+      const billingLocked = _unifiedMaterialBillingLocked(job, line.id);
+      if (billingLocked) {
+        stored.amount = prior.amount;
+        stored.clientAmount = prior.clientAmount ?? prior.amount;
+        stored.billClient = prior.billClient !== false;
+      }
+    } else if (prior) {
+      stored.amount = prior.amount;
+      stored.hours = prior.hours || 0;
+      stored.rate = prior.rate || 0;
+      stored.reimbursementAmount = prior.reimbursementAmount || 0;
+      stored.who = prior.who;
+      stored.billClient = prior.billClient !== false;
+    }
+    return stored;
+  });
   next.contactName = contactName;
-  next.date = date;
-  next.clientId = client?.id || next.clientId || '';
-  next.contactClientId = clientByName(contactName)?.id || '';
-  next.unifiedLines = lines;
+  next.unifiedLines = storedLines;
   next.workSummary = lines.map(line => line.description).filter(Boolean).join(', ');
-  _updateUnifiedPrimaryNote(next, notes, date);
+  _updateUnifiedPrimaryNote(next, notes, job.date || date);
+
+  const updateDescription = (line, item) => {
+    if (!item) return;
+    item.label = line.label;
+    item.description = line.description;
+  };
 
   lines.forEach(line => {
-    const updateDescription = item => {
-      if (!item) return;
-      item.label = line.label;
-      item.description = line.description;
-    };
-    (next.quoteItems || []).filter(item => item.id === line.id).forEach(updateDescription);
-    (next.materials || []).filter(item => item.id === line.id).forEach(updateDescription);
-    (next.subtractions || []).filter(item => item.id === line.id || item.partialGroupId === line.id).forEach(updateDescription);
-    (next.addOns || []).filter(item => item.id === line.id || item.partialGroupId === line.id || item.sourceItemId === line.id).forEach(updateDescription);
+    const isNew = !originalIds.has(line.id);
+    if (isNew) {
+      if (line.type === 'material') {
+        const material = {
+          id: line.id,
+          label: line.label,
+          description: line.description,
+          amount: line.reimbursementAmount,
+          who: line.who,
+          billClient: !!line.billClient,
+          clientAmount: line.amount,
+          reimbursementAmount: line.reimbursementAmount,
+          chargeAmount: line.billClient ? line.amount : 0,
+          costAmount: line.reimbursementAmount
+        };
+        if (!Array.isArray(next.materials)) next.materials = [];
+        next.materials.push(material);
+        _syncUnifiedMaterialCharge(next, material);
+        return;
+      }
+      if (line.type === 'credit') {
+        if (!Array.isArray(next.subtractions)) next.subtractions = [];
+        next.subtractions.push({
+          id: line.id,
+          label: line.label,
+          description: line.description,
+          amount: line.amount,
+          date: next.date || date,
+          status: 'pending',
+          sourceItemId: null
+        });
+        return;
+      }
+      if (!Array.isArray(next.addOns)) next.addOns = [];
+      next.addOns.push({
+        id: line.id,
+        label: line.label,
+        description: line.description,
+        amount: line.amount,
+        date: next.date || date,
+        status: 'pending',
+        isHours: line.type === 'hourly',
+        hours: line.type === 'hourly' ? line.hours : 0,
+        rate: line.type === 'hourly' ? line.rate : 0,
+        chargeType: line.type === 'hourly' ? 'hourly' : 'other'
+      });
+      return;
+    }
+
+    (next.quoteItems || []).filter(item => item.id === line.id).forEach(item => updateDescription(line, item));
+    (next.materials || []).filter(item => item.id === line.id).forEach(item => updateDescription(line, item));
+    (next.subtractions || []).filter(item => item.id === line.id || item.partialGroupId === line.id).forEach(item => updateDescription(line, item));
+    (next.addOns || []).filter(item => item.id === line.id || item.partialGroupId === line.id || item.sourceItemId === line.id).forEach(item => updateDescription(line, item));
+
+    if (line.type !== 'material') return;
+    const material = (next.materials || []).find(item => item.id === line.id);
+    if (!material) return;
+    const before = { reimbursementAmount: material.reimbursementAmount, costAmount: material.costAmount, amount: material.amount, who: material.who };
+    material.amount = line.reimbursementAmount;
+    material.reimbursementAmount = line.reimbursementAmount;
+    material.costAmount = line.reimbursementAmount;
+    material.who = line.who;
+    if (!_unifiedMaterialBillingLocked(next, line.id)) {
+      material.clientAmount = line.amount;
+      material.billClient = !!line.billClient;
+      material.chargeAmount = line.billClient ? line.amount : 0;
+    }
+    _recordUnifiedMaterialSettlementChange(material, before);
+    _syncUnifiedMaterialCharge(next, material);
   });
   return next;
 }
@@ -4780,6 +4972,26 @@ async function saveUnifiedJob() {
     showAlert('Billed materials need a client charge greater than $0, or turn off billing for that material.');
     return;
   }
+  if (editingJob && unifiedEditFinancialLocked && _jobType(editingJob) === 'hourly') {
+    const originalIds = new Set(_unifiedStoredLines(editingJob).map(line => line?.id).filter(Boolean));
+    if (lines.some(line => !originalIds.has(line.id) && !['hourly', 'material'].includes(line.type))) {
+      showAlert('Hourly jobs can add hours or materials only.');
+      return;
+    }
+  }
+
+  const notes = document.getElementById('uj_notes').value.trim();
+  if (editingJob && unifiedEditFinancialLocked) {
+    const idx = state.jobs.findIndex(item => item.id === editingJob.id);
+    state.jobs[idx] = _applyUnifiedProtectedEdits(editingJob, lines, { contactName, date, notes });
+    await save();
+    renderAll();
+    unifiedEditJobId = null;
+    unifiedEditPrimaryNoteId = '';
+    unifiedEditFinancialLocked = false;
+    closeModal('unifiedJobModal');
+    return;
+  }
 
   const hourlyItems = lines.filter(line => line.type === 'hourly');
   const hourlyOnly = hourlyItems.length > 0 && !lines.some(line => ['fixed','other','credit'].includes(line.type));
@@ -4795,18 +5007,8 @@ async function saveUnifiedJob() {
     state.clients.push(client);
   }
   const hourlyRate = hourlyItems.length ? hourlyItems[0].rate : 0;
-  const notes = document.getElementById('uj_notes').value.trim();
   const workSummary = lines.map(line => line.description).filter(Boolean).join(', ');
   const contactClient = clientByName(contactName);
-  if (editingJob && unifiedEditFinancialLocked) {
-    const idx = state.jobs.findIndex(item => item.id === editingJob.id);
-    state.jobs[idx] = _applyUnifiedLockedEdits(editingJob, lines, { name, contactName, date, client, notes });
-    await save();
-    renderAll();
-    unifiedEditJobId = null;
-    closeModal('unifiedJobModal');
-    return;
-  }
 
   const jobId = editingJob?.id || uid();
   const job = editingJob ? _unifiedClone(editingJob) : {
