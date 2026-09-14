@@ -746,8 +746,9 @@ function calcJob(job) {
   const empProfit   = profitPool * effectiveEmpShare;
   const ownerProfit = profitPool * effectiveOwnerShare;
   const debtContribution = job.repaymentMode ? Math.max(0, profitPool * ((debtOwnerShare||0.50) - normalOwnerShare)) : 0;
-  const empTotalOwed    = empProfit + empMats;
-  const advancesPaid    = (job.advances||[]).reduce((s,a)=>s+(a.amount||0),0);
+  const tipsTotal       = (job.advances||[]).filter(a => a.payType === 'tip').reduce((s,a)=>s+(a.amount||0),0);
+  const advancesPaid    = (job.advances||[]).filter(a => a.payType !== 'tip').reduce((s,a)=>s+(a.amount||0),0);
+  const empTotalOwed    = empProfit + empMats + tipsTotal;
   const linkedDebtPaid  = (state.debtPayments||[]).filter(p=>p.linkedJobId===job.id).reduce((s,p)=>s+(p.amount||0),0);
   const empBalance      = empTotalOwed - advancesPaid - linkedDebtPaid;
   const outstanding     = contractTotal - collectedGross;
@@ -756,7 +757,7 @@ function calcJob(job) {
   const projectedFees   = projectedGross * feeRate + txnFee * projectedTxns + manualFees;
   const projectedNetRevenue = projectedGross - projectedFees;
   const projectedProfitPool = Math.max(0, projectedNetRevenue - totalMats);
-  const potentialEmpTotalOwed = projectedProfitPool * effectiveEmpShare + empMats;
+  const potentialEmpTotalOwed = projectedProfitPool * effectiveEmpShare + empMats + tipsTotal;
   const potentialEmpBalance   = potentialEmpTotalOwed - advancesPaid - linkedDebtPaid;
   const potentialOwnerProfit  = projectedProfitPool * effectiveOwnerShare;
   const potentialOwnerTotal   = potentialOwnerProfit + ownerMats;
@@ -768,7 +769,7 @@ function calcJob(job) {
 
   return { contractTotal: _roundMoney(contractTotal), addOnTotal: _roundMoney(addOnTotal), subtractionTotal: _roundMoney(subtractionTotal), collectedGross: _roundMoney(collectedGross), pendingGross: _roundMoney(pendingGross),
     totalFees: _roundMoney(totalFees), netRevenue: _roundMoney(netRevenue), totalMats: _roundMoney(totalMats), ownerMats: _roundMoney(ownerMats), empMats: _roundMoney(empMats),
-    profitPool: _roundMoney(profitPool), empProfit: _roundMoney(empProfit), ownerProfit: _roundMoney(ownerProfit), debtContribution: _roundMoney(debtContribution),
+    profitPool: _roundMoney(profitPool), empProfit: _roundMoney(empProfit), ownerProfit: _roundMoney(ownerProfit), debtContribution: _roundMoney(debtContribution), tipsTotal: _roundMoney(tipsTotal),
     empTotalOwed: _roundMoney(empTotalOwed), advancesPaid: _roundMoney(advancesPaid), linkedDebtPaid: _roundMoney(linkedDebtPaid), empBalance: _roundMoney(empBalance),
     outstanding: _roundMoney(outstanding), projectedGross: _roundMoney(projectedGross), projectedFees: _roundMoney(projectedFees), projectedNetRevenue: _roundMoney(projectedNetRevenue), projectedProfitPool: _roundMoney(projectedProfitPool),
     potentialEmpTotalOwed: _roundMoney(potentialEmpTotalOwed), potentialEmpBalance: _roundMoney(potentialEmpBalance),
@@ -1308,7 +1309,7 @@ function renderEmpSummary() {
   const inWindow = date => !cutoffStr || (date && date >= cutoffStr);
   let tRecentPay = 0;
   state.jobs.filter(j => j.employeeId === myId).forEach(j => {
-    (j.advances||[]).forEach(a => { if (inWindow(a.date)) tRecentPay += a.amount||0; });
+    (j.advances||[]).forEach(a => { if (a.payType !== 'tip' && inWindow(a.date)) tRecentPay += a.amount||0; });
   });
   allHW.forEach(hw => {
     (hw.advances||[]).forEach(a => { if (inWindow(a.date)) tRecentPay += a.amount||0; });
@@ -1446,6 +1447,7 @@ function jobCard(job) {
               <div class="job-emp-pay-popover" onclick="event.stopPropagation()">
                 <div class="job-emp-pay-popover-title">Employee Pay</div>
                 <div class="job-emp-pay-row"><span>Total pay for job</span><strong>${fmt(employeePayTotal)}</strong></div>
+                <div class="job-emp-pay-row"><span>Tips earned</span><strong style="color:var(--green)">${fmt(c.tipsTotal)}</strong></div>
                 <div class="job-emp-pay-row"><span>Already paid</span><strong>${fmt(c.advancesPaid)}</strong></div>
                 ${c.linkedDebtPaid > 0 ? `<div class="job-emp-pay-row"><span>Applied to debt</span><strong>${fmt(c.linkedDebtPaid)}</strong></div>` : ''}
                 <div class="job-emp-pay-row current"><span>Currently owed</span><strong style="color:${employeePayBalance < 0 ? 'var(--red)' : 'var(--accent)'}">${fmt(employeePayBalance)}</strong></div>
@@ -1644,7 +1646,8 @@ function payTypeBadgeHtml(payType, jobId, idx) {
     '':         { cls:'badge-pending',   label:'Pay' },
     'advance':  { cls:'badge-invoiced',  label:'Advance' },
     'final':    { cls:'badge-collected', label:'Final Pay' },
-    'adjustment': { cls:'badge-pending', label:'Adjustment' }
+    'adjustment': { cls:'badge-pending', label:'Adjustment' },
+    'tip':       { cls:'badge-collected', label:'Tip' }
   };
   const { cls, label } = cfg[payType] || cfg[''];
   const admin = currentUser?.isAdmin;
@@ -1691,7 +1694,7 @@ function closeOtherJobPopovers(kind) {
 function cyclePayType(jobId, idx) {
   const job = state.jobs.find(j=>j.id===jobId);
   if (!job||!job.advances||job.advances[idx]===undefined) return;
-  const cycle = {'':'advance','advance':'final','final':'adjustment','adjustment':''};
+  const cycle = {'':'advance','advance':'final','final':'adjustment','adjustment':'tip','tip':''};
   job.advances[idx].payType = cycle[job.advances[idx].payType||''];
   save(); renderJobs();
 }
@@ -1883,6 +1886,13 @@ function jobDetail(job, c) {
   const admin  = currentUser?.isAdmin;
   const empShare = emp?.empShare ?? 0.66;
   const empPct = Math.round((job.repaymentMode ? (1-(state.settings.debtOwnerShare||0.5)) : empShare)*100);
+  const ownerPct = Math.round((job.repaymentMode ? (state.settings.debtOwnerShare||0.5) : (1-empShare))*100);
+  const empBalance = Number(c.potentialEmpBalance || 0);
+  const empBalanceStatus = empBalance > 0.005 ? 'Still owed' : empBalance < -0.005 ? 'Overpaid by' : 'Paid in full';
+  const employeeProjectedProfit = _roundMoney(Number(c.potentialEmpTotalOwed || 0) - Number(c.empMats || 0) - Number(c.tipsTotal || 0));
+  const ownerProjectedProfit = Number(c.potentialOwnerProfit || 0);
+  const ownerRealizedProfit = Number(c.ownerProfit || 0);
+  const ownerUnrealizedProfit = _roundMoney(ownerProjectedProfit - ownerRealizedProfit);
   const partialTag = (item) => {
     if (!item?.partialState) return '';
     const label = item.partialState === 'remaining' ? 'Partial Left' : 'Partial Paid';
@@ -2137,7 +2147,7 @@ function jobDetail(job, c) {
     <div class="line-item">
       <div class="line-item-label">${esc(a.label||'Pay')} <span style="font-size:15px;color:var(--text3)">${fmtDate(a.date)||''}</span></div>
       <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
-        <div class="line-item-value red">${fmt(a.amount)}</div>
+        <div class="line-item-value ${a.payType === 'tip' ? 'green' : 'red'}">${a.payType === 'tip' ? '+' : '-'}${fmt(a.amount)}</div>
         ${payTypeBadgeHtml(a.payType||'', job.id, i)}
         <button class="btn btn-ghost btn-sm admin-only job-icon-btn" onclick="openAddItem('${job.id}','advance','${a.id}')" title="Edit" aria-label="Edit">${jobIconSvg('edit')}</button>
         <button class="btn btn-danger btn-sm btn-icon-only admin-only" onclick="removeItem('${job.id}','advances',${i})" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
@@ -2252,61 +2262,42 @@ function jobDetail(job, c) {
           <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','advance')">+</button>
         </div>
         ${advHtml||'<div style="color:var(--text3);font-size:16px;padding:4px 0">None logged</div>'}
-        <div class="total-line"><span style="color:var(--text2)">Total Paid</span><span class="line-item-value red">-${fmt(c.advancesPaid)}</span></div>
+        <div class="total-line"><span style="color:var(--text2)">Tips earned</span><span class="line-item-value green">+${fmt(c.tipsTotal)}</span></div>
+        <div class="total-line"><span style="color:var(--text2)">Paid out</span><span class="line-item-value red">-${fmt(c.advancesPaid)}</span></div>
       </div>
 
     </div>
 
     <div class="settlement-box">
       <div class="settlement-title">Settlement Breakdown${job.repaymentMode?` <span style="color:var(--red);font-size:14px;margin-left:8px">REPAYMENT SPLIT ${Math.round((state.settings.debtOwnerShare||0.5)*100)}/${Math.round((1-(state.settings.debtOwnerShare||0.5))*100)}</span>`:''}</div>
+      <div style="font-size:15px;color:var(--text3);font-family:var(--mono);margin-top:6px">Profit pool: ${fmt(c.profitPool)}</div>
       <div class="settlement-grid" style="${admin?'':'grid-template-columns:1fr'}">
         <div class="admin-only">
-          <div class="settlement-col-title">Your ${Math.round((job.repaymentMode?(state.settings.debtOwnerShare||0.5):(1-empShare))*100)}%</div>
-          <div class="settlement-big orange">${fmt(c.ownerProfit)}</div>
-          <div style="font-size:16px;color:var(--text3);font-family:var(--mono)">profit share</div>
-          ${job.repaymentMode&&c.debtContribution>0?`<div style="font-size:16px;color:var(--red);font-family:var(--mono);margin-top:4px">${fmt(c.debtContribution)} to debt</div>`:''}
-          <div style="font-size:16px;color:var(--text2);font-family:var(--mono);margin-top:4px">+ ${fmt(c.ownerMats)} mats back</div>
-          <div style="font-size:17px;color:var(--green);font-family:var(--mono);font-weight:600;margin-top:6px;border-top:1px solid var(--border);padding-top:6px">= ${fmt(c.ownerTotal)} total</div>
+          <div class="settlement-col-title">Your share (${ownerPct}%)</div>
+          <div class="settlement-big orange">${fmt(c.potentialOwnerTotal)}</div>
+          <div class="settlement-status">Total</div>
+          <div class="settlement-breakdown-list">
+            <div class="settlement-breakdown-row"><span>Profit share</span><strong>${fmt(ownerProjectedProfit)}</strong></div>
+            <div class="settlement-breakdown-row"><span>Mats back</span><strong>${fmt(c.ownerMats)}</strong></div>
+            ${job.repaymentMode&&c.potentialDebtContribution>0?`<div class="settlement-breakdown-row"><span>Debt repayment allocation</span><strong>${fmt(c.potentialDebtContribution)}</strong></div>`:''}
+            <div class="settlement-breakdown-row total"><span>Your total</span><strong>${fmt(c.potentialOwnerTotal)}</strong></div>
+          </div>
+          <div class="settlement-realization-note">
+            <span>Realized profit: <strong>${fmt(ownerRealizedProfit)}</strong></span>
+            ${ownerUnrealizedProfit > 0.005 ? `<span class="settlement-unrealized">Not yet realized: ${fmt(ownerUnrealizedProfit)}</span>` : '<span class="settlement-realized">All projected profit realized</span>'}
+          </div>
         </div>
         <div>
           <div class="settlement-col-title">${admin ? `${en} (${empPct}%)` : `Your share (${empPct}%)`}</div>
-          <div class="settlement-big ${c.empBalance>0?'orange':'green'}">${fmt(Math.abs(c.empBalance))}</div>
-          <div style="font-size:16px;color:var(--text3);font-family:var(--mono)">${c.empBalance>0?'still owed':(admin?'he owes you':'you owe')}</div>
-          <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
-            <div style="font-size:16px;color:var(--text2);font-family:var(--mono)">Profit share: ${fmt(c.empProfit)}</div>
-            <div style="font-size:16px;color:var(--text2);font-family:var(--mono)">+ Mats back: ${fmt(c.empMats)}</div>
-            <div style="font-size:16px;color:var(--text2);font-family:var(--mono);border-top:1px solid var(--border);padding-top:4px;margin-top:4px">= Total owed: ${fmt(c.empTotalOwed)}</div>
-            <div style="font-size:16px;color:var(--text2);font-family:var(--mono)">- Paid out: ${fmt(c.advancesPaid)}</div>
-            ${c.linkedDebtPaid>0?`<div style="font-size:16px;color:var(--red);font-family:var(--mono)">- Debt repayment: ${fmt(c.linkedDebtPaid)}</div>`:''}
-          </div>
-          <div style="font-size:15px;color:var(--text3);font-family:var(--mono);margin-top:6px">Profit pool: ${fmt(c.profitPool)}</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="settlement-box" style="border-color:rgba(255,193,7,0.35)">
-      <div class="settlement-title">Potential (if everything pending is collected)
-        <span style="color:var(--text3);font-size:13px;margin-left:8px;font-family:var(--mono)">preview</span>
-        ${job.repaymentMode?` <span style="color:rgba(255,193,7,0.95);font-size:14px;margin-left:8px">POTENTIAL REPAYMENT</span>`:''}
-      </div>
-      <div class="settlement-grid" style="${admin?'':'grid-template-columns:1fr'}">
-        <div class="admin-only">
-          <div class="settlement-col-title">Your potential</div>
-          <div class="settlement-big orange">${fmt(c.potentialOwnerProfit)}</div>
-          <div style="font-size:16px;color:var(--text3);font-family:var(--mono)">profit share</div>
-          ${job.repaymentMode&&c.potentialDebtContribution>0?`<div style="font-size:16px;color:rgba(255,193,7,0.95);font-family:var(--mono);margin-top:4px">${fmt(c.potentialDebtContribution)} to debt</div>`:''}
-          <div style="font-size:16px;color:var(--text2);font-family:var(--mono);margin-top:4px">+ ${fmt(c.ownerMats)} mats back</div>
-          <div style="font-size:17px;color:var(--green);font-family:var(--mono);font-weight:600;margin-top:6px;border-top:1px solid var(--border);padding-top:6px">= ${fmt(c.potentialOwnerTotal)} total</div>
-        </div>
-        <div>
-          <div class="settlement-col-title">${admin ? `${en} (potential)` : 'Your potential'}</div>
-          <div class="settlement-big ${c.potentialEmpBalance>0?'orange':'green'}">${fmt(Math.abs(c.potentialEmpBalance))}</div>
-          <div style="font-size:16px;color:var(--text3);font-family:var(--mono)">${c.potentialEmpBalance>0?'still owed':(admin?'he owes you':'you owe')}</div>
-          <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
-            <div style="font-size:16px;color:var(--text2);font-family:var(--mono)">Projected profit pool: ${fmt(c.projectedProfitPool)}</div>
-            <div style="font-size:16px;color:var(--text2);font-family:var(--mono);border-top:1px solid var(--border);padding-top:4px;margin-top:4px">= Total owed: ${fmt(c.potentialEmpTotalOwed)}</div>
-            <div style="font-size:16px;color:var(--text2);font-family:var(--mono)">- Paid out: ${fmt(c.advancesPaid)}</div>
-            ${c.linkedDebtPaid>0?`<div style="font-size:16px;color:var(--red);font-family:var(--mono)">- Debt repayment: ${fmt(c.linkedDebtPaid)}</div>`:''}
+          <div class="settlement-big ${empBalance>0?'orange':'green'}">${fmt(Math.abs(empBalance))}</div>
+          <div class="settlement-status">${empBalanceStatus}</div>
+          <div class="settlement-breakdown-list">
+            <div class="settlement-breakdown-row"><span>Profit share</span><strong>${fmt(employeeProjectedProfit)}</strong></div>
+            <div class="settlement-breakdown-row"><span>Mats back</span><strong>${fmt(c.empMats)}</strong></div>
+            <div class="settlement-breakdown-row tip"><span>Tips (100%)</span><strong>${fmt(c.tipsTotal)}</strong></div>
+            <div class="settlement-breakdown-row total"><span>Employee total owed</span><strong>${fmt(c.potentialEmpTotalOwed)}</strong></div>
+            <div class="settlement-breakdown-row"><span>Paid out</span><strong>-${fmt(c.advancesPaid)}</strong></div>
+            ${c.linkedDebtPaid>0?`<div class="settlement-breakdown-row"><span>Debt repayment</span><strong>-${fmt(c.linkedDebtPaid)}</strong></div>`:''}
           </div>
         </div>
       </div>
@@ -5189,20 +5180,22 @@ function openAddItem(jobId, type, itemId = null) {
         <label class="form-label">Amount ($)</label>
         <div style="display:flex;gap:8px;align-items:center">
           <input class="form-input" id="ai_amount" type="number" step="0.01" placeholder="0.00" />
-          <button class="btn btn-ghost btn-sm" type="button" onclick="setAddItemAdvanceMax()" style="flex-shrink:0">Max</button>
+          <button class="btn btn-ghost btn-sm" id="ai_maxBtn" type="button" onclick="setAddItemAdvanceMax()" style="flex-shrink:0">Max</button>
         </div>
       </div>
       <div class="form-row">
         <div class="form-group"><label class="form-label">Date</label><input class="form-input" id="ai_date" type="date" value="${today()}" /></div>
         <div class="form-group"><label class="form-label">Type</label>
-          <select class="form-input" id="ai_paytype">
+          <select class="form-input" id="ai_paytype" onchange="updateAddItemPayTypeNotice()">
             <option value="">General</option>
             <option value="advance">Advance</option>
             <option value="final">Final Pay</option>
             <option value="adjustment">Adjustment</option>
+            <option value="tip">Tip</option>
           </select>
         </div>
-      </div>`;
+      </div>
+      <div class="form-hint" id="ai_tipHint" style="display:none;color:var(--red);font-family:var(--mono);margin-top:-4px">Tip reminder: 100% of this amount goes to the employee.</div>`;
   }
   document.getElementById('addItemForm').innerHTML = html;
   if (isEdit) {
@@ -5230,7 +5223,9 @@ function openAddItem(jobId, type, itemId = null) {
         const billClientEl = document.getElementById('ai_billClient');
         if (billClientEl) billClientEl.checked = item.billClient !== false;
       }
-      if (type==='advance') document.getElementById('ai_paytype').value = item.payType || '';
+      if (type==='advance') {
+        document.getElementById('ai_paytype').value = item.payType || '';
+      }
       if (type === 'addon' && item.partialGroupId) {
         const parentAmt = item.partialParentAmount || item.amount || 0;
         const partLbl = item.partialState === 'remaining' ? 'Partial Left' : 'Partial Paid';
@@ -5256,11 +5251,21 @@ function openAddItem(jobId, type, itemId = null) {
       }
     }
   }
+  if (type === 'advance') updateAddItemPayTypeNotice();
   if (type === 'hours' && !isEdit) updateHoursAddItemTotal();
   document.getElementById('addItemModal').classList.remove('hidden');
 }
+function updateAddItemPayTypeNotice() {
+  const payType = document.getElementById('ai_paytype');
+  const isTip = payType?.value === 'tip';
+  const hint = document.getElementById('ai_tipHint');
+  if (hint) hint.style.display = isTip ? '' : 'none';
+  const maxBtn = document.getElementById('ai_maxBtn');
+  if (maxBtn) maxBtn.style.display = isTip ? 'none' : '';
+}
 function setAddItemAdvanceMax() {
   if (!addItemContext || addItemContext.type !== 'advance') return;
+  if (document.getElementById('ai_paytype')?.value === 'tip') return;
   const { jobId, itemId } = addItemContext;
   const job = state.jobs.find(j => j.id === jobId);
   if (!job) return;
@@ -5322,6 +5327,10 @@ function saveItem() {
   }
   if (type === 'advance' && Math.abs(amount) < 0.000001) {
     showAlert('Please enter a non-zero amount.');
+    return;
+  }
+  if (type === 'advance' && document.getElementById('ai_paytype')?.value === 'tip' && amount <= 0) {
+    showAlert('Tips must be greater than $0.');
     return;
   }
   if (isHourly && (type === 'revenue' || type === 'addon' || type === 'subtraction')) {
