@@ -250,11 +250,18 @@ function migrateState(s) {
     delete job.notes;
     if (!job.hours) job.hours = [];
     if (!job.advances) job.advances = [];
+    if (!job.tips) job.tips = [];
     (job.advances || []).forEach(a => {
       if (a.splitEventId === undefined) a.splitEventId = '';
       if (a.payType === undefined) a.payType = '';
       if (a.label === undefined) a.label = '';
       if (a.date === undefined) a.date = '';
+    });
+    (job.tips || []).forEach(t => {
+      if (!t.id) t.id = uid();
+      if (t.label === undefined) t.label = 'Client tip';
+      if (t.amount === undefined) t.amount = 0;
+      if (t.date === undefined) t.date = '';
     });
     (job.milestones || []).forEach(m => {
       if (m.status === undefined) { m.status = m.collected ? 'collected' : 'pending'; delete m.collected; }
@@ -327,6 +334,7 @@ function migrateState(s) {
       if (p.mode === undefined) p.mode = 'dollar';
       if (p.partialPercent === undefined) p.partialPercent = 0;
       if (p.paymentTotal === undefined) p.paymentTotal = 0;
+      if (p.tipAmount === undefined) p.tipAmount = 0;
       if (p.autoSub === undefined) p.autoSub = false;
       if (!p.presetByKey || typeof p.presetByKey !== 'object') p.presetByKey = {};
       if (!p.snapshotBefore || typeof p.snapshotBefore !== 'object') {
@@ -746,8 +754,8 @@ function calcJob(job) {
   const empProfit   = profitPool * effectiveEmpShare;
   const ownerProfit = profitPool * effectiveOwnerShare;
   const debtContribution = job.repaymentMode ? Math.max(0, profitPool * ((debtOwnerShare||0.50) - normalOwnerShare)) : 0;
-  const tipsTotal       = (job.advances||[]).filter(a => a.payType === 'tip').reduce((s,a)=>s+(a.amount||0),0);
-  const advancesPaid    = (job.advances||[]).filter(a => a.payType !== 'tip').reduce((s,a)=>s+(a.amount||0),0);
+  const tipsTotal       = (job.tips||[]).reduce((s,t)=>s+(t.amount||0),0);
+  const advancesPaid    = (job.advances||[]).reduce((s,a)=>s+(a.amount||0),0);
   const empTotalOwed    = empProfit + empMats + tipsTotal;
   const linkedDebtPaid  = (state.debtPayments||[]).filter(p=>p.linkedJobId===job.id).reduce((s,p)=>s+(p.amount||0),0);
   const empBalance      = empTotalOwed - advancesPaid - linkedDebtPaid;
@@ -1309,7 +1317,7 @@ function renderEmpSummary() {
   const inWindow = date => !cutoffStr || (date && date >= cutoffStr);
   let tRecentPay = 0;
   state.jobs.filter(j => j.employeeId === myId).forEach(j => {
-    (j.advances||[]).forEach(a => { if (a.payType !== 'tip' && inWindow(a.date)) tRecentPay += a.amount||0; });
+    (j.advances||[]).forEach(a => { if (inWindow(a.date)) tRecentPay += a.amount||0; });
   });
   allHW.forEach(hw => {
     (hw.advances||[]).forEach(a => { if (inWindow(a.date)) tRecentPay += a.amount||0; });
@@ -1643,7 +1651,7 @@ function badgeHtml(status, jobId, itemType, idx) {
 
 function payTypeBadgeHtml(payType, jobId, idx) {
   const cfg = {
-    '':         { cls:'badge-pending',   label:'Pay' },
+    '':         { cls:'badge-pending',   label:'General' },
     'advance':  { cls:'badge-invoiced',  label:'Advance' },
     'final':    { cls:'badge-collected', label:'Final Pay' },
     'adjustment': { cls:'badge-pending', label:'Adjustment' },
@@ -2115,7 +2123,7 @@ function jobDetail(job, c) {
           const modeTxt = p.mode === 'percent' ? `${fmtPctDisplay(p.partialPercent || 0)}%` : 'Dollar';
           return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
             <div style="min-width:0">
-              <div style="font-size:14px">${fmt(p.paymentTotal || 0)} <span style="font-size:12px;color:var(--text3)">(${modeTxt})</span></div>
+              <div style="font-size:14px">${fmt(p.paymentTotal || 0)}${p.tipAmount > 0 ? ` <span style="color:var(--green)">+ ${fmt(p.tipAmount)} tip</span>` : ''} <span style="font-size:12px;color:var(--text3)">(${modeTxt})</span></div>
               <div style="font-size:12px;color:var(--text3)">${fmtDate(p.date) || p.date || ''}${p.note ? ` - ${esc(p.note)}` : ''}</div>
             </div>
             <div class="admin-only" style="display:flex;align-items:center;gap:6px;flex-shrink:0">
@@ -2147,10 +2155,21 @@ function jobDetail(job, c) {
     <div class="line-item">
       <div class="line-item-label">${esc(a.label||'Pay')} <span style="font-size:15px;color:var(--text3)">${fmtDate(a.date)||''}</span></div>
       <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
-        <div class="line-item-value ${a.payType === 'tip' ? 'green' : 'red'}">${a.payType === 'tip' ? '+' : '-'}${fmt(a.amount)}</div>
+        <div class="line-item-value red">-${fmt(a.amount)}</div>
         ${payTypeBadgeHtml(a.payType||'', job.id, i)}
         <button class="btn btn-ghost btn-sm admin-only job-icon-btn" onclick="openAddItem('${job.id}','advance','${a.id}')" title="Edit" aria-label="Edit">${jobIconSvg('edit')}</button>
         <button class="btn btn-danger btn-sm btn-icon-only admin-only" onclick="removeItem('${job.id}','advances',${i})" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
+      </div>
+    </div>`).join('');
+  const tipRows = [
+    ...(job.tips || []).map((tip, i) => ({ tip, key:'tips', idx:i }))
+  ];
+  const tipsHtml = tipRows.map(({tip, key, idx}) => `
+    <div class="line-item">
+      <div class="line-item-label">${esc(tip.label || 'Client tip')} <span style="font-size:15px;color:var(--text3)">${fmtDate(tip.date)||''}</span></div>
+      <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
+        <div class="line-item-value green">+${fmt(tip.amount)}</div>
+        <button class="btn btn-danger btn-sm btn-icon-only admin-only" onclick="removeItem('${job.id}','${key}',${idx})" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
       </div>
     </div>`).join('');
 
@@ -2166,10 +2185,10 @@ function jobDetail(job, c) {
             : `<button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openPartialCollect('${job.id}')" title="Record payment">+</button>`}
         </div>
         ${isHourly
-          ? (hoursHtml || '<div style="color:var(--text3);font-size:16px;padding:4px 0">No hours entries yet.</div>')
+          ? `${hoursHtml || '<div style="color:var(--text3);font-size:16px;padding:4px 0">No hours entries yet.</div>'}${tipsHtml}`
           : isLegacyHourly
           ? (hourlyRevenueHtml || '<div style="color:var(--text3);font-size:16px;padding:4px 0">No revenue entries yet.</div>')
-          : `${clientChargeSummaryHtml}${milestonesHtml ? `<div class="detail-section-header" style="display:flex;align-items:center;gap:10px;margin:14px 0 8px;padding-bottom:8px;border-bottom:1px solid var(--border)"><div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Billing schedule</div></div>${milestonesHtml}` : ''}`
+          : `${clientChargeSummaryHtml}${tipsHtml}${milestonesHtml ? `<div class="detail-section-header" style="display:flex;align-items:center;gap:10px;margin:14px 0 8px;padding-bottom:8px;border-bottom:1px solid var(--border)"><div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Billing schedule</div></div>${milestonesHtml}` : ''}`
         }
         ${isHourly ? '' : partialHistoryHtml}
         ${isHourly ? '' : legacyPartialHtml}
@@ -2261,8 +2280,7 @@ function jobDetail(job, c) {
           <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Employee Pay</div>
           <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','advance')">+</button>
         </div>
-        ${advHtml||'<div style="color:var(--text3);font-size:16px;padding:4px 0">None logged</div>'}
-        <div class="total-line"><span style="color:var(--text2)">Tips earned</span><span class="line-item-value green">+${fmt(c.tipsTotal)}</span></div>
+        ${advHtml||'<div style="color:var(--text3);font-size:16px;padding:4px 0">No employee payments logged</div>'}
         <div class="total-line"><span style="color:var(--text2)">Paid out</span><span class="line-item-value red">-${fmt(c.advancesPaid)}</span></div>
       </div>
 
@@ -2270,7 +2288,7 @@ function jobDetail(job, c) {
 
     <div class="settlement-box">
       <div class="settlement-title">Settlement Breakdown${job.repaymentMode?` <span style="color:var(--red);font-size:14px;margin-left:8px">REPAYMENT SPLIT ${Math.round((state.settings.debtOwnerShare||0.5)*100)}/${Math.round((1-(state.settings.debtOwnerShare||0.5))*100)}</span>`:''}</div>
-      <div style="font-size:15px;color:var(--text3);font-family:var(--mono);margin-top:6px">Profit pool: ${fmt(c.profitPool)}</div>
+      <div class="settlement-profit-pool">Profit pool: ${fmt(c.profitPool)}</div>
       <div class="settlement-grid" style="${admin?'':'grid-template-columns:1fr'}">
         <div class="admin-only">
           <div class="settlement-col-title">Your share (${ownerPct}%)</div>
@@ -2968,6 +2986,7 @@ function openPartialCollect(jobId, preset = null) {
   partialCollectCtx = _hydratePartialRows(_applyPartialPreset(ctx, preset));
   document.getElementById('pc_mode').value = preset?.mode || 'dollar';
   document.getElementById('pc_total').value = preset?.mode === 'dollar' ? (preset?.paymentTotal || '') : '';
+  document.getElementById('pc_tip').value = preset?.tipAmount ? Number(preset.tipAmount).toFixed(2) : '';
   document.getElementById('pc_percent').value = preset?.mode === 'percent' ? (preset?.partialPercent || '') : '';
   document.getElementById('pc_date').value = preset?.date || today();
   document.getElementById('pc_note').value = preset?.note || '';
@@ -3112,6 +3131,7 @@ function _getPartialCollectPlan() {
         allocs.reduce((sum, a) => sum + (a.subCollect || 0), 0)
       ))
     : 0;
+  const tipAmount = _roundMoney(Math.max(0, parseFloat(document.getElementById('pc_tip')?.value) || 0));
   return {
     mode,
     paymentTotal,
@@ -3120,7 +3140,8 @@ function _getPartialCollectPlan() {
     selectedNetBase: _roundMoney(selectedNetBase),
     allocs,
     grossTotal,
-    subCollectedTotal
+    subCollectedTotal,
+    tipAmount
   };
 }
 function updatePartialCollectTotals() {
@@ -3138,6 +3159,8 @@ function updatePartialCollectTotals() {
     const remColor = Math.abs(plan.remaining) < 0.01 ? 'var(--green)' : plan.remaining < 0 ? 'var(--red)' : 'var(--accent)';
     totalsEl.innerHTML = `
       <span>Payment <strong>${fmt(plan.paymentTotal)}</strong></span>
+      ${plan.tipAmount > 0 ? `<span>Tip for employee <strong style="color:var(--green)">${fmt(plan.tipAmount)}</strong></span>` : ''}
+      ${plan.tipAmount > 0 ? `<span>Total received <strong style="color:var(--green)">${fmt(plan.paymentTotal + plan.tipAmount)}</strong></span>` : ''}
       <span>Allocated <strong style="color:var(--green)">${fmt(plan.allocatedNet)}</strong></span>
       <span>Remaining <strong style="color:${remColor}">${fmt(plan.remaining)}</strong></span>
       ${partialCollectCtx?.autoSub ? `<span>Subtractions consumed in this payment <strong style="color:var(--red)">-${fmt(plan.subCollectedTotal)}</strong></span>` : ''}`;
@@ -3147,6 +3170,8 @@ function updatePartialCollectTotals() {
       <span>Selected Net Base <strong>${fmt(plan.selectedNetBase)}</strong></span>
       <span>Collect % <strong>${pct.toFixed(2)}%</strong></span>
       <span>Total Payment Amount <strong style="color:var(--green)">${fmt(plan.paymentTotal)}</strong></span>
+      ${plan.tipAmount > 0 ? `<span>Tip for employee <strong style="color:var(--green)">${fmt(plan.tipAmount)}</strong></span>` : ''}
+      ${plan.tipAmount > 0 ? `<span>Total received <strong style="color:var(--green)">${fmt(plan.paymentTotal + plan.tipAmount)}</strong></span>` : ''}
       ${partialCollectCtx?.autoSub ? `<span>Subtractions consumed in this payment <strong style="color:var(--red)">-${fmt(plan.subCollectedTotal)}</strong></span>` : ''}`;
   }
 }
@@ -3280,10 +3305,10 @@ function savePartialCollect() {
   const plan = _getPartialCollectPlan();
   if (!plan) return;
   const mode = plan.mode;
-  if (mode === 'dollar' && plan.paymentTotal <= 0) { showAlert('Please enter a payment amount.'); return; }
+  if (mode === 'dollar' && plan.paymentTotal <= 0 && plan.tipAmount <= 0) { showAlert('Please enter a payment amount or tip.'); return; }
   if (mode === 'percent') {
     const pct = Math.max(0, Math.min(100, parseFloat(document.getElementById('pc_percent')?.value) || 0));
-    if (pct <= 0) { showAlert('Please enter a percentage greater than 0.'); return; }
+    if (pct <= 0 && plan.tipAmount <= 0) { showAlert('Please enter a percentage or tip greater than 0.'); return; }
   }
   const job = state.jobs.find(j => j.id === partialCollectCtx.jobId);
   if (!job) return;
@@ -3292,6 +3317,11 @@ function savePartialCollect() {
   const partialPercent = mode === 'percent'
     ? Math.max(0, Math.min(100, parseFloat(document.getElementById('pc_percent')?.value) || 0))
     : 0;
+  const addTipRecord = () => {
+    if (plan.tipAmount <= 0) return;
+    if (!job.tips) job.tips = [];
+    job.tips.push({ id:uid(), label:'Client tip', amount:plan.tipAmount, date });
+  };
   const persist = () => {
     if (!plan.allocs.length && partialCollectCtx.isHourly && mode === 'dollar' && plan.paymentTotal > 0) {
       if (!job.revenueItems) job.revenueItems = [];
@@ -3302,9 +3332,16 @@ function savePartialCollect() {
         date,
         status: 'collected'
       });
+      addTipRecord();
       if (!job.jobNotes) job.jobNotes = [];
-      const summary = note || `Revenue payment logged: ${fmt(plan.paymentTotal)} on ${date}.`;
+      const summary = note || `Revenue payment logged: ${fmt(plan.paymentTotal)}${plan.tipAmount > 0 ? ` plus ${fmt(plan.tipAmount)} tip` : ''} on ${date}.`;
       job.jobNotes.push({ id: uid(), text: summary, date, authorId: currentUser?.id || '', authorName: currentUser?.name || 'Admin' });
+      save(); renderJobs(); closeModal('partialCollectModal');
+      partialCollectCtx = null;
+      return;
+    }
+    if (!plan.allocs.length && plan.tipAmount > 0 && plan.paymentTotal <= 0) {
+      addTipRecord();
       save(); renderJobs(); closeModal('partialCollectModal');
       partialCollectCtx = null;
       return;
@@ -3317,7 +3354,8 @@ function savePartialCollect() {
       milestones: JSON.parse(JSON.stringify(job.milestones || [])),
       revenueItems: JSON.parse(JSON.stringify(job.revenueItems || [])),
       addOns: JSON.parse(JSON.stringify(job.addOns || [])),
-      subtractions: JSON.parse(JSON.stringify(job.subtractions || []))
+      subtractions: JSON.parse(JSON.stringify(job.subtractions || [])),
+      tips: JSON.parse(JSON.stringify(job.tips || []))
     };
     const byType = { milestones: [], revenueItems: [], addOns: [] };
     plan.allocs.forEach(a => {
@@ -3334,6 +3372,7 @@ function savePartialCollect() {
     byType.addOns.sort((a,b) => b.idx - a.idx).forEach(a =>
       _applyPartialToAmountList(job.addOns, a.idx, a.gross, { partialMode: mode, partialPercent, partialDate: date })
     );
+    addTipRecord();
     if (partialCollectCtx.autoSub && plan.subCollectedTotal > 0.0001) {
       const subAlloc = _distributeSubtractionCollection(partialCollectCtx.subtractions, plan.subCollectedTotal);
       subAlloc.sort((a,b) => b.idx - a.idx).forEach(a =>
@@ -3352,13 +3391,14 @@ function savePartialCollect() {
       mode,
       partialPercent,
       paymentTotal: plan.paymentTotal,
+      tipAmount: plan.tipAmount,
       autoSub: !!partialCollectCtx.autoSub,
       presetByKey,
       snapshotBefore: before,
       createdAt: new Date().toISOString()
     });
     if (!job.jobNotes) job.jobNotes = [];
-    const summary = note || `Revenue collection logged: ${fmt(plan.paymentTotal)} on ${date}.`;
+    const summary = note || `Revenue collection logged: ${fmt(plan.paymentTotal)}${plan.tipAmount > 0 ? ` plus ${fmt(plan.tipAmount)} tip` : ''} on ${date}.`;
     job.jobNotes.push({ id: uid(), text: summary, date, authorId: currentUser?.id || '', authorName: currentUser?.name || 'Admin' });
     save(); renderJobs(); closeModal('partialCollectModal');
     partialCollectCtx = null;
@@ -3387,6 +3427,7 @@ function deletePartialCollection(jobId, partialId) {
     job.revenueItems = JSON.parse(JSON.stringify(snap.revenueItems || []));
     job.addOns = JSON.parse(JSON.stringify(snap.addOns || []));
     job.subtractions = JSON.parse(JSON.stringify(snap.subtractions || []));
+    job.tips = JSON.parse(JSON.stringify(snap.tips || []));
     job.partialCollections = arr.filter(p => p.id !== partialId);
     save(); renderJobs();
   }, { title:'Delete Partial Payment', okLabel:'Delete', danger:true });
@@ -3408,12 +3449,14 @@ function editPartialCollection(jobId, partialId) {
   job.revenueItems = JSON.parse(JSON.stringify(snap.revenueItems || []));
   job.addOns = JSON.parse(JSON.stringify(snap.addOns || []));
   job.subtractions = JSON.parse(JSON.stringify(snap.subtractions || []));
+  job.tips = JSON.parse(JSON.stringify(snap.tips || []));
   job.partialCollections = arr.filter(p => p.id !== partialId);
   save();
   openPartialCollect(jobId, {
     mode: entry.mode || 'dollar',
     partialPercent: Number(entry.partialPercent || 0),
     paymentTotal: Number(entry.paymentTotal || 0),
+    tipAmount: Number(entry.tipAmount || 0),
     date: entry.date || today(),
     note: entry.note || '',
     autoSub: entry.autoSub !== false,
@@ -4022,7 +4065,7 @@ function saveJob() {
     expandedJobs.add(newId);
     saveExpandedState();
     state.jobs.push({ id:newId, name, contactName, quote, date, isItemized, quoteItems, status:'active',
-      milestones, addOns:[], subtractions:[], materials:[], advances:[], fees:[], jobNotes:[], hours:[], partialCollections:[], repaymentMode:false,
+      milestones, addOns:[], subtractions:[], materials:[], advances:[], tips:[], fees:[], jobNotes:[], hours:[], partialCollections:[], repaymentMode:false,
       revenueItems:[], jobType, hourlyRate,
       hourlyStatus:'pending', hourlySquareInvoiceId:'',
       employeeId: employeeId || '' });
@@ -5033,6 +5076,7 @@ async function saveUnifiedJob() {
     id: jobId,
     status:'active',
     advances:[],
+    tips:[],
     fees:[],
     jobNotes:[],
     hours:[],
@@ -5186,7 +5230,7 @@ function openAddItem(jobId, type, itemId = null) {
       <div class="form-row">
         <div class="form-group"><label class="form-label">Date</label><input class="form-input" id="ai_date" type="date" value="${today()}" /></div>
         <div class="form-group"><label class="form-label">Type</label>
-          <select class="form-input" id="ai_paytype" onchange="updateAddItemPayTypeNotice()">
+          <select class="form-input" id="ai_paytype">
             <option value="">General</option>
             <option value="advance">Advance</option>
             <option value="final">Final Pay</option>
@@ -5194,8 +5238,7 @@ function openAddItem(jobId, type, itemId = null) {
             <option value="tip">Tip</option>
           </select>
         </div>
-      </div>
-      <div class="form-hint" id="ai_tipHint" style="display:none;color:var(--red);font-family:var(--mono);margin-top:-4px">Tip reminder: 100% of this amount goes to the employee.</div>`;
+      </div>`;
   }
   document.getElementById('addItemForm').innerHTML = html;
   if (isEdit) {
@@ -5251,21 +5294,11 @@ function openAddItem(jobId, type, itemId = null) {
       }
     }
   }
-  if (type === 'advance') updateAddItemPayTypeNotice();
   if (type === 'hours' && !isEdit) updateHoursAddItemTotal();
   document.getElementById('addItemModal').classList.remove('hidden');
 }
-function updateAddItemPayTypeNotice() {
-  const payType = document.getElementById('ai_paytype');
-  const isTip = payType?.value === 'tip';
-  const hint = document.getElementById('ai_tipHint');
-  if (hint) hint.style.display = isTip ? '' : 'none';
-  const maxBtn = document.getElementById('ai_maxBtn');
-  if (maxBtn) maxBtn.style.display = isTip ? 'none' : '';
-}
 function setAddItemAdvanceMax() {
   if (!addItemContext || addItemContext.type !== 'advance') return;
-  if (document.getElementById('ai_paytype')?.value === 'tip') return;
   const { jobId, itemId } = addItemContext;
   const job = state.jobs.find(j => j.id === jobId);
   if (!job) return;
@@ -5327,10 +5360,6 @@ function saveItem() {
   }
   if (type === 'advance' && Math.abs(amount) < 0.000001) {
     showAlert('Please enter a non-zero amount.');
-    return;
-  }
-  if (type === 'advance' && document.getElementById('ai_paytype')?.value === 'tip' && amount <= 0) {
-    showAlert('Tips must be greater than $0.');
     return;
   }
   if (isHourly && (type === 'revenue' || type === 'addon' || type === 'subtraction')) {
