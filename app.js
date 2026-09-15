@@ -659,6 +659,14 @@ function _jobType(job) {
   return 'quoted';
 }
 
+// Some older records retain their payment state in billingState/status as
+// "paid" while newer records use "collected". Treat both the same in the
+// financial calculations so the breakdown agrees with the billing display.
+function _isCollectedBillingItem(item, status = null) {
+  const itemStatus = status ?? item?.status;
+  return itemStatus === 'collected' || itemStatus === 'paid' || item?.billingState === 'paid';
+}
+
 function calcJob(job) {
   const emp = getEmp(job.employeeId);
   const empShare = emp?.empShare ?? 0.66;
@@ -686,14 +694,14 @@ function calcJob(job) {
 
   let collectedGross = 0, estimatedFees = 0, collectedTxns = 0;
   if (isHourly) {
-    if ((job.hourlyStatus || 'pending') === 'collected') {
+    if (_isCollectedBillingItem(job, job.hourlyStatus || 'pending')) {
       collectedGross += contractTotal;
       estimatedFees += contractTotal * feeRate;
       collectedTxns++;
     }
   } else if (isLegacyHourly) {
     revenueItems.forEach(r => {
-      if ((r.status || 'pending') === 'collected') {
+      if (_isCollectedBillingItem(r, r.status || 'pending')) {
         const g = Number(r.amount || 0);
         collectedGross += g;
         estimatedFees += g * feeRate;
@@ -702,7 +710,7 @@ function calcJob(job) {
     });
   } else {
     (job.milestones || []).forEach(m => {
-      if (m.status === 'collected') {
+      if (_isCollectedBillingItem(m)) {
         const g = (m.pct/100) * (job.quote||0);
         collectedGross += g; estimatedFees += g * feeRate; collectedTxns++;
       }
@@ -710,12 +718,12 @@ function calcJob(job) {
   }
   if (!isHourly) {
     (job.addOns || []).forEach(a => {
-      if (a.status === 'collected') {
+      if (_isCollectedBillingItem(a)) {
         collectedGross += a.amount||0; estimatedFees += (a.amount||0) * feeRate; collectedTxns++;
       }
     });
     (job.subtractions || []).forEach(a => {
-      if (a.status === 'collected') {
+      if (_isCollectedBillingItem(a)) {
         collectedGross -= a.amount||0; estimatedFees -= (a.amount||0) * feeRate;
       }
     });
@@ -727,23 +735,23 @@ function calcJob(job) {
 
   let pendingGross = 0, pendingTxns = 0;
   if (isHourly) {
-    if ((job.hourlyStatus || 'pending') !== 'collected') {
+    if (!_isCollectedBillingItem(job, job.hourlyStatus || 'pending')) {
       pendingGross += contractTotal;
       pendingTxns++;
     }
   } else if (isLegacyHourly) {
     revenueItems.forEach(r => {
-      if ((r.status || 'pending') === 'collected') return;
+      if (_isCollectedBillingItem(r, r.status || 'pending')) return;
       pendingGross += Number(r.amount || 0);
       pendingTxns++;
     });
   } else {
-    (job.milestones || []).forEach(m => { if (m.status !== 'collected') pendingGross += (m.pct/100)*(job.quote||0); });
-    (job.milestones || []).forEach(m => { if (m.status !== 'collected') pendingTxns++; });
+    (job.milestones || []).forEach(m => { if (!_isCollectedBillingItem(m)) pendingGross += (m.pct/100)*(job.quote||0); });
+    (job.milestones || []).forEach(m => { if (!_isCollectedBillingItem(m)) pendingTxns++; });
   }
   if (!isHourly) {
-    (job.addOns || []).forEach(a => { if (a.status !== 'collected') { pendingGross += a.amount||0; pendingTxns++; } });
-    (job.subtractions || []).forEach(a => { if (a.status !== 'collected') pendingGross -= a.amount||0; });
+    (job.addOns || []).forEach(a => { if (!_isCollectedBillingItem(a)) { pendingGross += a.amount||0; pendingTxns++; } });
+    (job.subtractions || []).forEach(a => { if (!_isCollectedBillingItem(a)) pendingGross -= a.amount||0; });
   }
 
   const ownerMats = (job.materials||[]).filter(m=>m.who==='owner').reduce((s,m)=>s+Number(m.costAmount ?? m.amount ?? 0),0);
@@ -2288,7 +2296,7 @@ function jobDetail(job, c) {
 
     <div class="settlement-box">
       <div class="settlement-title">Settlement Breakdown${job.repaymentMode?` <span style="color:var(--red);font-size:14px;margin-left:8px">REPAYMENT SPLIT ${Math.round((state.settings.debtOwnerShare||0.5)*100)}/${Math.round((1-(state.settings.debtOwnerShare||0.5))*100)}</span>`:''}</div>
-      <div class="settlement-profit-pool">Profit pool: ${fmt(c.profitPool)}</div>
+      <div class="settlement-profit-pool">Profit pool: ${fmt(c.projectedProfitPool)}</div>
       <div class="settlement-grid" style="${admin?'':'grid-template-columns:1fr'}">
         <div class="admin-only">
           <div class="settlement-col-title">Your share (${ownerPct}%)</div>
@@ -2883,7 +2891,7 @@ function _buildPartialCollectCtx(jobId) {
   const rows = [];
   if (isHourly) {
     (job.revenueItems || []).forEach((r, idx) => {
-      if ((r.status || 'pending') === 'collected') return;
+      if (_isCollectedBillingItem(r, r.status || 'pending')) return;
       const gross = _roundMoney(r.amount || 0);
       if (gross <= 0) return;
       rows.push({
@@ -2900,7 +2908,7 @@ function _buildPartialCollectCtx(jobId) {
     });
   } else {
     (job.milestones || []).forEach((m, idx) => {
-      if ((m.status || 'pending') === 'collected') return;
+      if (_isCollectedBillingItem(m, m.status || 'pending')) return;
       const gross = _roundMoney(((m.pct || 0) / 100) * (job.quote || 0));
       if (gross <= 0) return;
       rows.push({
@@ -2917,7 +2925,7 @@ function _buildPartialCollectCtx(jobId) {
     });
   }
   (job.addOns || []).forEach((a, idx) => {
-    if ((a.status || 'pending') === 'collected') return;
+    if (_isCollectedBillingItem(a, a.status || 'pending')) return;
     const gross = _roundMoney(a.amount || 0);
     if (gross <= 0) return;
     rows.push({
@@ -2934,7 +2942,7 @@ function _buildPartialCollectCtx(jobId) {
   });
   const subtractions = [];
   (job.subtractions || []).forEach((s, idx) => {
-    if ((s.status || 'pending') === 'collected') return;
+    if (_isCollectedBillingItem(s, s.status || 'pending')) return;
     const amt = _roundMoney(s.amount || 0);
     if (amt <= 0) return;
     subtractions.push({ idx, amount: amt });
