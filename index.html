@@ -257,6 +257,12 @@
   .job-billing-pill.paid { background: rgba(76,175,130,0.1); color: var(--green); border-color: rgba(76,175,130,0.3); }
   .job-billing-action { height: 22px; padding: 2px 7px; border: 1px solid var(--border2); border-radius: 2px; background: transparent; color: var(--text3); font-family: var(--mono); font-size: 11px; line-height: 1; cursor: pointer; white-space: nowrap; }
   .job-billing-action:hover { color: var(--accent); border-color: var(--accent); }
+  .job-billing-complete { margin-left: 9px; color: var(--green); border-color: rgba(76,175,130,0.45); }
+  .job-billing-complete:hover { color: var(--green); border-color: var(--green); }
+  .job-pay-status { display: inline-flex; align-items: center; margin-top: 6px; height: 22px; padding: 2px 7px; border: 1px solid rgba(76,175,130,0.45); border-radius: 2px; background: rgba(76,175,130,0.08); color: var(--green); font-family: var(--mono); font-size: 11px; line-height: 1; cursor: pointer; }
+  .job-pay-status.on-hold { border-color: rgba(240,166,35,0.45); background: rgba(240,166,35,0.08); color: var(--accent); }
+  .job-pay-status:hover { border-color: var(--green); }
+  .job-pay-status.on-hold:hover { border-color: var(--accent); }
   .job-billing-menu { position: relative; display: inline-flex; align-items: center; height: 22px; vertical-align: middle; }
   .job-billing-menu > summary { display: inline-flex; align-items: center; height: 22px; box-sizing: border-box; list-style: none; }
   .job-billing-menu > summary::-webkit-details-marker { display: none; }
@@ -864,7 +870,10 @@
     <div id="activeJobsList"></div>
   </div>
   <div id="tab-complete" class="tab-content"><div id="completeJobsList"></div></div>
-  <div id="tab-all" class="tab-content"><div id="allJobsList"></div></div>
+  <div id="tab-all" class="tab-content">
+    <div id="allJobsFilterBar" class="section-header" style="display:none;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap"></div>
+    <div id="allJobsList"></div>
+  </div>
   <div id="tab-schedule" class="tab-content"><div id="scheduleContent"></div></div>
   <div id="tab-homewatch" class="tab-content">
     <div class="section-header">
@@ -925,6 +934,14 @@
       <label class="form-label">Assign to Employee</label>
       <select class="form-input" id="f_emp"></select>
     </div>
+    <div class="form-group">
+      <label class="form-label">Employee Pay</label>
+      <div id="f_workStatusToggle" style="display:flex;gap:6px">
+        <button type="button" id="f_work_complete" class="btn btn-primary btn-sm" onclick="setJobWorkStatus(true)">Adding to employee pay</button>
+        <button type="button" id="f_work_progress" class="btn btn-ghost btn-sm" onclick="setJobWorkStatus(false)">Employee pay on hold</button>
+      </div>
+      <div id="f_workStatusHint" class="form-hint">This job contributes to employee pay totals.</div>
+    </div>
     <div id="jobFinancialLockRegion">
       <div class="form-group">
         <label class="form-label">Job Setup</label>
@@ -965,6 +982,11 @@
           <button id="ms_btn_single"  class="btn btn-primary btn-sm" onclick="setMilestoneMode('single')">Single Invoice</button>
           <button id="ms_btn_default" class="btn btn-ghost btn-sm"   onclick="setMilestoneMode('default')">Use Defaults</button>
           <button id="ms_btn_custom"  class="btn btn-ghost btn-sm"   onclick="setMilestoneMode('custom')">Custom</button>
+        </div>
+        <div id="milestoneValueToggle" style="display:none;gap:6px;margin-bottom:10px;align-items:center">
+          <span style="font-size:12px;color:var(--text3);font-family:var(--mono)">Values:</span>
+          <button type="button" id="ms_basis_percent" class="btn btn-primary btn-sm" onclick="setMilestoneValueMode('percent')">Percent</button>
+          <button type="button" id="ms_basis_amount" class="btn btn-ghost btn-sm" onclick="setMilestoneValueMode('amount')">Dollars</button>
         </div>
         <div id="milestoneHint" style="font-family:var(--mono);font-size:14px;color:var(--text3)">Full invoice - one payment to track.</div>
         <div id="milestoneEditor" style="display:none">
@@ -1030,10 +1052,18 @@
       <input class="form-input" id="uj_contactName" placeholder="e.g. property manager or contractor" />
     </div>
     <div class="form-group" id="uj_emp_wrap"><label class="form-label">Assign to Employee</label><select class="form-input" id="uj_emp"></select></div>
+    <div class="form-group">
+      <label class="form-label">Employee Pay</label>
+      <div id="uj_workStatusToggle" style="display:flex;gap:6px">
+        <button type="button" id="uj_work_complete" class="btn btn-primary btn-sm" onclick="setUnifiedWorkStatus(true)">Adding to employee pay</button>
+        <button type="button" id="uj_work_progress" class="btn btn-ghost btn-sm" onclick="setUnifiedWorkStatus(false)">Employee pay on hold</button>
+      </div>
+      <div id="uj_workStatusHint" class="unified-client-note">This job contributes to employee pay totals.</div>
+    </div>
 
     <div class="form-group">
       <label class="form-label">Work / invoice notes <span style="font-weight:400;color:var(--text3)">(optional)</span></label>
-      <textarea class="form-input" id="uj_notes" placeholder="Describe the completed work. These notes are saved on the job for reference when creating the invoice."></textarea>
+      <textarea class="form-input" id="uj_notes" placeholder="Describe the work. These notes are saved on the job for reference when creating the invoice."></textarea>
     </div>
 
     <div class="unified-section-title">Work and charges</div>
@@ -1059,6 +1089,11 @@
         <option value="default">Use saved defaults</option>
         <option value="custom">Custom milestones</option>
       </select>
+      <div id="uj_milestoneBasisToggle" style="display:none;gap:6px;margin-top:8px;align-items:center">
+        <span style="font-size:12px;color:var(--text3);font-family:var(--mono)">Values:</span>
+        <button type="button" id="uj_basis_percent" class="btn btn-primary btn-sm" onclick="setUnifiedMilestoneBasis('percent')">Percent</button>
+        <button type="button" id="uj_basis_amount" class="btn btn-ghost btn-sm" onclick="setUnifiedMilestoneBasis('amount')">Dollars</button>
+      </div>
       <div id="uj_paymentHint" class="unified-client-note">One invoice for the full client total.</div>
       <div id="uj_milestoneEditor" style="display:none;margin-top:10px">
         <div id="uj_milestoneList"></div>
@@ -1195,7 +1230,12 @@
         <div id="stab-jobs" class="settings-panel">
           <div class="form-group">
             <label class="form-label">Default Milestone Template</label>
-            <div class="form-hint" style="margin-bottom:10px">Loaded when you click "Use Defaults" on a new job. Must total 100%.</div>
+            <div class="form-hint" style="margin-bottom:10px">Loaded when you click "Use Defaults" on a new job. Percent templates must total 100%; dollar templates must match the job quote.</div>
+            <div id="dmBasisToggle" style="display:flex;gap:6px;margin-bottom:10px;align-items:center">
+              <span style="font-size:12px;color:var(--text3);font-family:var(--mono)">Values:</span>
+              <button type="button" id="dm_basis_percent" class="btn btn-primary btn-sm" onclick="setDefaultMilestoneBasis('percent')">Percent</button>
+              <button type="button" id="dm_basis_amount" class="btn btn-ghost btn-sm" onclick="setDefaultMilestoneBasis('amount')">Dollars</button>
+            </div>
             <div id="dmList"></div>
             <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
               <button class="btn btn-ghost btn-sm" onclick="addDmField()">+ Add Milestone</button>

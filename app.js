@@ -21,6 +21,7 @@ let state = {
     debtOriginal: 2256.58,
     debtOwnerShare: 0.50,
     defaultMilestones: [],
+    defaultMilestoneBasis: 'percent',
     square: { functionBaseUrl: '', highValueConfirmAmount: 1000 }
   },
   debtPayments: [],
@@ -38,6 +39,8 @@ let splitPayEmployeeId = '';
 let expandedJobs = new Set(); // local only - never saved to Firestore
 let expandedHW   = new Set(); // local only - never saved to Firestore
 let expandedClients = new Set();
+let allJobsClientFilterId = null;
+let allJobsJobFilterId = null;
 let notesCtx = null; // { type: 'job'|'hw', id }
 let empSummaryTimeframe = '30'; // days, or 'all' (user-scoped local preference)
 let hoursJobId = null;
@@ -157,6 +160,7 @@ function migrateState(s) {
   if (s.settings.debtOwnerShare === undefined) s.settings.debtOwnerShare = 0.50;
   if (s.settings.txnFee === undefined) s.settings.txnFee = 0.30;
   if (!s.settings.defaultMilestones) s.settings.defaultMilestones = [];
+  if (s.settings.defaultMilestoneBasis !== 'amount') s.settings.defaultMilestoneBasis = 'percent';
   if (!s.settings.square || typeof s.settings.square !== 'object') s.settings.square = {};
   if (s.settings.square.functionBaseUrl === undefined) s.settings.square.functionBaseUrl = '';
   if (s.settings.square.highValueConfirmAmount === undefined) s.settings.square.highValueConfirmAmount = 1000;
@@ -237,6 +241,8 @@ function migrateState(s) {
     if (job.jobType === 'hourly2') job.jobType = 'hourly';
     if (job.jobType !== 'hourly' && job.jobType !== 'quoted') job.jobType = 'quoted';
     if (job.hourlyRate === undefined) job.hourlyRate = 0;
+    if (job.workCompleted === undefined) job.workCompleted = true;
+    if (job.milestoneBasis !== 'amount') job.milestoneBasis = 'percent';
     if (!job.hourlyStatus) job.hourlyStatus = 'pending';
     if (!job.hourlySquareInvoiceId) job.hourlySquareInvoiceId = '';
     if (job.repaymentMode === undefined) job.repaymentMode = false;
@@ -272,6 +278,7 @@ function migrateState(s) {
       if (m.partialGroupId === undefined) m.partialGroupId = '';
       if (m.partialParentLabel === undefined) m.partialParentLabel = '';
       if (m.partialParentPct === undefined) m.partialParentPct = 0;
+      if (m.partialParentAmount === undefined) m.partialParentAmount = 0;
       if (m.partialMode === undefined) m.partialMode = '';
       if (m.partialPercent === undefined) m.partialPercent = 0;
       if (m.partialDate === undefined) m.partialDate = '';
@@ -658,6 +665,9 @@ function _jobType(job) {
   if (job?.jobType === 'hourly' || job?.jobType === 'hourly2') return 'hourly';
   return 'quoted';
 }
+function _jobWorkCompleted(job) {
+  return job?.workCompleted !== false;
+}
 
 // Some older records retain their payment state in billingState/status as
 // "paid" while newer records use "collected". Treat both the same in the
@@ -665,6 +675,23 @@ function _jobType(job) {
 function _isCollectedBillingItem(item, status = null) {
   const itemStatus = status ?? item?.status;
   return itemStatus === 'collected' || itemStatus === 'paid' || item?.billingState === 'paid';
+}
+
+function _milestoneBasis(job) {
+  return job?.milestoneBasis === 'amount' ? 'amount' : 'percent';
+}
+
+function _milestoneAmount(job, milestone) {
+  if (_milestoneBasis(job) === 'amount' && milestone?.amount !== undefined) {
+    return _roundMoney(Number(milestone.amount || 0));
+  }
+  return _roundMoney((Number(milestone?.pct || 0) / 100) * Number(job?.quote || 0));
+}
+
+function _milestonePercent(job, milestone) {
+  if (_milestoneBasis(job) === 'percent') return Number(milestone?.pct || 0);
+  const quote = Number(job?.quote || 0);
+  return quote > 0 ? (Number(milestone?.amount || 0) / quote) * 100 : 0;
 }
 
 function calcJob(job) {
@@ -711,7 +738,7 @@ function calcJob(job) {
   } else {
     (job.milestones || []).forEach(m => {
       if (_isCollectedBillingItem(m)) {
-        const g = (m.pct/100) * (job.quote||0);
+        const g = _milestoneAmount(job, m);
         collectedGross += g; estimatedFees += g * feeRate; collectedTxns++;
       }
     });
@@ -746,7 +773,7 @@ function calcJob(job) {
       pendingTxns++;
     });
   } else {
-    (job.milestones || []).forEach(m => { if (!_isCollectedBillingItem(m)) pendingGross += (m.pct/100)*(job.quote||0); });
+    (job.milestones || []).forEach(m => { if (!_isCollectedBillingItem(m)) pendingGross += _milestoneAmount(job, m); });
     (job.milestones || []).forEach(m => { if (!_isCollectedBillingItem(m)) pendingTxns++; });
   }
   if (!isHourly) {
@@ -764,17 +791,18 @@ function calcJob(job) {
   const debtContribution = job.repaymentMode ? Math.max(0, profitPool * ((debtOwnerShare||0.50) - normalOwnerShare)) : 0;
   const tipsTotal       = (job.tips||[]).reduce((s,t)=>s+(t.amount||0),0);
   const advancesPaid    = (job.advances||[]).reduce((s,a)=>s+(a.amount||0),0);
-  const empTotalOwed    = empProfit + empMats + tipsTotal;
+  const workCompleted   = _jobWorkCompleted(job);
+  const empTotalOwed    = workCompleted ? empProfit + empMats + tipsTotal : 0;
   const linkedDebtPaid  = (state.debtPayments||[]).filter(p=>p.linkedJobId===job.id).reduce((s,p)=>s+(p.amount||0),0);
-  const empBalance      = empTotalOwed - advancesPaid - linkedDebtPaid;
+  const empBalance      = workCompleted ? empTotalOwed - advancesPaid - linkedDebtPaid : 0;
   const outstanding     = contractTotal - collectedGross;
   const projectedGross  = collectedGross + pendingGross;
   const projectedTxns   = collectedTxns + pendingTxns;
   const projectedFees   = projectedGross * feeRate + txnFee * projectedTxns + manualFees;
   const projectedNetRevenue = projectedGross - projectedFees;
   const projectedProfitPool = Math.max(0, projectedNetRevenue - totalMats);
-  const potentialEmpTotalOwed = projectedProfitPool * effectiveEmpShare + empMats + tipsTotal;
-  const potentialEmpBalance   = potentialEmpTotalOwed - advancesPaid - linkedDebtPaid;
+  const potentialEmpTotalOwed = workCompleted ? projectedProfitPool * effectiveEmpShare + empMats + tipsTotal : 0;
+  const potentialEmpBalance   = workCompleted ? potentialEmpTotalOwed - advancesPaid - linkedDebtPaid : 0;
   const potentialOwnerProfit  = projectedProfitPool * effectiveOwnerShare;
   const potentialOwnerTotal   = potentialOwnerProfit + ownerMats;
   const potentialDebtContribution = job.repaymentMode
@@ -783,7 +811,7 @@ function calcJob(job) {
   const ownerTotal      = ownerProfit + ownerMats;
   const totalHours      = (job.hours||[]).reduce((s,h)=>s+(h.hours||0),0);
 
-  return { contractTotal: _roundMoney(contractTotal), addOnTotal: _roundMoney(addOnTotal), subtractionTotal: _roundMoney(subtractionTotal), collectedGross: _roundMoney(collectedGross), pendingGross: _roundMoney(pendingGross),
+  return { contractTotal: _roundMoney(contractTotal), addOnTotal: _roundMoney(addOnTotal), subtractionTotal: _roundMoney(subtractionTotal), collectedGross: _roundMoney(collectedGross), pendingGross: _roundMoney(pendingGross), workCompleted,
     totalFees: _roundMoney(totalFees), netRevenue: _roundMoney(netRevenue), totalMats: _roundMoney(totalMats), ownerMats: _roundMoney(ownerMats), empMats: _roundMoney(empMats),
     profitPool: _roundMoney(profitPool), empProfit: _roundMoney(empProfit), ownerProfit: _roundMoney(ownerProfit), debtContribution: _roundMoney(debtContribution), tipsTotal: _roundMoney(tipsTotal),
     empTotalOwed: _roundMoney(empTotalOwed), advancesPaid: _roundMoney(advancesPaid), linkedDebtPaid: _roundMoney(linkedDebtPaid), empBalance: _roundMoney(empBalance),
@@ -1367,10 +1395,25 @@ function renderJobs() {
   const allJobs = newestJobsFirst(visibleJobs);
   const active   = allJobs.filter(j => j.status !== 'complete');
   const complete = allJobs.filter(j => j.status === 'complete');
+  const filterClient = clientById(allJobsClientFilterId);
+  const filteredAllJobs = filterClient
+    ? allJobs.filter(job => jobBelongsToClient(job, filterClient) && (!allJobsJobFilterId || job.id === allJobsJobFilterId))
+    : allJobs;
+  const filterBar = document.getElementById('allJobsFilterBar');
+  if (filterBar) {
+    if (filterClient) {
+      const filterLabel = allJobsJobFilterId ? 'Showing 1 job' : 'Showing all jobs';
+      filterBar.style.display = 'flex';
+      filterBar.innerHTML = `<span style="font-family:var(--mono);font-size:12px;color:var(--text3)">${filterLabel} for <strong style="color:var(--text2)">${esc(clientDisplayName(filterClient) || 'Client')}</strong></span><button class="btn btn-ghost btn-sm" onclick="clearAllJobsFilter()">Clear filter</button>`;
+    } else {
+      filterBar.style.display = 'none';
+      filterBar.innerHTML = '';
+    }
+  }
   document.getElementById('activeCount').textContent = `${active.length} active job${active.length!==1?'s':''}`;
   document.getElementById('activeJobsList').innerHTML   = active.length   ? active.map(jobCard).join('')   : emptyState('No active jobs. Click + New Job to get started.');
   document.getElementById('completeJobsList').innerHTML = complete.length ? complete.map(jobCard).join('') : emptyState('No completed jobs yet.');
-  document.getElementById('allJobsList').innerHTML      = allJobs.length  ? allJobs.map(jobCard).join('')  : emptyState('No jobs yet.');
+  document.getElementById('allJobsList').innerHTML      = filteredAllJobs.length ? filteredAllJobs.map(jobCard).join('') : emptyState(filterClient ? 'No jobs found for this client.' : 'No jobs yet.');
   applyAdminClasses();
 }
 function applyAdminClasses() {
@@ -1437,6 +1480,12 @@ function jobCard(job) {
   const th    = c.totalHours;
   const jobEmpName = currentUser?.isAdmin ? (getEmp(job.employeeId)?.name || '') : '';
   const billingClass = jobBillingStatusClass(job, c);
+  const employeePayIncluded = _jobWorkCompleted(job);
+  const payStatusLabel = employeePayIncluded ? 'Adding to employee pay' : 'Employee pay on hold';
+  const payStatusClass = employeePayIncluded ? '' : ' on-hold';
+  const workHoldHtml = currentUser?.isAdmin && job.status !== 'complete'
+    ? `<button type="button" class="job-pay-status${payStatusClass}" onclick="event.stopPropagation();toggleJobWorkCompleted('${job.id}')" title="Toggle whether this job contributes to employee pay" aria-pressed="${employeePayIncluded ? 'true' : 'false'}">${payStatusLabel}</button>`
+    : `<span class="job-pay-status${payStatusClass}" style="cursor:default">${payStatusLabel}</span>`;
   return `
   <div class="job-card ${sc} ${isExp?'expanded':''} ${billingClass}" id="job_${job.id}" onclick="toggleCardMobile(event, 'job', '${job.id}')">
     <div class="job-header" onclick="toggleHeaderRow(event, 'job', '${job.id}')">
@@ -1450,6 +1499,7 @@ function jobCard(job) {
           ${jobContactLineHtml(job, contactClient)}
           <div style="font-size:15px;color:var(--text3);margin-top:2px;font-family:var(--mono)">${job.date||''}</div>
           ${jobBillingSummaryHtml(job, c)}
+          ${workHoldHtml}
         </div>
         <div class="job-quick-stats job-quick-stats-grid">
           <div class="job-stat" style="${statTileStyle(c.contractTotal)}"><div class="job-stat-label">Total</div><div class="job-stat-value" style="${statValueStyle(c.contractTotal)}">${fmt(c.contractTotal)}</div></div>
@@ -1517,7 +1567,7 @@ function getJobBillingSummary(job, calc = null) {
     return summary;
   }
   (job.milestones || []).forEach(m => {
-    _addBillingRow(summary, m.status || 'pending', ((m.pct || 0) / 100) * (job.quote || 0), m);
+    _addBillingRow(summary, m.status || 'pending', _milestoneAmount(job, m), m);
   });
   (job.revenueItems || []).forEach(r => {
     _addBillingRow(summary, r.status || 'pending', Number(r.amount || 0), r);
@@ -1537,9 +1587,8 @@ function _jobBillingEntries(job) {
     const amount = calcJob(job).contractTotal || 0;
     return Math.abs(Number(amount)) >= 0.005 ? [{ item: job, hourly: true, amount }] : [];
   }
-  const quote = Number(job.quote || 0);
   return [
-    ...(job.milestones || []).map(item => ({ item, amount: ((item.pct || 0) / 100) * quote })),
+    ...(job.milestones || []).map(item => ({ item, amount: _milestoneAmount(job, item) })),
     ...(job.revenueItems || []).map(item => ({ item, amount: Number(item.amount || 0) })),
     ...(job.addOns || []).map(item => ({ item, amount: Number(item.amount || 0) })),
     ...(job.subtractions || []).map(item => ({ item, amount: -Number(item.amount || 0) }))
@@ -1564,6 +1613,7 @@ function setAllBillingStatus(jobId, status) {
 
 function jobBillingSummaryHtml(job, calc = null) {
   const summary = getJobBillingSummary(job, calc);
+  const c = calc || calcJob(job);
   const cfg = {
     pending: { label: 'Pending', cls: 'pending' },
     invoiced: { label: 'Invoiced', cls: 'invoiced' },
@@ -1577,7 +1627,8 @@ function jobBillingSummaryHtml(job, calc = null) {
       const lineLabel = s.count === 1 ? 'line' : 'lines';
       return `<span class="job-billing-pill ${cfg[k].cls}" title="${label}: ${s.count} ${lineLabel}"><strong>${s.count}</strong><span>${label}</span></span>`;
     });
-  if (!parts.length) return '';
+  const canComplete = currentUser?.isAdmin && job.status !== 'complete'
+    && _jobWorkCompleted(job) && c.outstanding <= 0.005 && c.potentialEmpBalance <= 0.005;
   const bulkAction = currentUser?.isAdmin
     ? `<details class="job-billing-menu" onclick="event.stopPropagation();closeOtherJobPopovers('billing')">
         <summary class="job-billing-action" title="Set every invoiceable line to one status">Set all</summary>
@@ -1588,7 +1639,11 @@ function jobBillingSummaryHtml(job, calc = null) {
         </div>
       </details>`
     : '';
-  return `<div class="job-billing-strip" aria-label="Invoice status summary">${parts.join('')}${bulkAction}</div>`;
+  const completeAction = canComplete
+    ? `<button type="button" class="job-billing-action job-billing-complete" onclick="event.stopPropagation();completeJob('${job.id}')" title="Mark this job complete">Complete</button>`
+    : '';
+  if (!parts.length && !completeAction) return '';
+  return `<div class="job-billing-strip" aria-label="Invoice status summary">${parts.join('')}${bulkAction}${completeAction}</div>`;
 }
 
 function jobBillingStatusClass(job, calc = null) {
@@ -1772,7 +1827,7 @@ function _jobInvoiceItems(job) {
     (job.milestones || []).forEach(m => {
       if ((m.status || 'pending') === 'collected') return;
       if (m.squareInvoiceId) return;
-      const amountCents = Math.round(((m.pct || 0) / 100) * (job.quote || 0) * 100);
+      const amountCents = Math.round(_milestoneAmount(job, m) * 100);
       if (!amountCents) return;
       lineItems.push({ name: `${job.name} - ${m.label || 'Milestone'}`, amountCents });
       refs.push({ kind:'job', jobId:job.id, itemType:'milestones', itemId:m.id });
@@ -1905,7 +1960,9 @@ function jobDetail(job, c) {
   const ownerPct = Math.round((job.repaymentMode ? (state.settings.debtOwnerShare||0.5) : (1-empShare))*100);
   const empBalance = Number(c.potentialEmpBalance || 0);
   const empBalanceStatus = empBalance > 0.005 ? 'Still owed' : empBalance < -0.005 ? 'Overpaid by' : 'Paid in full';
-  const employeeProjectedProfit = _roundMoney(Number(c.potentialEmpTotalOwed || 0) - Number(c.empMats || 0) - Number(c.tipsTotal || 0));
+  const employeeProjectedProfit = c.workCompleted
+    ? _roundMoney(Number(c.potentialEmpTotalOwed || 0) - Number(c.empMats || 0) - Number(c.tipsTotal || 0))
+    : 0;
   const ownerProjectedProfit = Number(c.potentialOwnerProfit || 0);
   const ownerRealizedProfit = Number(c.ownerProfit || 0);
   const ownerUnrealizedProfit = _roundMoney(ownerProjectedProfit - ownerRealizedProfit);
@@ -1962,11 +2019,13 @@ function jobDetail(job, c) {
       const group = milestoneEntries.filter(x => x.m.partialGroupId === groupId);
       const parentLabel = group[0]?.m.partialParentLabel || group[0]?.m.label || `Milestone ${i + 1}`;
       const rawParentPct = Number(group[0]?.m.partialParentPct || 0);
-      const parentPct = rawParentPct > 0 ? rawParentPct : group.reduce((sum, x) => sum + Number(x.m.pct || 0), 0);
-      const parentAmt = (parentPct / 100) * (job.quote || 0);
+      const parentPct = rawParentPct > 0 ? rawParentPct : group.reduce((sum, x) => sum + _milestonePercent(job, x.m), 0);
+      const parentAmt = _milestoneBasis(job) === 'amount'
+        ? (Number(group[0]?.m.partialParentAmount || 0) || group.reduce((sum, x) => sum + _milestoneAmount(job, x.m), 0))
+        : (parentPct / 100) * (job.quote || 0);
       const splitHint = partialSplitHint(group[0]?.m);
       const childrenHtml = group.map(({ m: gm, i: gi }) => {
-        const amt = (gm.pct / 100) * (job.quote || 0);
+        const amt = _milestoneAmount(job, gm);
         const st = gm.status || 'pending';
         const childTag = partialTag(gm);
         return `<div class="line-item" style="padding-left:16px">
@@ -1980,18 +2039,18 @@ function jobDetail(job, c) {
         </div>`;
       }).join('');
       return `<div class="line-item">
-        <div class="line-item-label">${esc(parentLabel)} (${fmtPctDisplay(parentPct)}%)${splitHint}</div>
+        <div class="line-item-label">${esc(parentLabel)}${_milestoneBasis(job) === 'percent' ? ` (${fmtPctDisplay(parentPct)}%)` : ''}${splitHint}</div>
         <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
           <div class="line-item-value dim">${fmt(parentAmt)}</div>
         </div>
       </div>${childrenHtml}`;
     }
-    const amt = (m.pct / 100) * (job.quote || 0);
+    const amt = _milestoneAmount(job, m);
     const st = m.status || 'pending';
     const tag = partialTag(m);
     return `<div class="line-item">
       <div class="line-item-label" style="display:flex;flex-direction:column;gap:4px">
-        <span>${esc(m.label||`Milestone ${i+1}`)} (${fmtPctDisplay(m.pct)}%)</span>
+        <span>${esc(m.label||`Milestone ${i+1}`)}${_milestoneBasis(job) === 'percent' ? ` (${fmtPctDisplay(_milestonePercent(job, m))}%)` : ''}</span>
         ${tag ? `<span>${tag}</span>` : ''}
       </div>
       <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
@@ -2158,6 +2217,13 @@ function jobDetail(job, c) {
       </div>
     </div>`).join('');
   const clientChargeSummaryHtml = jobClientChargeSummaryHtml(job, c);
+  const scheduledMilestoneTotal = (job.milestones || []).reduce(
+    (sum, milestone) => sum + _milestoneAmount(job, milestone),
+    0
+  );
+  const fullInvoiceTotalHtml = Math.abs(Number(c.contractTotal || 0) - scheduledMilestoneTotal) >= 0.005
+    ? `<div class="total-line"><span style="color:var(--text2)">Full client invoice</span><span class="line-item-value" style="color:var(--purple)">${fmt(c.contractTotal)}</span></div>`
+    : '';
 
   const advHtml = (job.advances||[]).map((a,i) => `
     <div class="line-item">
@@ -2196,7 +2262,7 @@ function jobDetail(job, c) {
           ? `${hoursHtml || '<div style="color:var(--text3);font-size:16px;padding:4px 0">No hours entries yet.</div>'}${tipsHtml}`
           : isLegacyHourly
           ? (hourlyRevenueHtml || '<div style="color:var(--text3);font-size:16px;padding:4px 0">No revenue entries yet.</div>')
-          : `${clientChargeSummaryHtml}${tipsHtml}${milestonesHtml ? `<div class="detail-section-header" style="display:flex;align-items:center;gap:10px;margin:14px 0 8px;padding-bottom:8px;border-bottom:1px solid var(--border)"><div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Billing schedule</div></div>${milestonesHtml}` : ''}`
+          : `${clientChargeSummaryHtml}${tipsHtml}${milestonesHtml ? `<div class="detail-section-header" style="display:flex;align-items:center;gap:10px;margin:14px 0 8px;padding-bottom:8px;border-bottom:1px solid var(--border)"><div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Billing schedule</div></div>${milestonesHtml}${fullInvoiceTotalHtml}` : ''}`
         }
         ${isHourly ? '' : partialHistoryHtml}
         ${isHourly ? '' : legacyPartialHtml}
@@ -2316,14 +2382,16 @@ function jobDetail(job, c) {
         <div>
           <div class="settlement-col-title">${admin ? `${en} (${empPct}%)` : `Your share (${empPct}%)`}</div>
           <div class="settlement-big ${empBalance>0?'orange':'green'}">${fmt(Math.abs(empBalance))}</div>
-          <div class="settlement-status">${empBalanceStatus}</div>
+          <div class="settlement-status">${c.workCompleted ? empBalanceStatus : 'Employee pay on hold'}</div>
           <div class="settlement-breakdown-list">
-            <div class="settlement-breakdown-row"><span>Profit share</span><strong>${fmt(employeeProjectedProfit)}</strong></div>
-            <div class="settlement-breakdown-row"><span>Mats back</span><strong>${fmt(c.empMats)}</strong></div>
-            <div class="settlement-breakdown-row tip"><span>Tips (100%)</span><strong>${fmt(c.tipsTotal)}</strong></div>
-            <div class="settlement-breakdown-row total"><span>Employee total owed</span><strong>${fmt(c.potentialEmpTotalOwed)}</strong></div>
-            <div class="settlement-breakdown-row"><span>Paid out</span><strong>-${fmt(c.advancesPaid)}</strong></div>
-            ${c.linkedDebtPaid>0?`<div class="settlement-breakdown-row"><span>Debt repayment</span><strong>-${fmt(c.linkedDebtPaid)}</strong></div>`:''}
+            ${c.workCompleted ? `
+              <div class="settlement-breakdown-row"><span>Profit share</span><strong>${fmt(employeeProjectedProfit)}</strong></div>
+              <div class="settlement-breakdown-row"><span>Mats back</span><strong>${fmt(c.empMats)}</strong></div>
+              <div class="settlement-breakdown-row tip"><span>Tips (100%)</span><strong>${fmt(c.tipsTotal)}</strong></div>
+              <div class="settlement-breakdown-row total"><span>Employee total owed</span><strong>${fmt(c.potentialEmpTotalOwed)}</strong></div>
+              <div class="settlement-breakdown-row"><span>Paid out</span><strong>-${fmt(c.advancesPaid)}</strong></div>
+              ${c.linkedDebtPaid>0?`<div class="settlement-breakdown-row"><span>Debt repayment</span><strong>-${fmt(c.linkedDebtPaid)}</strong></div>`:''}
+            ` : '<div style="color:var(--text3);font-size:13px;padding:4px 0">Employee pay will be calculated when the work is marked completed.</div>'}
           </div>
         </div>
       </div>
@@ -2909,7 +2977,7 @@ function _buildPartialCollectCtx(jobId) {
   } else {
     (job.milestones || []).forEach((m, idx) => {
       if (_isCollectedBillingItem(m, m.status || 'pending')) return;
-      const gross = _roundMoney(((m.pct || 0) / 100) * (job.quote || 0));
+      const gross = _milestoneAmount(job, m);
       if (gross <= 0) return;
       rows.push({
         key: `milestones:${idx}`,
@@ -3252,8 +3320,9 @@ function _applyPartialToMilestones(job, idx, collectAmt, meta = {}) {
   const item = list[idx];
   if (!item) return;
   const quote = Number(job.quote || 0);
-  if (quote <= 0) return;
-  const total = _roundMoney(((item.pct || 0) / 100) * quote);
+  const basis = _milestoneBasis(job);
+  if (basis === 'percent' && quote <= 0) return;
+  const total = _milestoneAmount(job, item);
   const take = _roundMoney(Math.max(0, Math.min(total, collectAmt)));
   if (take <= 0) return;
   if (take >= total - 0.0001) {
@@ -3267,9 +3336,11 @@ function _applyPartialToMilestones(job, idx, collectAmt, meta = {}) {
     }
     return;
   }
-  const takePct = _roundPct((take / quote) * 100);
-  const remPct = _roundPct((item.pct || 0) - takePct);
-  if (takePct <= 0 || remPct <= 0) {
+  const currentPct = _milestonePercent(job, item);
+  const takePct = _roundPct((take / total) * currentPct);
+  const remPct = _roundPct(currentPct - takePct);
+  const remainingAmt = _roundMoney(total - take);
+  if (take <= 0 || remainingAmt <= 0) {
     item.status = 'collected';
     item.partialState = '';
     if (!item.id) item.id = uid();
@@ -3281,12 +3352,14 @@ function _applyPartialToMilestones(job, idx, collectAmt, meta = {}) {
   const remaining = {
     ...item,
     id: item.id || uid(),
-    pct: remPct,
+    pct: basis === 'percent' ? remPct : (quote > 0 ? _roundPct((remainingAmt / quote) * 100) : 0),
+    amount: basis === 'amount' ? remainingAmt : item.amount,
     status: 'pending',
     partialState: 'remaining',
     partialGroupId: baseId,
     partialParentLabel: parentLabel,
     partialParentPct: parentPct,
+    partialParentAmount: item.partialParentAmount ?? total,
     partialMode: meta.partialMode || item.partialMode || '',
     partialPercent: meta.partialPercent || item.partialPercent || 0,
     partialDate: meta.partialDate || item.partialDate || ''
@@ -3294,12 +3367,14 @@ function _applyPartialToMilestones(job, idx, collectAmt, meta = {}) {
   const collected = {
     ...item,
     id: uid(),
-    pct: takePct,
+    pct: basis === 'percent' ? takePct : (quote > 0 ? _roundPct((take / quote) * 100) : 0),
+    amount: basis === 'amount' ? take : item.amount,
     status: 'collected',
     partialState: 'paid',
     partialGroupId: baseId,
     partialParentLabel: parentLabel,
     partialParentPct: parentPct,
+    partialParentAmount: item.partialParentAmount ?? total,
     partialMode: meta.partialMode || item.partialMode || '',
     partialPercent: meta.partialPercent || item.partialPercent || 0,
     partialDate: meta.partialDate || item.partialDate || ''
@@ -3493,12 +3568,14 @@ function rebuildLegacyPartial(jobId) {
     const collapseMilestones = () => {
       const out = [];
       const byLabel = new Map();
+      const basis = _milestoneBasis(job);
       (job.milestones || []).forEach(item => {
-        if (!item?.partialState) { out.push({ ...item, partialGroupId: '', partialParentLabel: '', partialParentPct: 0, partialMode: '', partialPercent: 0 }); return; }
+        if (!item?.partialState) { out.push({ ...item, partialGroupId: '', partialParentLabel: '', partialParentPct: 0, partialParentAmount: 0, partialMode: '', partialPercent: 0 }); return; }
         const key = String(item.partialParentLabel || item.label || 'Milestone');
-        if (!byLabel.has(key)) byLabel.set(key, { ...item, id: uid(), label: key, pct: 0, status: 'pending', partialState: '', partialGroupId: '', partialParentLabel: '', partialParentPct: 0, partialMode: '', partialPercent: 0 });
+        if (!byLabel.has(key)) byLabel.set(key, { ...item, id: uid(), label: key, pct: 0, amount: basis === 'amount' ? 0 : item.amount, status: 'pending', partialState: '', partialGroupId: '', partialParentLabel: '', partialParentPct: 0, partialParentAmount: 0, partialMode: '', partialPercent: 0 });
         const g = byLabel.get(key);
         g.pct = _roundPct((g.pct || 0) + (item.pct || 0));
+        if (basis === 'amount') g.amount = _roundMoney((g.amount || 0) + Number(item.amount || 0));
       });
       byLabel.forEach(v => out.push(v));
       return out;
@@ -3567,7 +3644,39 @@ function cycleHourlyStatus(jobId) {
 }
 function toggleComplete(id) {
   const j = state.jobs.find(j=>j.id===id);
-  if (j) { j.status = j.status==='complete'?'active':'complete'; save(); renderJobs(); }
+  if (!j) return;
+  if (j.status === 'complete') {
+    j.status = 'active';
+  } else {
+    const c = calcJob(j);
+    if (!_jobWorkCompleted(j) || c.outstanding > 0.005 || c.potentialEmpBalance > 0.005) {
+      showAlert('This job can only be completed when the work, client balance, and employee pay are all complete.');
+      return;
+    }
+    j.status = 'complete';
+  }
+  save();
+  renderJobs();
+}
+function toggleJobWorkCompleted(id) {
+  if (!currentUser?.isAdmin) return;
+  const job = state.jobs.find(j => j.id === id);
+  if (!job || job.status === 'complete') return;
+  job.workCompleted = !_jobWorkCompleted(job);
+  save();
+  renderJobs();
+}
+function completeJob(id) {
+  const job = state.jobs.find(j => j.id === id);
+  if (!currentUser?.isAdmin || !job || job.status === 'complete') return;
+  const c = calcJob(job);
+  if (!_jobWorkCompleted(job) || c.outstanding > 0.005 || c.potentialEmpBalance > 0.005) {
+    showAlert('This job can only be completed when the work, client balance, and employee pay due are all complete.');
+    return;
+  }
+  job.status = 'complete';
+  save();
+  renderJobs();
 }
 function deleteJob(id) {
   showConfirm('Delete this job? This cannot be undone.', () => {
@@ -3749,6 +3858,9 @@ function populateEmpDropdown(selectId, wrapId, currentEmpId) {
   ).join('');
 }
 let milestoneMode = 'single';
+let milestoneValueMode = 'percent';
+let defaultMilestoneValueMode = 'percent';
+let jobWorkCompleted = true;
 let jobTypeMode = 'quoted';
 let jobSetupMode = 'unified';
 function refreshJobSetupButtons() {
@@ -3780,6 +3892,17 @@ function setJobSetupMode(mode) {
   toggleItemizedQuote();
   refreshJobSetupButtons();
 }
+function setJobWorkStatus(completed) {
+  jobWorkCompleted = !!completed;
+  const completeBtn = document.getElementById('f_work_complete');
+  const progressBtn = document.getElementById('f_work_progress');
+  if (completeBtn) completeBtn.className = `btn ${jobWorkCompleted ? 'btn-primary' : 'btn-ghost'} btn-sm`;
+  if (progressBtn) progressBtn.className = `btn ${jobWorkCompleted ? 'btn-ghost' : 'btn-primary'} btn-sm`;
+  const hint = document.getElementById('f_workStatusHint');
+  if (hint) hint.textContent = jobWorkCompleted
+    ? 'This job contributes to employee pay totals.'
+    : 'Employee pay is on hold until you turn it back on.';
+}
 function onJobTypeChange() {
   const type = document.getElementById('f_jobType')?.value || 'quoted';
   if (type === 'hourly') setJobSetupMode('hourly');
@@ -3801,23 +3924,55 @@ function setMilestoneMode(mode) {
   });
   const editor = document.getElementById('milestoneEditor');
   const hint   = document.getElementById('milestoneHint');
+  const valueToggle = document.getElementById('milestoneValueToggle');
   if (mode === 'single') {
     editor.style.display = 'none';
+    if (valueToggle) valueToggle.style.display = 'none';
     hint.textContent = 'Full invoice - one payment to track.';
     hint.style.display = '';
     document.getElementById('milestoneList').innerHTML = '';
     milestoneCount = 0;
   } else {
     editor.style.display = '';
+    if (valueToggle) valueToggle.style.display = 'flex';
     hint.style.display = 'none';
     document.getElementById('milestoneList').innerHTML = '';
     milestoneCount = 0;
     if (mode === 'default') {
-      dms.forEach(m => addMilestoneField(m.label, m.pct));
+      const basis = state.settings.defaultMilestoneBasis === 'amount' ? 'amount' : 'percent';
+      setMilestoneValueMode(basis);
+      dms.forEach(m => addMilestoneField(m.label, basis === 'amount' ? m.amount : m.pct, basis));
     } else {
       addMilestoneField();
     }
   }
+}
+function setMilestoneValueMode(mode) {
+  milestoneValueMode = mode === 'amount' ? 'amount' : 'percent';
+  ['percent', 'amount'].forEach(value => {
+    const btn = document.getElementById(`ms_basis_${value}`);
+    if (btn) btn.className = `btn ${milestoneValueMode === value ? 'btn-primary' : 'btn-ghost'} btn-sm`;
+  });
+  document.querySelectorAll('#milestoneList [id^="mpct_"]').forEach(el => {
+    el.placeholder = milestoneValueMode === 'amount' ? '$0.00' : '0';
+  });
+  updateMilestonePreview();
+}
+function setMilestoneMax(id) {
+  const targetEl = document.getElementById(`mpct_${id}`);
+  if (!targetEl) return;
+  const quote = document.getElementById('f_itemized')?.checked
+    ? [...document.querySelectorAll('[id^="qiamt_"]')].reduce((sum, el) => sum + (parseFloat(el.value) || 0), 0)
+    : (parseFloat(document.getElementById('f_quote')?.value) || 0);
+  const target = milestoneValueMode === 'amount'
+    ? quote
+    : 100;
+  let used = 0;
+  document.querySelectorAll('#milestoneList [id^="mpct_"]').forEach(el => {
+    if (el !== targetEl) used += parseFloat(el.value) || 0;
+  });
+  targetEl.value = String(Math.max(0, target - used).toFixed(2));
+  updateMilestonePreview();
 }
 function setJobFinancialEditLock(locked) {
   const note = document.getElementById('jobFinancialLockNote');
@@ -3841,6 +3996,7 @@ function setJobFinancialEditLock(locked) {
   document.querySelectorAll('#milestoneList input, #milestoneList button').forEach(el => {
     el.disabled = !!locked;
   });
+  document.querySelectorAll('#milestoneValueToggle button').forEach(el => { el.disabled = !!locked; });
 }
 
 function openNewJobModal() {
@@ -3853,8 +4009,10 @@ function openNewJobModal() {
   document.getElementById('f_date').value    = today();
   document.getElementById('f_itemized').checked = false;
   document.getElementById('f_jobType').value = 'quoted';
+  setJobWorkStatus(true);
   document.getElementById('quoteItemList').innerHTML = '';
   quoteItemCount = 0;
+  setMilestoneValueMode('percent');
   setJobSetupMode('unified');
   setMilestoneMode('single');
   populateEmpDropdown('f_emp', 'f_emp_wrap', null);
@@ -3878,18 +4036,25 @@ function editJob(id) {
   document.getElementById('f_date').value    = job.date||'';
   document.getElementById('f_itemized').checked = job.isItemized||false;
   document.getElementById('f_jobType').value = jobType;
+  setJobWorkStatus(_jobWorkCompleted(job));
   document.getElementById('quoteItemList').innerHTML = '';
   quoteItemCount = 0;
   if (job.isItemized && job.quoteItems?.length) {
     job.quoteItems.forEach(qi => addQuoteItemField(qi.label, qi.amount));
   }
   setJobSetupMode(jobType === 'hourly' ? 'hourly' : (job.isItemized ? 'itemized' : 'unified'));
+  milestoneValueMode = _milestoneBasis(job);
+  setMilestoneValueMode(milestoneValueMode);
   if (jobType === 'hourly') {
     milestoneMode = 'single';
     document.getElementById('milestoneList').innerHTML = '';
     milestoneCount = 0;
   } else {
-    const isSingle = job.milestones?.length === 1 && job.milestones[0].pct === 100;
+    const isSingle = job.milestones?.length === 1 && (
+      milestoneValueMode === 'amount'
+        ? Math.abs(Number(job.milestones[0].amount || 0) - Number(job.quote || 0)) < 0.005
+        : Math.abs(Number(job.milestones[0].pct || 0) - 100) < 0.01
+    );
     if (isSingle) {
       setMilestoneMode('single');
     } else {
@@ -3899,10 +4064,15 @@ function editJob(id) {
         if (btn) btn.className = `btn ${m === 'custom' ? 'btn-primary' : 'btn-ghost'} btn-sm`;
       });
       document.getElementById('milestoneEditor').style.display = '';
+      document.getElementById('milestoneValueToggle').style.display = 'flex';
       document.getElementById('milestoneHint').style.display = 'none';
       document.getElementById('milestoneList').innerHTML = '';
       milestoneCount = 0;
-      (job.milestones||[]).forEach(m => addMilestoneField(m.label, m.pct));
+      (job.milestones||[]).forEach(m => addMilestoneField(
+        m.label,
+        milestoneValueMode === 'amount' ? m.amount : m.pct,
+        milestoneValueMode
+      ));
     }
   }
   populateEmpDropdown('f_emp', 'f_emp_wrap', job.employeeId);
@@ -3910,14 +4080,41 @@ function editJob(id) {
   document.getElementById('jobModal').classList.remove('hidden');
 }
 let dmCount = 0;
-function addDmField(label='', pct='') {
+function setDefaultMilestoneBasis(mode) {
+  defaultMilestoneValueMode = mode === 'amount' ? 'amount' : 'percent';
+  ['percent', 'amount'].forEach(value => {
+    const btn = document.getElementById(`dm_basis_${value}`);
+    if (btn) btn.className = `btn ${defaultMilestoneValueMode === value ? 'btn-primary' : 'btn-ghost'} btn-sm`;
+  });
+  document.querySelectorAll('[id^="dmpct_"]').forEach(el => {
+    el.placeholder = defaultMilestoneValueMode === 'amount' ? '$0.00' : '0';
+    const maxBtn = el.closest('.milestone-row')?.querySelector('[data-default-max]');
+    if (maxBtn) maxBtn.style.display = defaultMilestoneValueMode === 'percent' ? '' : 'none';
+  });
+  updateDmPreview();
+}
+function setDefaultMilestoneMax(id) {
+  const targetEl = document.getElementById(`dmpct_${id}`);
+  if (!targetEl) return;
+  let used = 0;
+  document.querySelectorAll('[id^="dmpct_"]').forEach(el => {
+    if (el !== targetEl) used += parseFloat(el.value) || 0;
+  });
+  targetEl.value = String(Math.max(0, 100 - used).toFixed(2));
+  updateDmPreview();
+}
+function addDmField(label='', value='', basis = null) {
+  const valueMode = basis === 'amount' || basis === 'percent'
+    ? basis
+    : defaultMilestoneValueMode;
   dmCount++;
   const id = dmCount;
   const div = document.createElement('div');
   div.className = 'milestone-row'; div.id = `dmrow_${id}`;
   div.innerHTML = `
     <input class="form-input" placeholder="Label" value="${label}" id="dmlabel_${id}" style="flex:2" />
-    <input class="form-input" placeholder="%" type="number" value="${pct}" id="dmpct_${id}" style="flex:1;max-width:80px" oninput="updateDmPreview()" />
+    <input class="form-input" placeholder="${valueMode === 'amount' ? '$0.00' : '0'}" type="number" step="0.01" min="0" value="${value}" id="dmpct_${id}" style="flex:1;max-width:110px" oninput="updateDmPreview()" />
+    <button type="button" class="btn btn-ghost btn-sm" data-default-max style="display:${valueMode === 'percent' ? '' : 'none'}" onclick="setDefaultMilestoneMax(${id})">Max</button>
     <button class="btn btn-danger btn-sm btn-icon-only" onclick="document.getElementById('dmrow_${id}').remove();updateDmPreview()" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>`;
   document.getElementById('dmList').appendChild(div);
   updateDmPreview();
@@ -3926,16 +4123,21 @@ function updateDmPreview() {
   let total = 0;
   document.querySelectorAll('[id^="dmpct_"]').forEach(el => { total += parseFloat(el.value) || 0; });
   const err = document.getElementById('dmError');
-  if (err) err.textContent = (total > 0 && Math.abs(total - 100) > 0.01) ? `Total: ${total}%` : '';
+  const basis = defaultMilestoneValueMode;
+  if (err) err.textContent = total > 0 && basis === 'percent' && Math.abs(total - 100) > 0.01
+    ? `Total: ${total}%`
+    : basis === 'amount' && total > 0 ? `Total: ${fmt(total)}` : '';
 }
-function addMilestoneField(label='', pct='') {
+function addMilestoneField(label='', value='', basis = null) {
+  const valueMode = basis === 'amount' || basis === 'percent' ? basis : milestoneValueMode;
   milestoneCount++;
   const id = milestoneCount;
   const div = document.createElement('div');
   div.className = 'milestone-row'; div.id = `mrow_${id}`;
   div.innerHTML = `
     <input class="form-input" placeholder="Label" value="${label}" id="mlabel_${id}" style="flex:2" />
-    <input class="form-input" placeholder="%" type="number" value="${pct}" id="mpct_${id}" style="flex:1;max-width:80px" oninput="updateMilestonePreview()" />
+    <input class="form-input" placeholder="${valueMode === 'amount' ? '$0.00' : '0'}" type="number" step="0.01" min="0" value="${value}" id="mpct_${id}" style="flex:1;max-width:110px" oninput="updateMilestonePreview()" />
+    <button type="button" class="btn btn-ghost btn-sm" onclick="setMilestoneMax(${id})">Max</button>
     <button class="btn btn-danger btn-sm btn-icon-only" onclick="document.getElementById('mrow_${id}').remove();updateMilestonePreview()" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>`;
   document.getElementById('milestoneList').appendChild(div);
   updateMilestonePreview();
@@ -3944,7 +4146,10 @@ function updateMilestonePreview() {
   let total=0;
   document.querySelectorAll('[id^="mpct_"]').forEach(el=>{total+=parseFloat(el.value)||0;});
   const err = document.getElementById('milestoneError');
-  err.textContent = (Math.abs(total-100)>0.01&&total>0) ? `Milestones total ${total}% - must equal 100%` : '';
+  const quote = parseFloat(document.getElementById('f_quote')?.value) || 0;
+  err.textContent = milestoneValueMode === 'percent'
+    ? ((Math.abs(total - 100) > 0.01 && total > 0) ? `Milestones total ${total}% - must equal 100%` : '')
+    : ((Math.abs(total - quote) > 0.01 && total > 0) ? `Milestones total ${fmt(total)} - must equal ${fmt(quote)}` : '');
 }
 function toggleItemizedQuote() {
   const on = document.getElementById('f_itemized').checked;
@@ -3983,7 +4188,11 @@ function hasPartialFinancialState(job) {
   return false;
 }
 function financialSignatureFromMilestones(list) {
-  return JSON.stringify((list || []).map(m => ({ label: String(m?.label || ''), pct: Number(m?.pct || 0) })));
+  return JSON.stringify((list || []).map(m => ({
+    label: String(m?.label || ''),
+    pct: Number(m?.pct || 0),
+    amount: _roundMoney(Number(m?.amount || 0))
+  })));
 }
 function financialSignatureFromQuoteItems(list) {
   return JSON.stringify((list || []).map(q => ({ label: String(q?.label || ''), amount: _roundMoney(Number(q?.amount || 0)) })));
@@ -3998,6 +4207,7 @@ function saveJob() {
   const isHourly    = jobType === 'hourly';
   const hourlyRate  = _roundMoney(parseFloat(document.getElementById('f_hourlyRate')?.value) || 0);
   const isItemized  = !isHourly && document.getElementById('f_itemized').checked;
+  const milestoneBasis = !isHourly && milestoneValueMode === 'amount' ? 'amount' : 'percent';
   if (!name) { showAlert('Please enter a client name.'); return; }
   let quote = 0, quoteItems = [];
   if (isHourly) {
@@ -4022,15 +4232,28 @@ function saveJob() {
     const prevStatus = editingJobId
       ? (state.jobs.find(j=>j.id===editingJobId)?.milestones?.[0]?.status || 'pending')
       : 'pending';
-    milestones.push({ label:'Invoice', pct:100, status: prevStatus });
+    milestones.push(milestoneBasis === 'amount'
+      ? { label:'Invoice', amount:_roundMoney(quote), status:prevStatus }
+      : { label:'Invoice', pct:100, status:prevStatus });
   } else {
     document.querySelectorAll('[id^="mpct_"]').forEach((el,i)=>{
-      const pct = parseFloat(el.value)||0;
+      const value = parseFloat(el.value)||0;
       const mId = el.id.slice('mpct_'.length);
       const lbl = document.getElementById(`mlabel_${mId}`)?.value||`Milestone ${i+1}`;
-      milestones.push({label:lbl,pct,status:'pending'}); total+=pct;
+      if (milestoneBasis === 'amount') {
+        milestones.push({ label:lbl, amount:_roundMoney(value), status:'pending' });
+      } else {
+        milestones.push({ label:lbl, pct:_roundPct(value), status:'pending' });
+      }
+      total += value;
     });
-    if (milestones.length&&Math.abs(total-100)>0.01) { showAlert(`Milestone percentages add up to ${total}%, not 100%.`); return; }
+    const expected = milestoneBasis === 'amount' ? quote : 100;
+    if (milestones.length && Math.abs(total - expected) > 0.01) {
+      showAlert(milestoneBasis === 'amount'
+        ? `Milestone dollar amounts add up to ${fmt(total)}, not ${fmt(quote)}.`
+        : `Milestone percentages add up to ${total}%, not 100%.`);
+      return;
+    }
   }
   const isNew = !editingJobId;
   const originalName = editingJobId ? (state.jobs.find(j=>j.id===editingJobId)?.name || '') : '';
@@ -4045,10 +4268,11 @@ function saveJob() {
       if (partialLocked) {
         const typeChanged = _jobType(job) !== jobType;
         const milestoneChanged = !isHourly && (financialSignatureFromMilestones(milestones) !== financialSignatureFromMilestones(job.milestones || []));
+        const milestoneBasisChanged = !isHourly && milestoneBasis !== _milestoneBasis(job);
         const quoteChanged = !isHourly && (_roundMoney(Number(quote || 0)) !== _roundMoney(Number(job.quote || 0)));
         const itemizedChanged = !isHourly && (!!isItemized !== !!job.isItemized);
         const quoteItemsChanged = !isHourly && (financialSignatureFromQuoteItems(quoteItems) !== financialSignatureFromQuoteItems(job.quoteItems || []));
-        if (typeChanged || milestoneChanged || quoteChanged || itemizedChanged || quoteItemsChanged) {
+        if (typeChanged || milestoneChanged || milestoneBasisChanged || quoteChanged || itemizedChanged || quoteItemsChanged) {
           showAlert('This job has revenue-collection history. Job type, quote, and payment structure edits are locked here to protect split calculations. Use Revenue > Collections (Edit/Delete) first.');
           return;
         }
@@ -4059,12 +4283,14 @@ function saveJob() {
       if (employeeId) job.employeeId = employeeId;
       job.jobType = jobType;
       job.hourlyRate = hourlyRate;
+      job.workCompleted = jobWorkCompleted;
       if (!partialLocked) {
         job.quote = quote;
         job.isItemized = isItemized;
         job.quoteItems = quoteItems;
         if (!isHourly) milestones.forEach((m,i)=>{ if(job.milestones[i]) m.status=job.milestones[i].status||'pending'; });
         job.milestones = milestones;
+        job.milestoneBasis = milestoneBasis;
       }
     }
   } else {
@@ -4075,6 +4301,8 @@ function saveJob() {
     state.jobs.push({ id:newId, name, contactName, quote, date, isItemized, quoteItems, status:'active',
       milestones, addOns:[], subtractions:[], materials:[], advances:[], tips:[], fees:[], jobNotes:[], hours:[], partialCollections:[], repaymentMode:false,
       revenueItems:[], jobType, hourlyRate,
+      milestoneBasis,
+      workCompleted: jobWorkCompleted,
       hourlyStatus:'pending', hourlySquareInvoiceId:'',
       employeeId: employeeId || '' });
   }
@@ -4085,6 +4313,7 @@ function saveJob() {
 // ─── UNIFIED QUICK JOB MODAL ────────────────────────────────────────────────
 let unifiedLineCount = 0;
 let unifiedMilestoneCount = 0;
+let unifiedWorkCompleted = true;
 let unifiedNewClientMode = false;
 let unifiedClientAcIdx = -1;
 let unifiedEditJobId = null;
@@ -4119,6 +4348,18 @@ function _unifiedEmployeeId() {
 
 function _unifiedEmployeeName() {
   return getEmp(_unifiedEmployeeId())?.name || 'Employee';
+}
+
+function setUnifiedWorkStatus(completed) {
+  unifiedWorkCompleted = !!completed;
+  const completeBtn = document.getElementById('uj_work_complete');
+  const progressBtn = document.getElementById('uj_work_progress');
+  if (completeBtn) completeBtn.className = `btn ${unifiedWorkCompleted ? 'btn-primary' : 'btn-ghost'} btn-sm`;
+  if (progressBtn) progressBtn.className = `btn ${unifiedWorkCompleted ? 'btn-ghost' : 'btn-primary'} btn-sm`;
+  const hint = document.getElementById('uj_workStatusHint');
+  if (hint) hint.textContent = unifiedWorkCompleted
+    ? 'This job contributes to employee pay totals.'
+    : 'Employee pay is on hold until you turn it back on.';
 }
 
 function _unifiedItemHasFinancialHistory(item) {
@@ -4259,7 +4500,7 @@ function applyUnifiedEditLock() {
   const locked = unifiedEditFinancialLocked;
   const job = unifiedEditJobId ? state.jobs.find(item => item.id === unifiedEditJobId) : null;
   const protectedHourly = locked && _jobType(job) === 'hourly';
-  document.querySelectorAll('#uj_clientName, #uj_newClientBtn, #uj_date, #uj_emp, #uj_paymentMode').forEach(el => { el.disabled = locked; });
+  document.querySelectorAll('#uj_clientName, #uj_newClientBtn, #uj_date, #uj_emp, #uj_paymentMode, #uj_milestoneBasisToggle button').forEach(el => { el.disabled = locked; });
   document.querySelectorAll('#uj_milestoneList input, #uj_milestoneList button, #uj_milestoneEditor > button').forEach(el => { el.disabled = locked; });
 
   document.querySelectorAll('#uj_lineList .unified-line-row').forEach(row => {
@@ -4347,6 +4588,8 @@ function openUnifiedJobModal(jobId = null) {
   }
   updateUnifiedNewClientButtonState();
   document.getElementById('uj_contactName').value = job?.contactName || '';
+  unifiedWorkCompleted = job ? _jobWorkCompleted(job) : true;
+  setUnifiedWorkStatus(unifiedWorkCompleted);
   document.getElementById('uj_date').value = job?.date || today();
   const primaryNote = _unifiedPrimaryNote(job);
   unifiedEditPrimaryNoteId = primaryNote?.id || '';
@@ -4354,6 +4597,7 @@ function openUnifiedJobModal(jobId = null) {
   document.getElementById('uj_lineList').innerHTML = '';
   document.getElementById('uj_milestoneList').innerHTML = '';
   document.getElementById('uj_paymentMode').value = 'single';
+  unifiedMilestoneValueMode = job ? _milestoneBasis(job) : (state.settings.defaultMilestoneBasis === 'amount' ? 'amount' : 'percent');
   populateEmpDropdown('uj_emp', 'uj_emp_wrap', job?.employeeId || null);
   const linePresets = job ? _unifiedEditLinePresets(job) : [];
   if (linePresets.length) linePresets.forEach(line => addUnifiedLine(line.type, line));
@@ -4362,6 +4606,7 @@ function openUnifiedJobModal(jobId = null) {
   const milestoneSource = _unifiedMilestoneSource(job);
   const paymentMode = job && milestoneSource.length > 1 ? 'custom' : 'single';
   document.getElementById('uj_paymentMode').value = paymentMode;
+  setUnifiedMilestoneBasis(unifiedMilestoneValueMode);
   setUnifiedPaymentMode(paymentMode, milestoneSource);
   applyUnifiedEditLock();
   document.getElementById('unifiedJobModal').classList.remove('hidden');
@@ -4623,7 +4868,48 @@ function navigateUnifiedClientAC(e) {
   items.forEach((el, i) => el.classList.toggle('ac-active', i === unifiedClientAcIdx));
 }
 
-function addUnifiedMilestoneField(label = '', pct = '', preset = {}) {
+let unifiedMilestoneValueMode = 'percent';
+function _unifiedMilestoneBasis() {
+  return unifiedMilestoneValueMode;
+}
+
+function _unifiedMilestoneTarget() {
+  return _roundMoney(readUnifiedLines()
+    .filter(line => line.type === 'fixed' && !line.unifiedAddition)
+    .reduce((sum, line) => sum + Number(line.amount || 0), 0));
+}
+
+function setUnifiedMilestoneBasis(mode) {
+  const basis = mode === 'amount' ? 'amount' : 'percent';
+  unifiedMilestoneValueMode = basis;
+  ['percent', 'amount'].forEach(value => {
+    const btn = document.getElementById(`uj_basis_${value}`);
+    if (btn) btn.className = `btn ${basis === value ? 'btn-primary' : 'btn-ghost'} btn-sm`;
+  });
+  const paymentMode = document.getElementById('uj_paymentMode')?.value || 'single';
+  const hint = document.getElementById('uj_paymentHint');
+  if (hint && paymentMode === 'custom') {
+    hint.textContent = basis === 'amount' ? 'Dollar milestones must add up to the fixed quote.' : 'Percent milestones must add up to 100%.';
+  }
+  document.querySelectorAll('#uj_milestoneList [id^="uj_mlpct_"]').forEach(el => {
+    el.placeholder = basis === 'amount' ? '$0.00' : '0';
+  });
+  updateUnifiedMilestonePreview();
+}
+function setUnifiedMilestoneMax(id) {
+  const targetEl = document.getElementById(`uj_mlpct_${id}`);
+  if (!targetEl) return;
+  const target = _unifiedMilestoneBasis() === 'amount' ? _unifiedMilestoneTarget() : 100;
+  let used = 0;
+  document.querySelectorAll('#uj_milestoneList [id^="uj_mlpct_"]').forEach(el => {
+    if (el !== targetEl) used += parseFloat(el.value) || 0;
+  });
+  targetEl.value = String(Math.max(0, target - used).toFixed(2));
+  updateUnifiedMilestonePreview();
+}
+
+function addUnifiedMilestoneField(label = '', value = '', preset = {}, basis = null) {
+  const valueMode = basis === 'amount' || basis === 'percent' ? basis : _unifiedMilestoneBasis();
   unifiedMilestoneCount++;
   const id = unifiedMilestoneCount;
   const div = document.createElement('div');
@@ -4632,7 +4918,8 @@ function addUnifiedMilestoneField(label = '', pct = '', preset = {}) {
   div._preset = { ...preset };
   div.innerHTML = `
     <input class="form-input" placeholder="Label" value="${_unifiedAttr(label)}" id="uj_mllabel_${id}" style="flex:2" />
-    <input class="form-input" placeholder="%" type="number" min="0" value="${_unifiedAttr(pct)}" id="uj_mlpct_${id}" style="flex:1;max-width:80px" oninput="updateUnifiedMilestonePreview()" />
+    <input class="form-input" placeholder="${valueMode === 'amount' ? '$0.00' : '0'}" type="number" min="0" step="0.01" value="${_unifiedAttr(value)}" id="uj_mlpct_${id}" style="flex:1;max-width:110px" oninput="updateUnifiedMilestonePreview()" />
+    <button type="button" class="btn btn-ghost btn-sm" onclick="setUnifiedMilestoneMax(${id})">Max</button>
     <button type="button" class="btn btn-danger btn-sm btn-icon-only" onclick="document.getElementById('uj_mrow_${id}').remove();updateUnifiedMilestonePreview()" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>`;
   document.getElementById('uj_milestoneList').appendChild(div);
   updateUnifiedMilestonePreview();
@@ -4642,7 +4929,11 @@ function updateUnifiedMilestonePreview() {
   let total = 0;
   document.querySelectorAll('#uj_milestoneList [id^="uj_mlpct_"]').forEach(el => { total += parseFloat(el.value) || 0; });
   const err = document.getElementById('uj_milestoneError');
-  if (err) err.textContent = total > 0 && Math.abs(total - 100) > 0.01 ? `Milestones total ${total}%, must equal 100%.` : '';
+  const basis = _unifiedMilestoneBasis();
+  const target = basis === 'amount' ? _unifiedMilestoneTarget() : 100;
+  if (err) err.textContent = total > 0 && Math.abs(total - target) > 0.01
+    ? basis === 'amount' ? `Milestones total ${fmt(total)}, must equal ${fmt(target)}.` : `Milestones total ${total}%, must equal 100%.`
+    : '';
 }
 
 function setUnifiedPaymentMode(mode, editMilestones = null) {
@@ -4655,7 +4946,9 @@ function setUnifiedPaymentMode(mode, editMilestones = null) {
   const editor = document.getElementById('uj_milestoneEditor');
   const hint = document.getElementById('uj_paymentHint');
   const list = document.getElementById('uj_milestoneList');
+  const basisToggle = document.getElementById('uj_milestoneBasisToggle');
   if (!editor || !hint || !list) return;
+  if (basisToggle) basisToggle.style.display = mode === 'single' ? 'none' : 'flex';
   list.innerHTML = '';
   unifiedMilestoneCount = 0;
   if (mode === 'single') {
@@ -4664,18 +4957,28 @@ function setUnifiedPaymentMode(mode, editMilestones = null) {
     return;
   }
   editor.style.display = '';
-  hint.textContent = mode === 'default' ? 'Using the saved milestone template.' : 'Milestones must add up to 100%.';
-  if (Array.isArray(editMilestones)) editMilestones.forEach(m => addUnifiedMilestoneField(m.label, m.pct, m));
-  else if (mode === 'default') dms.forEach(m => addUnifiedMilestoneField(m.label, m.pct));
+  const basis = _unifiedMilestoneBasis();
+  hint.textContent = mode === 'default'
+    ? 'Using the saved milestone template.'
+    : basis === 'amount' ? 'Dollar milestones must add up to the fixed quote.' : 'Percent milestones must add up to 100%.';
+  if (Array.isArray(editMilestones)) editMilestones.forEach(m => addUnifiedMilestoneField(m.label, basis === 'amount' ? m.amount : m.pct, m, basis));
+  else if (mode === 'default') {
+    const defaultBasis = state.settings.defaultMilestoneBasis === 'amount' ? 'amount' : 'percent';
+    setUnifiedMilestoneBasis(defaultBasis);
+    dms.forEach(m => addUnifiedMilestoneField(m.label, defaultBasis === 'amount' ? m.amount : m.pct, {}, defaultBasis));
+  }
   else addUnifiedMilestoneField();
   applyUnifiedEditLock();
 }
 
 function _readUnifiedMilestones(existing = null) {
   const mode = document.getElementById('uj_paymentMode')?.value || 'single';
+  const basis = _unifiedMilestoneBasis();
   if (mode === 'single') {
     const prior = Array.isArray(existing) && existing.length === 1 ? existing[0] : null;
-    return [{ ...(prior ? JSON.parse(JSON.stringify(prior)) : {}), id:prior?.id || uid(), label:'Invoice', pct:100, status:prior?.status || 'pending' }];
+    return [{ ...(prior ? JSON.parse(JSON.stringify(prior)) : {}), id:prior?.id || uid(), label:'Invoice',
+      ...(basis === 'amount' ? { amount:_unifiedMilestoneTarget(), pct:100 } : { pct:100 }),
+      status:prior?.status || 'pending' }];
   }
   const milestones = [];
   let total = 0;
@@ -4683,13 +4986,20 @@ function _readUnifiedMilestones(existing = null) {
     const id = el.id.slice('uj_mlpct_'.length);
     const row = el.closest('.milestone-row');
     const preset = row?._preset || {};
-    const pct = _roundPct(parseFloat(el.value) || 0);
+    const value = parseFloat(el.value) || 0;
     const label = document.getElementById(`uj_mllabel_${id}`)?.value.trim() || `Milestone ${i + 1}`;
-    if (pct > 0) milestones.push({ ...preset, id:preset.id || uid(), label, pct, status:preset.status || 'pending' });
-    total += pct;
+    if (value > 0) {
+      milestones.push({ ...preset, id:preset.id || uid(), label,
+        ...(basis === 'amount' ? { amount:_roundMoney(value), pct:100 * value / Math.max(0.01, _unifiedMilestoneTarget()) } : { pct:_roundPct(value) }),
+        status:preset.status || 'pending' });
+    }
+    total += value;
   });
-  if (!milestones.length || Math.abs(total - 100) > 0.01) {
-    showAlert(`Milestone percentages add up to ${total}%, not 100%.`);
+  const target = basis === 'amount' ? _unifiedMilestoneTarget() : 100;
+  if (!milestones.length || Math.abs(total - target) > 0.01) {
+    showAlert(basis === 'amount'
+      ? `Milestone dollar amounts add up to ${fmt(total)}, not ${fmt(target)}.`
+      : `Milestone percentages add up to ${total}%, not 100%.`);
     return null;
   }
   return milestones;
@@ -5052,7 +5362,9 @@ async function saveUnifiedJob() {
   const notes = document.getElementById('uj_notes').value.trim();
   if (editingJob && unifiedEditFinancialLocked) {
     const idx = state.jobs.findIndex(item => item.id === editingJob.id);
-    state.jobs[idx] = _applyUnifiedProtectedEdits(editingJob, lines, { contactName, date, notes });
+    const next = _applyUnifiedProtectedEdits(editingJob, lines, { contactName, date, notes });
+    next.workCompleted = unifiedWorkCompleted;
+    state.jobs[idx] = next;
     await save();
     renderAll();
     unifiedEditJobId = null;
@@ -5104,6 +5416,8 @@ async function saveUnifiedJob() {
   job.isItemized = quoteItems.length > 0;
   job.quoteItems = quoteItems;
   job.milestones = milestones;
+  job.milestoneBasis = hourlyOnly ? 'percent' : _unifiedMilestoneBasis();
+  job.workCompleted = unifiedWorkCompleted;
   job.addOns = addOns;
   job.subtractions = subtractions;
   job.materials = materials;
@@ -5678,7 +5992,10 @@ function openSettings() {
   // Populate default milestones
   document.getElementById('dmList').innerHTML = '';
   dmCount = 0;
-  (state.settings.defaultMilestones || []).forEach(m => addDmField(m.label, m.pct));
+  const defaultBasis = state.settings.defaultMilestoneBasis === 'amount' ? 'amount' : 'percent';
+  defaultMilestoneValueMode = defaultBasis;
+  setDefaultMilestoneBasis(defaultBasis);
+  (state.settings.defaultMilestones || []).forEach(m => addDmField(m.label, defaultBasis === 'amount' ? m.amount : m.pct, defaultBasis));
   applyTheme();
   // Reset to Account tab
   settingsTab('employees', document.querySelector('#settingsModal .settings-nav-btn'));
@@ -5698,16 +6015,22 @@ function saveSettings() {
   state.settings.square.functionBaseUrl = (document.getElementById('s_squareBaseUrl').value || '').trim().replace(/\/+$/,'');
   state.settings.square.highValueConfirmAmount = parseFloat(document.getElementById('s_squareHighValue').value) || 1000;
   const defaultMilestones = []; let dmTotal = 0;
+  const defaultBasis = defaultMilestoneValueMode;
   document.querySelectorAll('[id^="dmpct_"]').forEach((el, i) => {
-    const pct = parseFloat(el.value) || 0;
+    const value = parseFloat(el.value) || 0;
     const dmId = el.id.slice('dmpct_'.length);
     const lbl = document.getElementById(`dmlabel_${dmId}`)?.value.trim() || `Milestone ${i+1}`;
-    defaultMilestones.push({ label: lbl, pct }); dmTotal += pct;
+    defaultMilestones.push(defaultBasis === 'amount' ? { label: lbl, amount:_roundMoney(value) } : { label: lbl, pct:_roundPct(value) });
+    dmTotal += value;
   });
-  if (defaultMilestones.length && Math.abs(dmTotal - 100) > 0.01) {
+  if (defaultMilestones.length && defaultBasis === 'percent' && Math.abs(dmTotal - 100) > 0.01) {
     showAlert(`Default milestones total ${dmTotal}% - must equal 100%.`); return;
   }
+  if (defaultMilestones.length && defaultBasis === 'amount' && dmTotal <= 0) {
+    showAlert('Default milestone dollar amounts must total more than $0.00.'); return;
+  }
   state.settings.defaultMilestones = defaultMilestones;
+  state.settings.defaultMilestoneBasis = defaultBasis;
   save(); renderAll(); closeModal('settingsModal');
 }
 
@@ -6838,6 +7161,83 @@ function formatPhone(p) {
   return p;
 }
 
+function jobsForClient(client) {
+  if (!client) return [];
+  return (state.jobs || []).filter(job => jobBelongsToClient(job, client))
+    .sort((a, b) => String(b.date || b.createdAt || '').localeCompare(String(a.date || a.createdAt || '')));
+}
+
+function jobBelongsToClient(job, client) {
+  if (!job || !client) return false;
+  if (job.clientId === client.id) return true;
+  if (job.clientId) return false;
+  const names = new Set(clientMatchNames(client).map(n => n.toLowerCase().trim()));
+  return names.has(String(job.name || '').toLowerCase().trim());
+}
+
+function clientJobHistorySection(client) {
+  const jobs = jobsForClient(client);
+  const rows = jobs.map(job => {
+    const c = calcJob(job);
+    const date = job.date ? (fmtDate(job.date) || job.date) : 'No date';
+    const status = job.status === 'complete' ? 'Completed' : 'In progress';
+    const balance = Math.abs(Number(c.outstanding || 0)) > 0.005
+      ? `Balance ${fmt(c.outstanding)}`
+      : 'Paid in full';
+    const pay = Number(c.potentialEmpBalance || 0) > 0.005 ? ` | Pay due ${fmt(c.potentialEmpBalance)}` : '';
+    return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;margin-bottom:5px">
+      <div style="min-width:0">
+        <div style="font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(job.name || 'Untitled job')}</div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:2px">${esc(date)} | ${status} | Total ${fmt(c.contractTotal)} | ${balance}${pay}</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" style="flex:none" onclick="event.stopPropagation();goToClientJob('${job.id}','${client.id}')">View</button>
+    </div>`;
+  }).join('');
+  const viewAll = jobs.length
+    ? `<button class="btn btn-ghost btn-sm" style="margin-top:3px" onclick="event.stopPropagation();goToClientJobs('${client.id}')">View all</button>`
+    : '';
+  return `<div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
+    <div style="font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--text3);margin-bottom:8px">Job history (${jobs.length})</div>
+    ${rows || '<div style="color:var(--text3);font-size:13px">No jobs recorded for this client.</div>'}
+    ${viewAll}
+  </div>`;
+}
+
+function setAllJobsFilter(clientId, jobId = null) {
+  const client = clientById(clientId);
+  if (!client) return;
+  allJobsClientFilterId = client.id;
+  allJobsJobFilterId = jobId || null;
+  expandedJobs.clear();
+  if (jobId) expandedJobs.add(jobId);
+  saveExpandedState();
+  goToTab('all');
+  renderJobs();
+  setTimeout(() => {
+    if (jobId) document.getElementById(`job_${jobId}`)?.scrollIntoView({ behavior:'smooth', block:'center' });
+  }, 80);
+}
+
+function goToClientJob(jobId, clientId) {
+  closeModal('clientQuickModal');
+  closeModal('clientDetailModal');
+  setAllJobsFilter(clientId, jobId);
+}
+
+function goToClientJobs(clientId) {
+  closeModal('clientQuickModal');
+  closeModal('clientDetailModal');
+  setAllJobsFilter(clientId);
+}
+
+function clearAllJobsFilter() {
+  allJobsClientFilterId = null;
+  allJobsJobFilterId = null;
+  expandedJobs.clear();
+  saveExpandedState();
+  renderJobs();
+}
+
 function renderClients() {
   if (!document.getElementById('tab-clients').classList.contains('active')) return;
   const clients = state.clients || [];
@@ -6927,6 +7327,7 @@ function renderClients() {
                       ${notesInlineHtml}
                     </div>`;
                   })()}
+                  ${clientJobHistorySection(c)}
                   <div style="display:flex;gap:8px;margin-top:8px;padding-top:10px;border-top:1px solid var(--border)">
                     <button class="btn btn-ghost btn-sm admin-only job-icon-btn" onclick="event.stopPropagation();openClientDetail('${c.id}')" title="Edit client" aria-label="Edit client">${jobIconSvg('edit')}</button>
                     <button class="btn btn-ghost btn-sm employee-only" onclick="event.stopPropagation();openClientDetail('${c.id}')">Notes</button>
@@ -6996,6 +7397,7 @@ function _renderClientDetailModal(c) {
         <button class="btn btn-ghost btn-sm" style="align-self:flex-end" onclick="addClientNote()">Add</button>
       </div>
     </div>`;
+  const jobHistorySection = clientJobHistorySection(c);
   if (isAdmin) {
     document.getElementById('clientDetailBody').innerHTML = `
       ${sqBar}
@@ -7020,6 +7422,7 @@ function _renderClientDetailModal(c) {
       </div>
       <div class="form-group"><label class="form-label">Birthday</label><input class="form-input" id="cd_birthday" value="${esc(c.birthday||'')}" placeholder="e.g. 1985-06-15" style="max-width:160px" /></div>
       ${!clientDetailIsNew ? `<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-ghost btn-sm" onclick="syncClientToSquare('${id}')">Sync to Square API</button><button class="btn btn-ghost btn-sm" onclick="exportClientToSquare('${id}')">Export to Square CSV</button></div>` : ''}
+      ${jobHistorySection}
       ${notesSection}
     `;
   } else {
@@ -7042,6 +7445,7 @@ function _renderClientDetailModal(c) {
         ${ro('Zip', c.postal)}
       </div>
       <div style="margin-top:10px">${ro('Birthday', c.birthday)}</div>
+      ${jobHistorySection}
       ${notesSection}
     `;
   }
@@ -7435,9 +7839,11 @@ function openClientQuickById(id) {
       <div style="font-family:var(--mono);font-size:11px;color:var(--text3);margin-bottom:4px">${esc(n.authorName)} | ${fmtDate(n.date)}</div>
       <div style="color:var(--text2);font-size:13px;white-space:pre-wrap">${esc(n.text)}</div>
     </div>`).join('') : '<div style="color:var(--text3);font-size:13px">No notes.</div>';
+  const jobHistorySection = clientJobHistorySection(c);
   document.getElementById('cqBody').innerHTML = `
     ${sqParts ? `<div class="icon-inline" style="font-family:var(--mono);font-size:12px;color:var(--text3);padding:7px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;margin-bottom:12px">${jobIconSvg('chart')} ${sqParts}</div>` : ''}
     ${rows || '<div style="color:var(--text3);font-size:13px;margin-bottom:12px">No contact info on file.</div>'}
+    ${jobHistorySection}
     <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
       <div style="font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--text3);margin-bottom:8px">Notes</div>
       ${notesHtml}
