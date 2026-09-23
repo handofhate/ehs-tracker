@@ -794,7 +794,7 @@ function calcJob(job) {
   const workCompleted   = _jobWorkCompleted(job);
   const empTotalOwed    = workCompleted ? empProfit + empMats + tipsTotal : 0;
   const linkedDebtPaid  = (state.debtPayments||[]).filter(p=>p.linkedJobId===job.id).reduce((s,p)=>s+(p.amount||0),0);
-  const empBalance      = workCompleted ? empTotalOwed - advancesPaid - linkedDebtPaid : 0;
+  const empBalance      = (workCompleted ? empTotalOwed : 0) - advancesPaid - linkedDebtPaid;
   const outstanding     = contractTotal - collectedGross;
   const projectedGross  = collectedGross + pendingGross;
   const projectedTxns   = collectedTxns + pendingTxns;
@@ -802,7 +802,7 @@ function calcJob(job) {
   const projectedNetRevenue = projectedGross - projectedFees;
   const projectedProfitPool = Math.max(0, projectedNetRevenue - totalMats);
   const potentialEmpTotalOwed = workCompleted ? projectedProfitPool * effectiveEmpShare + empMats + tipsTotal : 0;
-  const potentialEmpBalance   = workCompleted ? potentialEmpTotalOwed - advancesPaid - linkedDebtPaid : 0;
+  const potentialEmpBalance   = (workCompleted ? potentialEmpTotalOwed : 0) - advancesPaid - linkedDebtPaid;
   const potentialOwnerProfit  = projectedProfitPool * effectiveOwnerShare;
   const potentialOwnerTotal   = potentialOwnerProfit + ownerMats;
   const potentialDebtContribution = job.repaymentMode
@@ -1249,7 +1249,9 @@ function renderSummary() {
     const empJobs = state.jobs.filter(j => j.employeeId === emp.id && j.status !== 'complete');
     const empHWAll = (state.homewatch||[]).filter(hw => hw.employeeId === emp.id);
     const empHWActive = empHWAll.filter(hw => hw.status !== 'paused');
-    const jobBal = _roundMoney(empJobs.reduce((s,j) => s + calcJob(j).empBalance, 0));
+    const jobBalRaw = _roundMoney(empJobs.reduce((s,j) => s + calcJob(j).empBalance, 0));
+    const jobBal = Math.max(0, jobBalRaw);
+    const jobCredit = Math.max(0, -jobBalRaw);
     const hwBal = _roundMoney(empHWAll.reduce((s,hw) => s + calcHW(hw).empBalance, 0));
     // Potential row is incremental only so it can be safely combined with current owed rows.
     const potentialBal = _roundMoney(empJobs.reduce((s,j) => {
@@ -1274,6 +1276,7 @@ function renderSummary() {
             <span class="owed-toggle-thumb"></span>
           </button>
         </div>
+        ${jobCredit > 0.005 ? `<div class="owed-breakdown-row"><span class="owed-breakdown-label">Employee credit</span><span class="owed-breakdown-amount" style="color:var(--red)">-${fmt(jobCredit)}</span></div>` : ''}
         <div class="owed-breakdown-row">
           <span class="owed-breakdown-label">HomeWatch</span>
           <span class="owed-breakdown-amount">${fmt(hwBal)}</span>
@@ -1328,7 +1331,7 @@ function renderEmpSummary() {
   let tOwed = 0;
   active.forEach(j => { tOwed += calcJob(j).empBalance; });
   allHW.forEach(hw => { tOwed += calcHW(hw).empBalance; });
-  tOwed = _roundMoney(tOwed);
+  tOwed = Math.max(0, _roundMoney(tOwed));
 
   // Potential pay mirrors core calc functions:
   // start from current owed, then add only the active-items delta to potential balances.
@@ -1341,7 +1344,7 @@ function renderEmpSummary() {
     const c = calcHW(hw);
     tPotential += (c.potentialEmpBalance - c.empBalance);
   });
-  tPotential = _roundMoney(tPotential);
+  tPotential = Math.max(0, _roundMoney(tPotential));
 
   // Recent pay (all recorded employee payments within the selected timeframe)
   let cutoffStr = null;
@@ -1516,7 +1519,7 @@ function jobCard(job) {
                 <div class="job-emp-pay-row"><span>Tips earned</span><strong style="color:var(--green)">${fmt(c.tipsTotal)}</strong></div>
                 <div class="job-emp-pay-row"><span>Already paid</span><strong>${fmt(c.advancesPaid)}</strong></div>
                 ${c.linkedDebtPaid > 0 ? `<div class="job-emp-pay-row"><span>Applied to debt</span><strong>${fmt(c.linkedDebtPaid)}</strong></div>` : ''}
-                <div class="job-emp-pay-row current"><span>Currently owed</span><strong style="color:${employeePayBalance < 0 ? 'var(--red)' : 'var(--accent)'}">${fmt(employeePayBalance)}</strong></div>
+                <div class="job-emp-pay-row current"><span>${employeePayBalance < -0.005 ? 'Employee credit' : 'Currently owed'}</span><strong style="color:${employeePayBalance < 0 ? 'var(--red)' : 'var(--accent)'}">${fmt(employeePayBalance < -0.005 ? Math.abs(employeePayBalance) : employeePayBalance)}</strong></div>
               </div>
             </details>
           </div>
@@ -1960,6 +1963,7 @@ function jobDetail(job, c) {
   const ownerPct = Math.round((job.repaymentMode ? (state.settings.debtOwnerShare||0.5) : (1-empShare))*100);
   const empBalance = Number(c.potentialEmpBalance || 0);
   const empBalanceStatus = empBalance > 0.005 ? 'Still owed' : empBalance < -0.005 ? 'Overpaid by' : 'Paid in full';
+  const empHoldStatus = empBalance < -0.005 ? 'Employee credit' : 'Employee pay on hold';
   const employeeProjectedProfit = c.workCompleted
     ? _roundMoney(Number(c.potentialEmpTotalOwed || 0) - Number(c.empMats || 0) - Number(c.tipsTotal || 0))
     : 0;
@@ -2382,7 +2386,7 @@ function jobDetail(job, c) {
         <div>
           <div class="settlement-col-title">${admin ? `${en} (${empPct}%)` : `Your share (${empPct}%)`}</div>
           <div class="settlement-big ${empBalance>0?'orange':'green'}">${fmt(Math.abs(empBalance))}</div>
-          <div class="settlement-status">${c.workCompleted ? empBalanceStatus : 'Employee pay on hold'}</div>
+          <div class="settlement-status">${c.workCompleted ? empBalanceStatus : empHoldStatus}</div>
           <div class="settlement-breakdown-list">
             ${c.workCompleted ? `
               <div class="settlement-breakdown-row"><span>Profit share</span><strong>${fmt(employeeProjectedProfit)}</strong></div>
@@ -2391,7 +2395,9 @@ function jobDetail(job, c) {
               <div class="settlement-breakdown-row total"><span>Employee total owed</span><strong>${fmt(c.potentialEmpTotalOwed)}</strong></div>
               <div class="settlement-breakdown-row"><span>Paid out</span><strong>-${fmt(c.advancesPaid)}</strong></div>
               ${c.linkedDebtPaid>0?`<div class="settlement-breakdown-row"><span>Debt repayment</span><strong>-${fmt(c.linkedDebtPaid)}</strong></div>`:''}
-            ` : '<div style="color:var(--text3);font-size:13px;padding:4px 0">Employee pay will be calculated when the work is marked completed.</div>'}
+            ` : `<div style="color:var(--text3);font-size:13px;padding:4px 0">Employee pay will be calculated when the work is marked completed.</div>
+              ${c.advancesPaid > 0 ? `<div class="settlement-breakdown-row"><span>Paid out</span><strong>-${fmt(c.advancesPaid)}</strong></div>` : ''}
+              ${c.linkedDebtPaid > 0 ? `<div class="settlement-breakdown-row"><span>Debt repayment</span><strong>-${fmt(c.linkedDebtPaid)}</strong></div>` : ''}`}
           </div>
         </div>
       </div>
@@ -2833,13 +2839,13 @@ function maxAlloc(inputId, bal, potentialBal, allowAdvances) {
   };
   let target;
   if (!allowAdvances || Math.abs(potentialBal - bal) <= 0.005) {
-    target = capTarget(bal);
+    target = capTarget(Math.max(0, bal));
     if (btn) btn.dataset.step = '0';
   } else if (step === 0) {
-    target = capTarget(bal);
+    target = capTarget(Math.max(0, bal));
     if (btn) btn.dataset.step = '1';
   } else {
-    target = capTarget(potentialBal);
+    target = capTarget(Math.max(0, potentialBal));
     if (btn) btn.dataset.step = '0';
   }
   document.getElementById(inputId).value = Math.abs(target) > 0.005 ? target.toFixed(2) : '';
@@ -7184,7 +7190,9 @@ function clientJobHistorySection(client) {
     const balance = Math.abs(Number(c.outstanding || 0)) > 0.005
       ? `Balance ${fmt(c.outstanding)}`
       : 'Paid in full';
-    const pay = Number(c.potentialEmpBalance || 0) > 0.005 ? ` | Pay due ${fmt(c.potentialEmpBalance)}` : '';
+    const pay = Number(c.potentialEmpBalance || 0) > 0.005
+      ? ` | Pay due ${fmt(c.potentialEmpBalance)}`
+      : Number(c.potentialEmpBalance || 0) < -0.005 ? ` | Employee credit ${fmt(Math.abs(c.potentialEmpBalance))}` : '';
     return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;margin-bottom:5px">
       <div style="min-width:0">
         <div style="font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(job.name || 'Untitled job')}</div>
