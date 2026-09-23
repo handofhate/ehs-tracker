@@ -1248,46 +1248,32 @@ function renderSummary() {
   const empCardsHtml = employees.map(emp => {
     const empJobs = state.jobs.filter(j => j.employeeId === emp.id && j.status !== 'complete');
     const empHWAll = (state.homewatch||[]).filter(hw => hw.employeeId === emp.id);
-    const empHWActive = empHWAll.filter(hw => hw.status !== 'paused');
-    const jobBalRaw = _roundMoney(empJobs.reduce((s,j) => s + calcJob(j).empBalance, 0));
-    const jobBal = Math.max(0, jobBalRaw);
-    const jobCredit = Math.max(0, -jobBalRaw);
-    const hwBal = _roundMoney(empHWAll.reduce((s,hw) => s + calcHW(hw).empBalance, 0));
-    // Potential row is incremental only so it can be safely combined with current owed rows.
-    const potentialBal = _roundMoney(empJobs.reduce((s,j) => {
-      const c = calcJob(j);
-      return s + (c.potentialEmpBalance - c.empBalance);
-    }, 0) + empHWActive.reduce((s,hw) => {
-      const c = calcHW(hw);
-      return s + (c.potentialEmpBalance - c.empBalance);
-    }, 0));
+    // Employee pay is based on completed work, not on whether the client has
+    // paid yet. Use the projected employee balance for each item so pending
+    // client charges do not delay pay, while held-job advances remain credits.
+    const jobPay = _roundMoney(empJobs.reduce((s,j) => s + Math.max(0, calcJob(j).potentialEmpBalance), 0));
+    const jobCredit = _roundMoney(empJobs.reduce((s,j) => s + Math.max(0, -calcJob(j).potentialEmpBalance), 0));
+    const jobNet = _roundMoney(jobPay - jobCredit);
+    const hwBal = _roundMoney(empHWAll.reduce((s,hw) => s + calcHW(hw).potentialEmpBalance, 0));
     const total = _roundMoney(
-      (include.jobs ? jobBal : 0) +
-      (include.homewatch ? hwBal : 0) +
-      (include.potential ? potentialBal : 0));
+      (include.jobs ? jobNet : 0) +
+      (include.homewatch ? hwBal : 0));
     return `<div class="summary-card">
       <div class="summary-label">Owed to ${esc(emp.name)}</div>
       <div class="summary-value ${total < 0 ? 'red' : 'orange'}">${fmt(total)}</div>
       <div class="owed-breakdown">
         <div class="owed-breakdown-row">
           <span class="owed-breakdown-label">Jobs</span>
-          <span class="owed-breakdown-amount">${fmt(jobBal)}</span>
+          <span class="owed-breakdown-amount">${fmt(jobPay)}</span>
           <button type="button" class="owed-toggle${include.jobs ? ' on' : ''}" onclick="event.stopPropagation();toggleSummaryOwedInclude('jobs')" aria-pressed="${include.jobs ? 'true' : 'false'}" title="Include Jobs in total">
             <span class="owed-toggle-thumb"></span>
           </button>
         </div>
-        ${jobCredit > 0.005 ? `<div class="owed-breakdown-row"><span class="owed-breakdown-label">Employee credit</span><span class="owed-breakdown-amount" style="color:var(--red)">-${fmt(jobCredit)}</span></div>` : ''}
+        ${jobCredit > 0.005 ? `<div class="owed-breakdown-row"><span class="owed-breakdown-label">Advance</span><span class="owed-breakdown-amount" style="color:var(--red)">-${fmt(jobCredit)}</span></div>` : ''}
         <div class="owed-breakdown-row">
           <span class="owed-breakdown-label">HomeWatch</span>
           <span class="owed-breakdown-amount">${fmt(hwBal)}</span>
           <button type="button" class="owed-toggle${include.homewatch ? ' on' : ''}" onclick="event.stopPropagation();toggleSummaryOwedInclude('homewatch')" aria-pressed="${include.homewatch ? 'true' : 'false'}" title="Include HomeWatch in total">
-            <span class="owed-toggle-thumb"></span>
-          </button>
-        </div>
-        <div class="owed-breakdown-row">
-          <span class="owed-breakdown-label">Potential</span>
-          <span class="owed-breakdown-amount">${fmt(potentialBal)}</span>
-          <button type="button" class="owed-toggle${include.potential ? ' on' : ''}" onclick="event.stopPropagation();toggleSummaryOwedInclude('potential')" aria-pressed="${include.potential ? 'true' : 'false'}" title="Include Potential in total">
             <span class="owed-toggle-thumb"></span>
           </button>
         </div>
@@ -1304,15 +1290,9 @@ function renderSummary() {
 }
 
 function toggleSummaryOwedInclude(category) {
-  if (!['jobs', 'homewatch', 'potential'].includes(category)) return;
+  if (!['jobs', 'homewatch'].includes(category)) return;
   const include = normalizeOwedInclude(state.settings?.owedSummaryInclude);
   include[category] = !include[category];
-  if (category === 'potential' && include.potential && !include.jobs) {
-    include.jobs = true;
-  }
-  if (category === 'jobs' && !include.jobs && include.potential) {
-    include.potential = false;
-  }
   state.settings.owedSummaryInclude = include;
   save();
   renderSummary();
@@ -1329,22 +1309,9 @@ function renderEmpSummary() {
 
   // Employee pay is based on completed work, regardless of whether the client has paid yet.
   let tOwed = 0;
-  active.forEach(j => { tOwed += calcJob(j).empBalance; });
-  allHW.forEach(hw => { tOwed += calcHW(hw).empBalance; });
-  tOwed = Math.max(0, _roundMoney(tOwed));
-
-  // Potential pay mirrors core calc functions:
-  // start from current owed, then add only the active-items delta to potential balances.
-  let tPotential = tOwed;
-  active.forEach(j => {
-    const c = calcJob(j);
-    tPotential += (c.potentialEmpBalance - c.empBalance);
-  });
-  activeHW.forEach(hw => {
-    const c = calcHW(hw);
-    tPotential += (c.potentialEmpBalance - c.empBalance);
-  });
-  tPotential = Math.max(0, _roundMoney(tPotential));
+  active.forEach(j => { tOwed += calcJob(j).potentialEmpBalance; });
+  allHW.forEach(hw => { tOwed += calcHW(hw).potentialEmpBalance; });
+  tOwed = _roundMoney(tOwed);
 
   // Recent pay (all recorded employee payments within the selected timeframe)
   let cutoffStr = null;
@@ -1377,7 +1344,7 @@ function renderEmpSummary() {
       <div class="summary-value green">${fmt(tRecentPay)}</div>
       <div class="summary-sub">received</div>
     </div>
-    <div class="summary-card"><div class="summary-label">Currently Owed</div><div class="summary-value ${tPotential>0?'orange':tPotential<0?'red':'green'}">${fmt(tPotential)}</div><div class="summary-sub">from completed work</div></div>`;
+    <div class="summary-card"><div class="summary-label">Currently Owed</div><div class="summary-value ${tOwed>0?'orange':tOwed<0?'red':'green'}">${fmt(tOwed)}</div><div class="summary-sub">from completed work</div></div>`;
 }
 
 // ─── RENDER JOBS ─────────────────────────────────────────────────────────────
