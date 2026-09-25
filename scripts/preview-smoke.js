@@ -85,6 +85,7 @@ async function main() {
       await page.goto(`${baseUrl}/index.html`, { waitUntil: 'networkidle2', timeout: 30000 });
       await page.waitForFunction(() => window.TRACKER_BUILD?.mode === 'local-preview');
       await page.waitForFunction(() => !!window.Tracker2JobDomain);
+      await page.waitForFunction(() => !!window.Tracker2State);
       await page.waitForFunction(() => !!window.Tracker2Persistence);
       await page.waitForFunction(() => !!window.Tracker2History);
       await page.waitForFunction(() => !!window.Tracker2Financial);
@@ -113,6 +114,7 @@ async function main() {
           loginVisible: getComputedStyle(document.getElementById('loginOverlay')).display !== 'none',
           domainFunctions: ['validateJobDraft', 'buildCollections', 'buildMilestones', 'buildUnifiedJobRecord']
             .every(name => typeof domain[name] === 'function'),
+          stateModule: typeof window.Tracker2State.migrateState === 'function',
           persistenceModule: typeof window.Tracker2Persistence.createPersistenceBoundary === 'function',
           previewPersistence: window.Tracker2Persistence.createPersistenceBoundary({ mode: 'local-preview', writeState: () => {} }).isPreview,
           historyModule: typeof window.Tracker2History.buildClientHistory === 'function',
@@ -127,6 +129,7 @@ async function main() {
       assert.equal(result.bannerVisible, true);
       assert.equal(result.loginVisible, true);
       assert.equal(result.domainFunctions, true);
+      assert.equal(result.stateModule, true);
       assert.equal(result.persistenceModule, true);
       assert.equal(result.previewPersistence, true);
       assert.equal(result.historyModule, true);
