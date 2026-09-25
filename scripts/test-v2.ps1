@@ -10,6 +10,10 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'v2/job-domain.js syntax check failed.' }
   node --check v2/state-domain.js
   if ($LASTEXITCODE -ne 0) { throw 'v2/state-domain.js syntax check failed.' }
+  node --check v2/migration-audit.js
+  if ($LASTEXITCODE -ne 0) { throw 'v2/migration-audit.js syntax check failed.' }
+  node --check scripts/migration-audit.js
+  if ($LASTEXITCODE -ne 0) { throw 'scripts/migration-audit.js syntax check failed.' }
   node --check v2/persistence-domain.js
   if ($LASTEXITCODE -ne 0) { throw 'v2/persistence-domain.js syntax check failed.' }
   node --check v2/history-domain.js
@@ -41,6 +45,9 @@ try {
     'v2/job-domain.test.js',
     'v2/state-domain.js',
     'v2/state-domain.test.js',
+    'v2/migration-audit.js',
+    'v2/migration-audit.test.js',
+    'scripts/migration-audit.js',
     'v2/persistence-domain.js',
     'v2/persistence-domain.test.js',
     'v2/history-domain.js',
