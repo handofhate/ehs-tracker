@@ -42,6 +42,7 @@ This is the working plan for the Tracker 2.0 rebuild and cutover. Tracker 1.0 re
 - [x] Lock job fees and HomeWatch payment fees per record, backfill existing records from the unchanged current rate, and limit future fee-setting changes to new records.
 - [x] Verify all three user themes apply consistently and add browser smoke coverage for their state/class changes.
 - [x] Add code-level admin guards for global settings and employee/debt administration actions.
+- [x] Audit current manual payment and partial-payment behavior; prevent duplicate history entries, orphaned generated notes, and split-payout ledger drift without changing Square behavior.
 - [ ] Review Square, exports/imports, history, payments, employee pay, Homewatch, notes, filters, undo/redo, and settings for duplicated or obsolete behavior.
 - [ ] Review the UI for unnecessary controls, duplicated flows, confusing labels, stale terminology, layout cleanup, and responsive/accessibility issues.
 - [ ] Prioritize feature and UI changes by user value and risk, keeping financial and historical behavior covered by tests before implementation.
@@ -60,6 +61,7 @@ This is the working plan for the Tracker 2.0 rebuild and cutover. Tracker 1.0 re
 ## Codebase cleanup
 
 - [ ] Add browser-level regression coverage for the main job and client workflows.
+- [ ] Add automated browser regression coverage for manual payments, partial payments, generated-note cleanup, payout-ledger updates, and preview no-write behavior.
 - [ ] Split the large frontend into behavior-focused modules after the data model stabilizes.
 - [ ] Separate read models, calculations, persistence, and rendering so Tracker 2.0 changes do not require editing one monolithic file.
 - [ ] Review the full-state Firestore write model for conflict and accidental-overwrite risks.
