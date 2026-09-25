@@ -66,10 +66,19 @@ async function main() {
       const page = await browser.newPage();
       const pageErrors = [];
       const failedResponses = [];
+      const firestoreWriteRequests = [];
       page.on('pageerror', error => pageErrors.push(String(error)));
       page.on('response', response => {
         if (response.status() >= 400 && !response.url().endsWith('/favicon.ico')) {
           failedResponses.push(`${response.status()} ${response.url()}`);
+        }
+      });
+      page.on('request', request => {
+        const url = request.url();
+        const method = request.method();
+        if (url.includes('firestore.googleapis.com') &&
+            (method === 'PATCH' || method === 'DELETE' || /:(commit|batchWrite|rollback)\b/.test(url))) {
+          firestoreWriteRequests.push(`${method} ${url}`);
         }
       });
 
@@ -113,8 +122,136 @@ async function main() {
       assert.equal(result.domainFunctions, true);
       assert.equal(result.validationOk, true);
       assert.equal(result.milestoneOk, true);
+
+      const fixtureResult = await page.evaluate(() => {
+        const base = _cloneState(state);
+        const fixtureJob = {
+          id: 'browser-smoke-job',
+          name: 'Browser Test Client',
+          contactName: '',
+          clientId: 'browser-smoke-client',
+          contactClientId: '',
+          quote: 125,
+          date: '2026-01-01',
+          isItemized: true,
+          quoteItems: [{ id: 'browser-smoke-line', label: 'Initial work', description: 'Initial work', amount: 125 }],
+          milestones: [{ id: 'browser-smoke-milestone', label: 'Invoice', pct: 100, status: 'pending' }],
+          addOns: [],
+          subtractions: [],
+          materials: [],
+          workSummary: 'Initial work',
+          jobType: 'quoted',
+          hourlyRate: 0,
+          employeeId: 'browser-smoke-employee',
+          createdVia: 'unified-v2',
+          status: 'active',
+          advances: [],
+          tips: [],
+          fees: [],
+          jobNotes: [{
+            id: 'browser-smoke-note',
+            text: 'Original note',
+            date: '2026-01-01',
+            authorId: 'browser-smoke-admin',
+            authorName: 'Smoke Admin',
+            source: 'unified-job'
+          }],
+          hours: [],
+          partialCollections: [],
+          repaymentMode: false,
+          revenueItems: [],
+          hourlyStatus: 'pending',
+          hourlySquareInvoiceId: '',
+          workCompleted: true,
+          milestoneBasis: 'percent',
+          unifiedLines: [{
+            id: 'browser-smoke-line',
+            type: 'fixed',
+            label: 'Initial work',
+            description: 'Initial work',
+            amount: 125
+          }]
+        };
+        state = {
+          ...base,
+          settings: { ...base.settings, defaultMilestones: [], defaultMilestoneBasis: 'percent' },
+          users: [
+            { id: 'browser-smoke-admin', name: 'Smoke Admin', isAdmin: true },
+            { id: 'browser-smoke-employee', name: 'Smoke Employee', isAdmin: false, empShare: 0.66 }
+          ],
+          clients: [{ id: 'browser-smoke-client', firstName: 'Browser', surname: 'Test Client', email: '', phone: '' }],
+          jobs: [fixtureJob]
+        };
+        currentUser = { id: 'browser-smoke-admin', name: 'Smoke Admin', isAdmin: true };
+        document.getElementById('loginOverlay').style.display = 'none';
+        previewLatestServerState = _cloneState(state);
+        _lastSavedState = _cloneState(state);
+        previewDirty = false;
+        _clearPreviewHistory();
+        openUnifiedJobModal(fixtureJob.id);
+        return {
+          modalOpen: !document.getElementById('unifiedJobModal').classList.contains('hidden'),
+          clientName: document.getElementById('uj_clientName').value,
+          initialDescription: document.getElementById('uj_desc_1').value,
+          initialNote: document.getElementById('uj_notes').value
+        };
+      });
+
+      assert.deepEqual(fixtureResult, {
+        modalOpen: true,
+        clientName: 'Browser Test Client',
+        initialDescription: 'Initial work',
+        initialNote: 'Original note'
+      });
+
+      await page.$eval('#uj_desc_1', element => {
+        element.value = 'Temporary work';
+        element.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await page.$eval('#uj_notes', element => {
+        element.value = 'Temporary note';
+        element.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await page.click('#uj_saveBtn');
+      await page.waitForFunction(() => {
+        const job = state.jobs.find(item => item.id === 'browser-smoke-job');
+        return previewDirty &&
+          document.getElementById('unifiedJobModal').classList.contains('hidden') &&
+          job?.unifiedLines?.[0]?.description === 'Temporary work';
+      });
+
+      const changedResult = await page.evaluate(() => {
+        const job = state.jobs.find(item => item.id === 'browser-smoke-job');
+        return {
+          description: job.unifiedLines[0].description,
+          note: job.jobNotes[0].text,
+          dirty: previewDirty
+        };
+      });
+      assert.deepEqual(changedResult, { description: 'Temporary work', note: 'Temporary note', dirty: true });
+
+      await page.evaluate(() => discardPreviewChanges());
+      await page.waitForFunction(() => !document.getElementById('confirmModal').classList.contains('hidden'));
+      await page.click('#confirmModalOk');
+      await page.waitForFunction(() => {
+        const job = state.jobs.find(item => item.id === 'browser-smoke-job');
+        return !previewDirty &&
+          document.getElementById('confirmModal').classList.contains('hidden') &&
+          job?.unifiedLines?.[0]?.description === 'Initial work';
+      });
+
+      const discardedResult = await page.evaluate(() => {
+        const job = state.jobs.find(item => item.id === 'browser-smoke-job');
+        return {
+          description: job.unifiedLines[0].description,
+          note: job.jobNotes[0].text,
+          dirty: previewDirty
+        };
+      });
+      assert.deepEqual(discardedResult, { description: 'Initial work', note: 'Original note', dirty: false });
       assert.deepEqual(pageErrors, []);
       assert.deepEqual(failedResponses, []);
+      assert.deepEqual(firestoreWriteRequests, []);
 
       await page.reload({ waitUntil: 'networkidle2', timeout: 30000 });
       await page.waitForFunction(() => window.TRACKER_BUILD?.mode === 'local-preview');
