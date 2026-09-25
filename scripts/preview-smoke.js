@@ -88,6 +88,7 @@ async function main() {
       await page.waitForFunction(() => !!window.Tracker2State);
       await page.waitForFunction(() => !!window.Tracker2Persistence);
       await page.waitForFunction(() => !!window.Tracker2History);
+      await page.waitForFunction(() => !!window.Tracker2DebtFeature);
       await page.waitForFunction(() => !!window.Tracker2Financial);
       await page.waitForFunction(() => !!window.Tracker2Backup);
       await page.waitForFunction(() => document.body.innerText.includes('TRACKER 2.0 LOCAL PREVIEW'));
@@ -119,6 +120,7 @@ async function main() {
           persistenceModule: typeof window.Tracker2Persistence.createPersistenceBoundary === 'function',
           previewPersistence: window.Tracker2Persistence.createPersistenceBoundary({ mode: 'local-preview', writeState: () => {} }).isPreview,
           historyModule: typeof window.Tracker2History.buildClientHistory === 'function',
+          debtModule: typeof window.Tracker2DebtFeature.isActive === 'function',
           financialModule: typeof window.Tracker2Financial.calcJob === 'function',
           backupModule: typeof window.Tracker2Backup.serializeState === 'function' &&
             typeof window.Tracker2Backup.parseBackup === 'function',
@@ -136,6 +138,7 @@ async function main() {
       assert.equal(result.persistenceModule, true);
       assert.equal(result.previewPersistence, true);
       assert.equal(result.historyModule, true);
+      assert.equal(result.debtModule, true);
       assert.equal(result.financialModule, true);
       assert.equal(result.backupModule, true);
       assert.equal(result.validationOk, true);
@@ -221,6 +224,52 @@ async function main() {
         clientName: 'Browser Test Client',
         initialDescription: 'Initial work',
         initialNote: 'Original note'
+      });
+
+      const themeResult = await page.evaluate(() => {
+        const inspect = theme => {
+          applyTheme(theme);
+          return {
+            bodyClass: document.body.className,
+            background: getComputedStyle(document.body).getPropertyValue('--bg').trim(),
+            activeControls: document.querySelectorAll(`[data-theme-option="${theme}"].active`).length
+          };
+        };
+        const result = {
+          default: inspect('default'),
+          highContrast: inspect('highContrast'),
+          simple: inspect('simple')
+        };
+        applyTheme('default');
+        return result;
+      });
+      assert.equal(themeResult.default.bodyClass.includes('high-contrast'), false);
+      assert.equal(themeResult.default.bodyClass.includes('simple-theme'), false);
+      assert.equal(themeResult.highContrast.bodyClass.includes('high-contrast'), true);
+      assert.equal(themeResult.simple.bodyClass.includes('simple-theme'), true);
+      assert.notEqual(themeResult.default.background, themeResult.simple.background);
+      assert.equal(themeResult.default.activeControls > 0, true);
+      assert.equal(themeResult.highContrast.activeControls > 0, true);
+      assert.equal(themeResult.simple.activeControls > 0, true);
+
+      const feeProtection = await page.evaluate(() => {
+        const before = state.settings.feeRate;
+        openSettings();
+        document.getElementById('s_feeRate').value = '3.1';
+        saveSettings();
+        return {
+          unchanged: state.settings.feeRate === before,
+          confirmation: document.getElementById('confirmModalMsg').textContent,
+          visible: !document.getElementById('confirmModal').classList.contains('hidden')
+        };
+      });
+      assert.equal(feeProtection.unchanged, true);
+      assert.equal(feeProtection.visible, true);
+      assert.match(feeProtection.confirmation, /existing as well as new records/i);
+      assert.match(feeProtection.confirmation, /not currently stored per job/i);
+      await page.evaluate(() => {
+        closeModal('confirmModal');
+        closeModal('settingsModal');
       });
 
       await page.$eval('#uj_desc_1', element => {

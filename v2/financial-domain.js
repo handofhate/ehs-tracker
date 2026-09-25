@@ -1,10 +1,10 @@
 (function attachTracker2Financial(root, factory) {
   if (typeof module === 'object' && module.exports) {
-    module.exports = factory();
+    module.exports = factory(require('./debt-feature'));
   } else {
-    root.Tracker2Financial = factory();
+    root.Tracker2Financial = factory(root.Tracker2DebtFeature);
   }
-})(typeof globalThis !== 'undefined' ? globalThis : this, function createFinancialDomain() {
+})(typeof globalThis !== 'undefined' ? globalThis : this, function createFinancialDomain(debtFeature) {
   'use strict';
 
   function roundMoney(value) {
@@ -52,11 +52,10 @@
 
   function calcJob(job, { employee = null, settings = {}, debtPayments = [] } = {}) {
     const empShare = employee?.empShare ?? 0.66;
-    const { feeRate = 0, txnFee = 0, debtOwnerShare } = settings;
+    const { feeRate = 0, txnFee = 0 } = settings;
     const normalOwnerShare = 1 - empShare;
-    const effectiveOwnerShare = job.repaymentMode ? (debtOwnerShare || 0.50) : normalOwnerShare;
+    const effectiveOwnerShare = debtFeature.effectiveOwnerShare(job, employee, settings);
     const effectiveEmpShare = 1 - effectiveOwnerShare;
-    const ownerShare = effectiveOwnerShare;
     const type = jobType(job);
     const isLegacyHourly = false;
     const isHourly = type === 'hourly';
@@ -150,9 +149,7 @@
     const profitPool = Math.max(0, netRevenue - totalMats);
     const empProfit = profitPool * effectiveEmpShare;
     const ownerProfit = profitPool * effectiveOwnerShare;
-    const debtContribution = job.repaymentMode
-      ? Math.max(0, profitPool * ((debtOwnerShare || 0.50) - normalOwnerShare))
-      : 0;
+    const debtContribution = debtFeature.debtContribution(job, profitPool, employee, settings);
     const tipsTotal = (job.tips || []).reduce((sum, tip) => sum + (tip.amount || 0), 0);
     const advancesPaid = (job.advances || []).reduce((sum, advance) => sum + (advance.amount || 0), 0);
     const workCompleted = jobWorkCompleted(job);
@@ -169,9 +166,7 @@
     const potentialEmpBalance = (workCompleted ? potentialEmpTotalOwed : 0) - advancesPaid - linkedDebtPaid;
     const potentialOwnerProfit = projectedProfitPool * effectiveOwnerShare;
     const potentialOwnerTotal = potentialOwnerProfit + ownerMats;
-    const potentialDebtContribution = job.repaymentMode
-      ? Math.max(0, projectedProfitPool * ((debtOwnerShare || 0.50) - normalOwnerShare))
-      : 0;
+    const potentialDebtContribution = debtFeature.debtContribution(job, projectedProfitPool, employee, settings);
     const ownerTotal = ownerProfit + ownerMats;
     const totalHours = (job.hours || []).reduce((sum, item) => sum + (item.hours || 0), 0);
 

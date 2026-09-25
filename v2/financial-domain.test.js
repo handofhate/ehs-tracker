@@ -133,6 +133,27 @@ test('calculates repayment-mode debt contribution with the adjusted owner share'
   assert.equal(result.debtContribution, 160);
 });
 
+test('falls back to the normal split when the one-off debt is inactive', () => {
+  const job = {
+    id: 'inactive-repayment-job',
+    quote: 1000,
+    milestones: [{ pct: 100, status: 'collected' }],
+    addOns: [], subtractions: [], materials: [], tips: [], advances: [], fees: [],
+    workCompleted: true,
+    repaymentMode: true,
+    jobType: 'quoted'
+  };
+  const result = calcJob(job, {
+    employee,
+    settings: { debtOriginal: 0, feeRate: 0, txnFee: 0, debtOwnerShare: 0.5 },
+    debtPayments: []
+  });
+
+  assert.equal(result.empProfit, 660);
+  assert.equal(result.ownerProfit, 340);
+  assert.equal(result.debtContribution, 0);
+});
+
 test('calculates homewatch balances using collected and pending payments', () => {
   const homewatch = {
     id: 'hw-1',
@@ -154,4 +175,28 @@ test('calculates homewatch balances using collected and pending payments', () =>
   assert.equal(result.empOwed, 58.08);
   assert.equal(result.empBalance, 28.08);
   assert.equal(result.potentialEmpBalance, 56.46);
+});
+
+test('applies the current fee settings to both historical and projected job totals', () => {
+  const job = {
+    id: 'fee-setting-job',
+    quote: 100,
+    milestones: [
+      { pct: 50, status: 'collected' },
+      { pct: 50, status: 'pending' }
+    ],
+    addOns: [], subtractions: [], materials: [], tips: [], advances: [], fees: [],
+    workCompleted: true,
+    repaymentMode: false,
+    jobType: 'quoted'
+  };
+
+  const result = calcJob(job, {
+    employee,
+    settings: { feeRate: 0.10, txnFee: 2 },
+    debtPayments: []
+  });
+
+  assert.equal(result.totalFees, 7);
+  assert.equal(result.projectedFees, 14);
 });

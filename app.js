@@ -29,6 +29,7 @@ const V2_PERSISTENCE = window.Tracker2Persistence.createPersistenceBoundary({
   writeState: next => DOC.set(next)
 });
 const V2_HISTORY = window.Tracker2History;
+const V2_DEBT = window.Tracker2DebtFeature;
 const V2_FINANCIAL = window.Tracker2Financial;
 const V2_LEGACY_PARTIAL = window.Tracker2LegacyPartial;
 const V2_BACKUP = window.Tracker2Backup;
@@ -902,6 +903,7 @@ function renderDebtPanel() {
     return;
   }
   const s = state.settings;
+  if (!V2_DEBT.isActive(s)) { debtEl.innerHTML = ''; return; }
   const originalDebt = s.debtOriginal || 0;
   if (!originalDebt) { debtEl.innerHTML = ''; return; }
 
@@ -1690,9 +1692,9 @@ function jobDetail(job, c) {
   const emp    = getEmp(job.employeeId);
   const en     = esc(emp?.name || 'Employee');
   const admin  = currentUser?.isAdmin;
-  const empShare = emp?.empShare ?? 0.66;
-  const empPct = Math.round((job.repaymentMode ? (1-(state.settings.debtOwnerShare||0.5)) : empShare)*100);
-  const ownerPct = Math.round((job.repaymentMode ? (state.settings.debtOwnerShare||0.5) : (1-empShare))*100);
+  const effectiveOwnerShare = V2_DEBT.effectiveOwnerShare(job, emp, state.settings);
+  const empPct = Math.round((1-effectiveOwnerShare)*100);
+  const ownerPct = Math.round(effectiveOwnerShare*100);
   const empBalance = Number(c.potentialEmpBalance || 0);
   const empBalanceStatus = empBalance > 0.005 ? 'Still owed' : empBalance < -0.005 ? 'Overpaid by' : 'Paid in full';
   const empHoldStatus = empBalance < -0.005 ? 'Employee credit' : 'Employee pay on hold';
@@ -2090,7 +2092,7 @@ function jobDetail(job, c) {
     </div>
 
     <div class="settlement-box">
-      <div class="settlement-title">Settlement Breakdown${job.repaymentMode?` <span style="color:var(--red);font-size:14px;margin-left:8px">REPAYMENT SPLIT ${Math.round((state.settings.debtOwnerShare||0.5)*100)}/${Math.round((1-(state.settings.debtOwnerShare||0.5))*100)}</span>`:''}</div>
+      <div class="settlement-title">Settlement Breakdown${job.repaymentMode && V2_DEBT.isActive(state.settings)?` <span style="color:var(--red);font-size:14px;margin-left:8px">REPAYMENT SPLIT ${ownerPct}/${100-ownerPct}</span>`:''}</div>
       <div class="settlement-profit-pool">Profit pool: ${fmt(c.projectedProfitPool)}</div>
       <div class="settlement-grid" style="${admin?'':'grid-template-columns:1fr'}">
         <div class="admin-only">
@@ -2137,7 +2139,7 @@ function jobDetail(job, c) {
           ${job.status==='complete'?'Reopen':'Complete'}
         </button>
       <button class="btn btn-danger btn-sm btn-icon-only" onclick="deleteJob('${job.id}')" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
-        <button class="repay-toggle${job.repaymentMode?' active':''}" onclick="toggleRepayment('${job.id}')" title="Toggle debt repayment split for this job">${job.repaymentMode?'Repaying':'Normal'}</button>
+        ${V2_DEBT.canToggleRepayment(job, state.settings) ? `<button class="repay-toggle${job.repaymentMode?' active':''}" onclick="toggleRepayment('${job.id}')" title="Toggle debt repayment split for this job">${job.repaymentMode?'Repaying':'Normal'}</button>` : ''}
       </div>
     </div>
   </div>`;
@@ -2146,6 +2148,7 @@ function jobDetail(job, c) {
 // ─── INTERACTIONS ─────────────────────────────────────────────────────────────
 // ─── DEBT PAYMENTS ────────────────────────────────────────────────────────────
 function openAddDebtPayment() {
+  if (!currentUser?.isAdmin || !V2_DEBT.isActive(state.settings)) return;
   document.getElementById('dp_label').value  = '';
   document.getElementById('dp_amount').value = '';
   document.getElementById('dp_date').value   = today();
@@ -2172,6 +2175,7 @@ function toggleDpLink() {
   document.getElementById('dp_jobWrap').style.display = on ? '' : 'none';
 }
 function saveDebtPayment() {
+  if (!currentUser?.isAdmin || !V2_DEBT.isActive(state.settings)) return;
   const amount = parseFloat(document.getElementById('dp_amount').value);
   if (!amount || amount <= 0) { showAlert('Please enter a valid amount.'); return; }
   const label  = document.getElementById('dp_label').value.trim();
@@ -2186,6 +2190,7 @@ function saveDebtPayment() {
   save(); renderAll(); closeModal('debtPaymentModal');
 }
 function deleteDebtPayment(id) {
+  if (!currentUser?.isAdmin || !V2_DEBT.isActive(state.settings)) return;
   showConfirm('Remove this payment?', () => {
     state.debtPayments = (state.debtPayments || []).filter(p => p.id !== id);
     save(); renderAll();
@@ -3291,7 +3296,7 @@ function editPartialCollection(jobId, partialId) {
 
 function toggleRepayment(id) {
   const j = state.jobs.find(j=>j.id===id);
-  if (!j) return;
+  if (!j || !V2_DEBT.canToggleRepayment(j, state.settings)) return;
   j.repaymentMode = !j.repaymentMode;
   save(); renderJobs();
 }
@@ -5426,12 +5431,13 @@ function toggleMyClientQuickCol(key, on) {
   save();
 }
 function openSettings() {
-  document.getElementById('s_feeRate').value         = +((state.settings.feeRate || 0.026) * 100).toFixed(3);
+  if (!currentUser?.isAdmin) return;
+  document.getElementById('s_feeRate').value         = +((state.settings.feeRate ?? 0.026) * 100).toFixed(3);
   document.getElementById('s_txnFee').value          = state.settings.txnFee ?? 0.30;
-  document.getElementById('s_debtOriginal').value    = state.settings.debtOriginal || 2256.58;
-  document.getElementById('s_debtOwnerShare').value  = Math.round((state.settings.debtOwnerShare || 0.50) * 100);
+  document.getElementById('s_debtOriginal').value    = state.settings.debtOriginal ?? 2256.58;
+  document.getElementById('s_debtOwnerShare').value  = Math.round((state.settings.debtOwnerShare ?? 0.50) * 100);
   document.getElementById('s_squareBaseUrl').value   = state.settings.square?.functionBaseUrl || '';
-  document.getElementById('s_squareHighValue').value = state.settings.square?.highValueConfirmAmount || 1000;
+  document.getElementById('s_squareHighValue').value = state.settings.square?.highValueConfirmAmount ?? 1000;
   const debtEmp = getEmp(state.settings.debtEmployeeId);
   document.getElementById('s_debtHint').textContent  = debtEmp
     ? `Debt assigned to ${debtEmp.name}. Extra above their normal split counts toward debt.`
@@ -5454,14 +5460,12 @@ function openSettings() {
   document.getElementById('settingsModal').classList.remove('hidden');
   requestAnimationFrame(_initSettingsNavScroll);
 }
-function saveSettings() {
-  state.settings.feeRate        = (parseFloat(document.getElementById('s_feeRate').value) || 2.6) / 100;
-  state.settings.txnFee         = parseFloat(document.getElementById('s_txnFee').value) || 0;
-  state.settings.debtOriginal   = parseFloat(document.getElementById('s_debtOriginal').value) || 0;
-  state.settings.debtOwnerShare = (parseFloat(document.getElementById('s_debtOwnerShare').value) || 50) / 100;
-  if (!state.settings.square || typeof state.settings.square !== 'object') state.settings.square = {};
-  state.settings.square.functionBaseUrl = (document.getElementById('s_squareBaseUrl').value || '').trim().replace(/\/+$/,'');
-  state.settings.square.highValueConfirmAmount = parseFloat(document.getElementById('s_squareHighValue').value) || 1000;
+function _readSettingsDraft() {
+  const feePct = parseFloat(document.getElementById('s_feeRate').value);
+  const txnFee = parseFloat(document.getElementById('s_txnFee').value);
+  const debtOriginal = parseFloat(document.getElementById('s_debtOriginal').value);
+  const debtOwnerPct = parseFloat(document.getElementById('s_debtOwnerShare').value);
+  const squareThreshold = parseFloat(document.getElementById('s_squareHighValue').value);
   const defaultMilestones = []; let dmTotal = 0;
   const defaultBasis = defaultMilestoneValueMode;
   document.querySelectorAll('[id^="dmpct_"]').forEach((el, i) => {
@@ -5477,9 +5481,62 @@ function saveSettings() {
   if (defaultMilestones.length && defaultBasis === 'amount' && dmTotal <= 0) {
     showAlert('Default milestone dollar amounts must total more than $0.00.'); return;
   }
-  state.settings.defaultMilestones = defaultMilestones;
-  state.settings.defaultMilestoneBasis = defaultBasis;
+  return {
+    feeRate: Number.isFinite(feePct) ? Math.min(1, Math.max(0, feePct / 100)) : (state.settings.feeRate ?? 0.026),
+    txnFee: Number.isFinite(txnFee) ? Math.max(0, txnFee) : (state.settings.txnFee ?? 0.30),
+    debtOriginal: Number.isFinite(debtOriginal) ? Math.max(0, debtOriginal) : 0,
+    debtOwnerShare: Number.isFinite(debtOwnerPct) ? Math.min(1, Math.max(0, debtOwnerPct / 100)) : 0.50,
+    square: {
+      ...(state.settings.square || {}),
+      functionBaseUrl: (document.getElementById('s_squareBaseUrl').value || '').trim().replace(/\/+$/,''),
+      highValueConfirmAmount: Number.isFinite(squareThreshold) ? Math.max(1, squareThreshold) : 1000
+    },
+    defaultMilestones,
+    defaultMilestoneBasis: defaultBasis
+  };
+}
+
+function _applySettingsDraft(draft) {
+  const oldFeeRate = state.settings.feeRate ?? 0.026;
+  const oldTxnFee = state.settings.txnFee ?? 0.30;
+  const feeChanged = Math.abs(oldFeeRate - draft.feeRate) > 0.0000001 || Math.abs(oldTxnFee - draft.txnFee) > 0.0000001;
+  state.settings.feeRate = draft.feeRate;
+  state.settings.txnFee = draft.txnFee;
+  state.settings.debtOriginal = draft.debtOriginal;
+  state.settings.debtOwnerShare = draft.debtOwnerShare;
+  state.settings.square = draft.square;
+  state.settings.defaultMilestones = draft.defaultMilestones;
+  state.settings.defaultMilestoneBasis = draft.defaultMilestoneBasis;
+  if (feeChanged) {
+    if (!Array.isArray(state.settings.feeChangeLog)) state.settings.feeChangeLog = [];
+    state.settings.feeChangeLog.push({
+      changedAt: today(),
+      changedBy: currentUser?.id || '',
+      fromFeeRate: oldFeeRate,
+      toFeeRate: draft.feeRate,
+      fromTxnFee: oldTxnFee,
+      toTxnFee: draft.txnFee
+    });
+  }
   save(); renderAll(); closeModal('settingsModal');
+}
+
+function saveSettings() {
+  if (!currentUser?.isAdmin) return;
+  const draft = _readSettingsDraft();
+  if (!draft) return;
+  const oldFeeRate = state.settings.feeRate ?? 0.026;
+  const oldTxnFee = state.settings.txnFee ?? 0.30;
+  const feeChanged = Math.abs(oldFeeRate - draft.feeRate) > 0.0000001 || Math.abs(oldTxnFee - draft.txnFee) > 0.0000001;
+  if (feeChanged) {
+    showConfirm(
+      `This changes the global fee settings from ${(oldFeeRate * 100).toFixed(2)}% + $${oldTxnFee.toFixed(2)} per transaction to ${(draft.feeRate * 100).toFixed(2)}% + $${draft.txnFee.toFixed(2)}. The tracker recalculates fees, profit pools, employee pay, owner profit, debt projections, and HomeWatch totals for existing as well as new records. This setting is not currently stored per job. Continue?`,
+      () => _applySettingsDraft(draft),
+      { title: 'Confirm global fee change', okLabel: 'Apply fee change', danger: true }
+    );
+    return;
+  }
+  _applySettingsDraft(draft);
 }
 
 function renderSquareAlerts(alerts = []) {
@@ -5726,6 +5783,14 @@ function _setSquarePreviewAvailability() {
     btn.disabled = PREVIEW_MODE;
     btn.title = PREVIEW_MODE ? 'Disabled in the local Tracker 2.0 preview' : '';
   });
+  ['s_squareBaseUrl', 's_squareHighValue'].forEach(id => {
+    const input = document.getElementById(id);
+    if (!input) return;
+    input.disabled = PREVIEW_MODE;
+    input.title = PREVIEW_MODE ? 'Not used by the local Tracker 2.0 preview' : '';
+  });
+  const notice = document.getElementById('squarePreviewNotice');
+  if (notice) notice.style.display = PREVIEW_MODE ? '' : 'none';
 }
 
 function loadExpandedState() {
@@ -5811,6 +5876,7 @@ function renderUserList() {
 }
 
 async function addUser() {
+  if (!currentUser?.isAdmin) return;
   const name = document.getElementById('nu_name').value.trim();
   const pin  = document.getElementById('nu_pin').value;
   const role = document.getElementById('nu_role').value;
@@ -5829,6 +5895,7 @@ async function addUser() {
 }
 
 async function deleteUser(id) {
+  if (!currentUser?.isAdmin) return;
   const u = state.users.find(x => x.id === id);
   if (!u) return;
   if (u.id === currentUser.id) { showAlert("You can't remove yourself."); return; }
@@ -5840,6 +5907,7 @@ async function deleteUser(id) {
 }
 
 function openResetPin(userId) {
+  if (!currentUser?.isAdmin) return;
   resetPinUserId = userId;
   const u = state.users.find(x => x.id === userId);
   document.getElementById('resetPinLabel').textContent = `New PIN for ${u ? u.name : 'user'}`;
@@ -5848,6 +5916,7 @@ function openResetPin(userId) {
 }
 
 async function doResetPin() {
+  if (!currentUser?.isAdmin) return;
   const pin = document.getElementById('rp_pin').value;
   if (!pin) { showAlert('Please enter a PIN.'); return; }
   const u = state.users.find(x => x.id === resetPinUserId);
@@ -5860,6 +5929,7 @@ async function doResetPin() {
 
 let editEmpId = null;
 function openEditEmp(userId) {
+  if (!currentUser?.isAdmin) return;
   const u = state.users.find(x => x.id === userId);
   if (!u) return;
   editEmpId = userId;
@@ -5874,6 +5944,7 @@ function openEditEmp(userId) {
   document.getElementById('empEditModal').classList.remove('hidden');
 }
 async function saveEmpEdit() {
+  if (!currentUser?.isAdmin) return;
   const u = state.users.find(x => x.id === editEmpId);
   if (!u) return;
   const name  = document.getElementById('ee_name').value.trim();
@@ -5884,6 +5955,7 @@ async function saveEmpEdit() {
   await save(); closeModal('empEditModal'); renderUserList(); renderAll();
 }
 async function reassignDebt(fromId, toId) {
+  if (!currentUser?.isAdmin) return;
   if (toId) {
     const target = state.users.find(u => u.id === toId);
     if (target) {

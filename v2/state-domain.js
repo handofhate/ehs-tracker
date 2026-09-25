@@ -112,6 +112,7 @@
     if (s.settings.debtOriginal === undefined) s.settings.debtOriginal = 2256.58;
     if (s.settings.debtOwnerShare === undefined) s.settings.debtOwnerShare = 0.50;
     if (s.settings.txnFee === undefined) s.settings.txnFee = 0.30;
+    if (!Array.isArray(s.settings.feeChangeLog)) s.settings.feeChangeLog = [];
     if (!s.settings.defaultMilestones) s.settings.defaultMilestones = [];
     if (s.settings.defaultMilestoneBasis !== 'amount') s.settings.defaultMilestoneBasis = 'percent';
     if (!s.settings.square || typeof s.settings.square !== 'object') s.settings.square = {};
