@@ -19,11 +19,11 @@ This is the working plan for the Tracker 2.0 rebuild and cutover. Tracker 1.0 re
 - [ ] Create an archive/export and verify that it can be restored before changing any historical records.
 - [x] Add a separate read-only dry-run cleanup planner that lists every proposed record change and every ambiguous match.
 - [x] Build and run the cleanup apply step as a one-time, guarded tool that is separate from the tracker and requires review of the dry-run first.
-- [ ] Add an explicit `createdVia: 'legacy'` marker to older jobs without changing their financial history or making them editable as unified jobs.
-- [ ] Backfill `clientId` only where the client match is exact and unambiguous; leave uncertain historical jobs name-linked and read-only.
-- [ ] Review the 2 jobs with legacy partial-payment state and decide whether each should be safely rebuilt or permanently preserved as a historical exception.
-- [ ] Re-run the audit after cleanup and record which legacy checks reached zero, which records were intentionally retained, and the final archive location.
-- [ ] Remove the remaining compatibility code only after the post-cleanup audit, client-history review, backup-import decision, and rollback verification pass.
+- [x] Add an explicit `createdVia: 'legacy'` marker to older jobs without changing their financial history or making them editable as unified jobs.
+- [x] Backfill `clientId` using the approved exact and manual matches without changing historical financial data.
+- [x] Review the 2 jobs with legacy partial-payment state and preserve them as explicit historical exceptions; block new partial collections on those records.
+- [x] Re-run the audit after cleanup and record which legacy checks reached zero, which records were intentionally retained, and the final archive location.
+- [ ] Remove the remaining compatibility code only after the post-cleanup audit, client-history review, and rollback verification pass. Old JSON backup import is intentionally out of scope.
 - [ ] Archive or delete the one-time cleanup tool and temporary migration-only tests after the retirement boundary is accepted.
 
 ## Unified job workflow
@@ -52,8 +52,8 @@ This is the working plan for the Tracker 2.0 rebuild and cutover. Tracker 1.0 re
 - [ ] Split `migrateState()` into a small current-state normalizer and a separate historical compatibility layer.
 - [x] Remove zero-count legacy conversions after confirming no live records use them (`historicalAdj`, string client notes, `hourly2`, old job notes, old collected flags, and legacy employee-share seeding).
 - [ ] Reassess current-shape defaulting for missing payment metadata separately; it remains protective for incomplete incoming or restored data.
-- [ ] Keep legacy job/client matching and read-only normalization until the 100 untagged historical jobs and 91 jobs without `clientId` have a deliberate historical-data strategy.
-- [ ] Keep legacy partial-payment compatibility until the 2 affected jobs and their 12 legacy partial items are repaired or explicitly preserved as historical records.
+- [ ] Review whether the legacy name-matching fallback is still needed for imported or restored states; all current live jobs now have stable `clientId` links.
+- [x] Isolate legacy partial-payment compatibility behind a small historical-boundary module and preserve the 2 affected jobs and their 12 legacy items as read-only exceptions.
 - [ ] Re-test backup import, realtime snapshots, undo/redo, and historical client views after separating migration compatibility.
 - [ ] Remove migration-only compatibility code once the archive/cutover boundary is established.
 - [ ] Keep the local no-write preview build as a rollback and validation tool until Tracker 2.0 is proven.

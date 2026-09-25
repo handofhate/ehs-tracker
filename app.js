@@ -30,6 +30,7 @@ const V2_PERSISTENCE = window.Tracker2Persistence.createPersistenceBoundary({
 });
 const V2_HISTORY = window.Tracker2History;
 const V2_FINANCIAL = window.Tracker2Financial;
+const V2_LEGACY_PARTIAL = window.Tracker2LegacyPartial;
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
 let state = {
@@ -1736,13 +1737,7 @@ function jobDetail(job, c) {
   const isLegacyHourly = false;
   const isHourly = jobType === 'hourly';
 
-  const hasLegacyPartial = !(job.partialCollections || []).length && (
-    (isLegacyHourly
-      ? (job.revenueItems || []).some(r => !!r.partialState)
-      : (job.milestones || []).some(m => !!m.partialState)) ||
-    (job.addOns || []).some(a => !!a.partialState) ||
-    (job.subtractions || []).some(s => !!s.partialState)
-  );
+  const hasLegacyPartial = V2_LEGACY_PARTIAL.hasLegacyPartial(job);
   const milestoneEntries = (job.milestones || []).map((m, i) => ({ m, i }));
   const renderedMilestoneGroups = new Set();
   const milestonesHtml = milestoneEntries.map(({ m, i }) => {
@@ -1937,8 +1932,7 @@ function jobDetail(job, c) {
     : '';
   const legacyPartialHtml = hasLegacyPartial
     ? `<div style="margin-top:10px;border-top:1px dashed var(--border);padding-top:10px">
-        <div style="font-size:13px;color:var(--text3);margin-bottom:8px">Legacy partial payment detected (created before edit history support).</div>
-        <button class="btn btn-ghost btn-sm admin-only" onclick="rebuildLegacyPartial('${job.id}')">Rebuild Legacy Partial</button>
+        <div style="font-size:13px;color:var(--text3)">Historical partial payment retained in its original format. This record is read-only for new partial collections.</div>
       </div>`
     : '';
   const matsHtml = (job.materials||[]).map((m,i) => `
@@ -2791,6 +2785,11 @@ function _applyPartialPreset(ctx, preset) {
 }
 function openPartialCollect(jobId, preset = null) {
   if (!currentUser?.isAdmin) return;
+  const job = state.jobs.find(item => item.id === jobId);
+  if (!V2_LEGACY_PARTIAL.allowsCurrentPartialCollection(job)) {
+    showAlert('This historical job uses an older partial-payment format and is preserved as read-only.');
+    return;
+  }
   const ctx = _buildPartialCollectCtx(jobId);
   if (!ctx) {
     return;
@@ -3131,6 +3130,12 @@ function savePartialCollect() {
   }
   const job = state.jobs.find(j => j.id === partialCollectCtx.jobId);
   if (!job) return;
+  if (!V2_LEGACY_PARTIAL.allowsCurrentPartialCollection(job)) {
+    showAlert('This historical job uses an older partial-payment format and is preserved as read-only.');
+    partialCollectCtx = null;
+    closeModal('partialCollectModal');
+    return;
+  }
   const date = document.getElementById('pc_date')?.value || today();
   const note = (document.getElementById('pc_note')?.value || '').trim();
   const partialPercent = mode === 'percent'
@@ -3283,47 +3288,6 @@ function editPartialCollection(jobId, partialId) {
   });
 }
 
-
-function rebuildLegacyPartial(jobId) {
-  const job = state.jobs.find(j => j.id === jobId);
-  if (!job) return;
-  showConfirm('Rebuild legacy partial into a clean baseline so you can re-run partial collection?', () => {
-    const collapseAmountList = (arr) => {
-      const out = [];
-      const byLabel = new Map();
-      (arr || []).forEach(item => {
-        if (!item?.partialState) { out.push({ ...item, appliedByPartial: false }); return; }
-        const key = String(item.partialParentLabel || item.label || 'Item');
-        if (!byLabel.has(key)) byLabel.set(key, { ...item, id: uid(), label: key, amount: 0, status: 'pending', partialState: '', appliedByPartial: false, partialGroupId: '', partialParentAmount: 0, partialParentLabel: '' });
-        const g = byLabel.get(key);
-        g.amount = _roundMoney((g.amount || 0) + (item.amount || 0));
-      });
-      byLabel.forEach(v => out.push(v));
-      return out;
-    };
-    const collapseMilestones = () => {
-      const out = [];
-      const byLabel = new Map();
-      const basis = _milestoneBasis(job);
-      (job.milestones || []).forEach(item => {
-        if (!item?.partialState) { out.push({ ...item, partialGroupId: '', partialParentLabel: '', partialParentPct: 0, partialParentAmount: 0, partialMode: '', partialPercent: 0 }); return; }
-        const key = String(item.partialParentLabel || item.label || 'Milestone');
-        if (!byLabel.has(key)) byLabel.set(key, { ...item, id: uid(), label: key, pct: 0, amount: basis === 'amount' ? 0 : item.amount, status: 'pending', partialState: '', partialGroupId: '', partialParentLabel: '', partialParentPct: 0, partialParentAmount: 0, partialMode: '', partialPercent: 0 });
-        const g = byLabel.get(key);
-        g.pct = _roundPct((g.pct || 0) + (item.pct || 0));
-        if (basis === 'amount') g.amount = _roundMoney((g.amount || 0) + Number(item.amount || 0));
-      });
-      byLabel.forEach(v => out.push(v));
-      return out;
-    };
-    job.milestones = collapseMilestones();
-    job.revenueItems = collapseAmountList(job.revenueItems || []);
-    job.addOns = collapseAmountList(job.addOns || []);
-    job.subtractions = collapseAmountList(job.subtractions || []).map(s => ({ ...s, status: 'pending' }));
-    job.partialCollections = [];
-    save(); renderJobs();
-  }, { title:'Rebuild Legacy Partial', okLabel:'Rebuild', danger:true });
-}
 function toggleRepayment(id) {
   const j = state.jobs.find(j=>j.id===id);
   if (!j) return;
