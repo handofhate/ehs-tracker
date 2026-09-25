@@ -37,5 +37,10 @@ This is the working plan for the Tracker 2.0 rebuild and cutover. Tracker 1.0 re
 - [ ] Split the large frontend into behavior-focused modules after the data model stabilizes.
 - [ ] Separate read models, calculations, persistence, and rendering so Tracker 2.0 changes do not require editing one monolithic file.
 - [ ] Review the full-state Firestore write model for conflict and accidental-overwrite risks.
+- [ ] Split `migrateState()` into a small current-state normalizer and a separate historical compatibility layer.
+- [ ] Remove one-time migration checks only after confirming zero live records still use them (`historicalAdj`, string client notes, `hourly2`, old job notes, old collected flags, and missing payment metadata).
+- [ ] Keep legacy job/client matching and read-only normalization until the 100 untagged historical jobs and 91 jobs without `clientId` have a deliberate historical-data strategy.
+- [ ] Keep legacy partial-payment compatibility until the 2 affected jobs and their 12 legacy partial items are repaired or explicitly preserved as historical records.
+- [ ] Re-test backup import, realtime snapshots, undo/redo, and historical client views after separating migration compatibility.
 - [ ] Remove migration-only compatibility code once the archive/cutover boundary is established.
 - [ ] Keep the local no-write preview build as a rollback and validation tool until Tracker 2.0 is proven.
