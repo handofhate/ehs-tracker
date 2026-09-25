@@ -34,6 +34,14 @@ This is the working plan for the Tracker 2.0 rebuild and cutover. Tracker 1.0 re
 - [ ] Test quoted, itemized, hourly, material, credit, milestone, notes, and employee-pay cases before removing the old modal.
 - [ ] Retire the legacy add/edit code after the cutover validation passes.
 
+## Feature and UI review
+
+- [ ] Inventory current features and classify each as keep, optimize, shelve, or remove before deeper Tracker 2.0 restructuring.
+- [ ] Review Square, exports/imports, history, payments, employee pay, Homewatch, notes, filters, undo/redo, and settings for duplicated or obsolete behavior.
+- [ ] Review the UI for unnecessary controls, duplicated flows, confusing labels, stale terminology, layout cleanup, and responsive/accessibility issues.
+- [ ] Prioritize feature and UI changes by user value and risk, keeping financial and historical behavior covered by tests before implementation.
+- [ ] Re-check the feature inventory after the review so removed or deferred behavior does not get reintroduced during the `app.js` split.
+
 ## Square integration
 
 - [ ] Decide whether Square remains part of Tracker 2.0 immediately or is temporarily shelved behind a later milestone.
