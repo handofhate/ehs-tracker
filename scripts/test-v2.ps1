@@ -18,6 +18,8 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'v2/legacy-cleanup.js syntax check failed.' }
   node --check scripts/legacy-cleanup-dry-run.js
   if ($LASTEXITCODE -ne 0) { throw 'scripts/legacy-cleanup-dry-run.js syntax check failed.' }
+  node --check scripts/legacy-cleanup-apply.js
+  if ($LASTEXITCODE -ne 0) { throw 'scripts/legacy-cleanup-apply.js syntax check failed.' }
   node --check v2/persistence-domain.js
   if ($LASTEXITCODE -ne 0) { throw 'v2/persistence-domain.js syntax check failed.' }
   node --check v2/history-domain.js
@@ -55,6 +57,8 @@ try {
     'v2/legacy-cleanup.js',
     'v2/legacy-cleanup.test.js',
     'scripts/legacy-cleanup-dry-run.js',
+    'v2/legacy-cleanup-apply.test.js',
+    'scripts/legacy-cleanup-apply.js',
     'v2/persistence-domain.js',
     'v2/persistence-domain.test.js',
     'v2/history-domain.js',

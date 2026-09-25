@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { applyCleanupPlan, buildCleanupPlan, clientCandidates } = require('./legacy-cleanup');
+const { buildCleanupPlan, clientCandidates, applyCleanupPlan } = require('./legacy-cleanup');
 
 test('builds non-mutating cleanup proposals for markers and exact client links', () => {
   const state = {
@@ -63,6 +63,8 @@ test('keeps ambiguous matches and partial jobs out of proposed writes', () => {
   assert.equal(plan.summary.partialItemsToReview, 2);
 });
 
-test('refuses to apply a plan before explicit implementation', () => {
-  assert.throws(() => applyCleanupPlan({}), /not implemented/);
+test('refuses conflicting changes instead of overwriting them', () => {
+  assert.throws(() => applyCleanupPlan({ jobs: [{ id: 'job-1', clientId: 'other-client' }], clients: [{ id: 'client-1' }] }, {
+    clientAssignments: [{ jobId: 'job-1', clientId: 'client-1' }]
+  }), /different clientId/);
 });

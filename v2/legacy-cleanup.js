@@ -111,8 +111,51 @@
     };
   }
 
-  function applyCleanupPlan() {
-    throw new Error('Live cleanup is intentionally not implemented. Review the dry-run plan first.');
+  function applyCleanupPlan(state, {
+    legacyMarkerJobIds = [],
+    clientAssignments = [],
+    newClient = null
+  } = {}) {
+    const next = clone(state || {});
+    const jobs = arrayAt(next, 'jobs');
+    const clients = arrayAt(next, 'clients');
+    const markerIds = new Set(legacyMarkerJobIds);
+    const assignmentByJob = new Map(clientAssignments.map(entry => [entry.jobId, entry.clientId]));
+
+    jobs.forEach(job => {
+      if (markerIds.has(job.id)) {
+        if (job.createdVia !== undefined && job.createdVia !== 'legacy') {
+          throw new Error(`Job ${job.id} already has a different createdVia value.`);
+        }
+        job.createdVia = 'legacy';
+      }
+      if (assignmentByJob.has(job.id)) {
+        const clientId = assignmentByJob.get(job.id);
+        if (job.clientId !== undefined && job.clientId !== clientId) {
+          throw new Error(`Job ${job.id} already has a different clientId value.`);
+        }
+        job.clientId = clientId;
+      }
+    });
+    const jobIds = new Set(jobs.map(job => job.id));
+    [...markerIds, ...assignmentByJob.keys()].forEach(jobId => {
+      if (!jobIds.has(jobId)) throw new Error(`Cleanup references missing job ${jobId}.`);
+    });
+    clientAssignments.forEach(entry => {
+      if (!clients.some(client => client.id === entry.clientId) && (!newClient || newClient.id !== entry.clientId)) {
+        throw new Error(`Cleanup references missing client ${entry.clientId}.`);
+      }
+    });
+    if (newClient) {
+      const existing = clients.find(client => client.id === newClient.id);
+      if (!existing) clients.push(clone(newClient));
+      else if (JSON.stringify(existing) !== JSON.stringify(newClient)) {
+        throw new Error(`Client ${newClient.id} already exists with different data.`);
+      }
+    }
+    next.jobs = jobs;
+    next.clients = clients;
+    return next;
   }
 
   return Object.freeze({
