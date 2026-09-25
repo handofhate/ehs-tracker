@@ -4401,6 +4401,13 @@ function _unifiedPrimaryNote(job) {
   return notes.length === 1 ? notes[0] : (notes[0]?.date === job?.date ? notes[0] : null);
 }
 
+function _jobPrimaryNote(job) {
+  const notes = Array.isArray(job?.jobNotes) ? job.jobNotes : [];
+  const tagged = notes.find(note => note?.source === 'unified-job');
+  if (tagged) return tagged;
+  return job?.createdVia === 'unified-v2' ? (notes[0] || null) : null;
+}
+
 function _unifiedMilestoneSource(job) {
   if (unifiedEditFinancialLocked && (job?.partialCollections || []).length) {
     const original = job.partialCollections[0]?.snapshotBefore?.milestones;
@@ -5808,6 +5815,13 @@ function openQuoteSnapshot(jobId) {
   const addOnTotal       = addOns.reduce((s,a) => s+(a.amount||0), 0);
   const manualSubTotal   = manualSubs.reduce((s,a) => s+(a.amount||0), 0);
   const grandTotal       = activeItemsTotal + addOnTotal - manualSubTotal;
+  const primaryNote = _jobPrimaryNote(job);
+  const mainNoteHtml = primaryNote?.text?.trim()
+    ? `<div style="margin:14px auto 0;max-width:460px;padding:10px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;text-align:left">
+        <div style="font-family:var(--mono);font-size:11px;letter-spacing:0.12em;color:var(--text3);text-transform:uppercase;margin-bottom:5px">Job Notes</div>
+        <div style="font-size:15px;line-height:1.45;color:var(--text2);white-space:pre-wrap">${esc(primaryNote.text.trim())}</div>
+      </div>`
+    : '';
 
   const row = (label, value, opts={}) => {
     const {color='var(--text)', strikethrough=false, sub=''} = opts;
@@ -5837,6 +5851,7 @@ function openQuoteSnapshot(jobId) {
       <div style="font-family:var(--mono);font-size:11px;letter-spacing:0.2em;color:var(--text3);text-transform:uppercase;margin-bottom:8px">Quote Snapshot</div>
       <div style="font-size:26px;font-weight:600;letter-spacing:0.02em">${esc(job.name)}</div>
       ${job.date ? `<div style="font-family:var(--mono);font-size:14px;color:var(--text3);margin-top:6px">${fmtDate(job.date)}</div>` : ''}
+      ${mainNoteHtml}
     </div>
 
     ${sectionHead('Scope of Work')}
