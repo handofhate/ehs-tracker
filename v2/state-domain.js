@@ -27,47 +27,75 @@
     };
   }
 
-  function normalizeLegacyState(s, options = {}) {
+  function normalizeLegacyPartialState(job, options = {}) {
     const idFactory = options.idFactory || (() => 'generated-id');
     const today = options.today || (() => '');
 
-    if (s.settings.historicalAdj !== undefined && s.settings.debtOriginal === undefined) {
-      s.settings.debtOriginal = s.settings.historicalAdj;
-      delete s.settings.historicalAdj;
-    }
-    (s.clients || []).forEach(c => {
-      if (typeof c.clientNotes === 'string') {
-        c.clientNotes = c.clientNotes.trim()
-          ? [{ id: idFactory(), text: c.clientNotes, date: today(), authorId: '', authorName: 'Admin' }]
-          : [];
+    (job.milestones || []).forEach(m => {
+      if (m.partialState === undefined) m.partialState = '';
+      if (m.partialGroupId === undefined) m.partialGroupId = '';
+      if (m.partialParentLabel === undefined) m.partialParentLabel = '';
+      if (m.partialParentPct === undefined) m.partialParentPct = 0;
+      if (m.partialParentAmount === undefined) m.partialParentAmount = 0;
+      if (m.partialMode === undefined) m.partialMode = '';
+      if (m.partialPercent === undefined) m.partialPercent = 0;
+      if (m.partialDate === undefined) m.partialDate = '';
+    });
+    (job.addOns || []).forEach(a => {
+      if (a.partialState === undefined) a.partialState = '';
+      if (a.partialGroupId === undefined) a.partialGroupId = '';
+      if (a.partialParentAmount === undefined) a.partialParentAmount = 0;
+      if (a.partialParentLabel === undefined) a.partialParentLabel = '';
+      if (a.partialMode === undefined) a.partialMode = '';
+      if (a.partialPercent === undefined) a.partialPercent = 0;
+      if (a.partialDate === undefined) a.partialDate = '';
+    });
+    (job.revenueItems || []).forEach(r => {
+      if (r.partialState === undefined) r.partialState = '';
+      if (r.partialGroupId === undefined) r.partialGroupId = '';
+      if (r.partialParentAmount === undefined) r.partialParentAmount = 0;
+      if (r.partialParentLabel === undefined) r.partialParentLabel = '';
+      if (r.partialMode === undefined) r.partialMode = '';
+      if (r.partialPercent === undefined) r.partialPercent = 0;
+      if (r.partialDate === undefined) r.partialDate = '';
+    });
+    (job.subtractions || []).forEach(a => {
+      if (a.partialState === undefined) a.partialState = '';
+      if (a.partialGroupId === undefined) a.partialGroupId = '';
+      if (a.partialParentAmount === undefined) a.partialParentAmount = 0;
+      if (a.partialParentLabel === undefined) a.partialParentLabel = '';
+      if (a.partialMode === undefined) a.partialMode = '';
+      if (a.partialPercent === undefined) a.partialPercent = 0;
+      if (a.partialDate === undefined) a.partialDate = '';
+    });
+    if (!job.partialCollections) job.partialCollections = [];
+    (job.partialCollections || []).forEach(p => {
+      if (!p.id) p.id = idFactory();
+      if (p.date === undefined) p.date = job.date || today();
+      if (p.note === undefined) p.note = '';
+      if (p.mode === undefined) p.mode = 'dollar';
+      if (p.partialPercent === undefined) p.partialPercent = 0;
+      if (p.paymentTotal === undefined) p.paymentTotal = 0;
+      if (p.tipAmount === undefined) p.tipAmount = 0;
+      if (p.autoSub === undefined) p.autoSub = false;
+      if (!p.presetByKey || typeof p.presetByKey !== 'object') p.presetByKey = {};
+      if (!p.snapshotBefore || typeof p.snapshotBefore !== 'object') {
+        p.snapshotBefore = {
+          milestones: JSON.parse(JSON.stringify(job.milestones || [])),
+          revenueItems: JSON.parse(JSON.stringify(job.revenueItems || [])),
+          addOns: JSON.parse(JSON.stringify(job.addOns || [])),
+          subtractions: JSON.parse(JSON.stringify(job.subtractions || []))
+        };
       }
-    });
-    const legacyEmpShare = s.settings.empShare ?? 0.66;
-    (s.users || []).forEach(u => {
-      if (!u.isAdmin && u.empShare === undefined) u.empShare = legacyEmpShare;
-    });
-    (s.jobs || []).forEach(job => {
-      if (job.jobType === 'hourly2') job.jobType = 'hourly';
-      if (!job.jobNotes) {
-        job.jobNotes = [];
-        if (job.notes && typeof job.notes === 'string' && job.notes.trim()) {
-          job.jobNotes.push({ id: idFactory(), text: job.notes, date: job.date || today() });
-        }
+      if (!Array.isArray(p.snapshotBefore.revenueItems)) {
+        p.snapshotBefore.revenueItems = JSON.parse(JSON.stringify(job.revenueItems || []));
       }
-      delete job.notes;
-      (job.milestones || []).forEach(m => {
-        if (m.status === undefined && m.collected !== undefined) {
-          m.status = m.collected ? 'collected' : 'pending';
-          delete m.collected;
-        }
-      });
-      (job.addOns || []).forEach(a => {
-        if (a.status === undefined && a.collected !== undefined) {
-          a.status = a.collected ? 'collected' : 'pending';
-          delete a.collected;
-        }
-      });
+      if (p.createdAt === undefined) p.createdAt = '';
     });
+  }
+
+  function normalizeLegacyState(s, options = {}) {
+    (s.jobs || []).forEach(job => normalizeLegacyPartialState(job, options));
     return s;
   }
 
@@ -185,14 +213,6 @@
         if (!m.billingState) m.billingState = 'none';
         if (!m.squarePaymentIds) m.squarePaymentIds = [];
         if (!m.reconcileStatus) m.reconcileStatus = 'none';
-        if (m.partialState === undefined) m.partialState = '';
-        if (m.partialGroupId === undefined) m.partialGroupId = '';
-        if (m.partialParentLabel === undefined) m.partialParentLabel = '';
-        if (m.partialParentPct === undefined) m.partialParentPct = 0;
-        if (m.partialParentAmount === undefined) m.partialParentAmount = 0;
-        if (m.partialMode === undefined) m.partialMode = '';
-        if (m.partialPercent === undefined) m.partialPercent = 0;
-        if (m.partialDate === undefined) m.partialDate = '';
       });
       (job.addOns || []).forEach(a => {
         if (a.status === undefined) a.status = 'pending';
@@ -200,13 +220,6 @@
         if (!a.billingState) a.billingState = 'none';
         if (!a.squarePaymentIds) a.squarePaymentIds = [];
         if (!a.reconcileStatus) a.reconcileStatus = 'none';
-        if (a.partialState === undefined) a.partialState = '';
-        if (a.partialGroupId === undefined) a.partialGroupId = '';
-        if (a.partialParentAmount === undefined) a.partialParentAmount = 0;
-        if (a.partialParentLabel === undefined) a.partialParentLabel = '';
-        if (a.partialMode === undefined) a.partialMode = '';
-        if (a.partialPercent === undefined) a.partialPercent = 0;
-        if (a.partialDate === undefined) a.partialDate = '';
         if (a.isHours === undefined) a.isHours = false;
         if (a.hours === undefined) a.hours = 0;
         if (a.rate === undefined) a.rate = 0;
@@ -218,13 +231,6 @@
         if (!r.billingState) r.billingState = 'none';
         if (!r.squarePaymentIds) r.squarePaymentIds = [];
         if (!r.reconcileStatus) r.reconcileStatus = 'none';
-        if (r.partialState === undefined) r.partialState = '';
-        if (r.partialGroupId === undefined) r.partialGroupId = '';
-        if (r.partialParentAmount === undefined) r.partialParentAmount = 0;
-        if (r.partialParentLabel === undefined) r.partialParentLabel = '';
-        if (r.partialMode === undefined) r.partialMode = '';
-        if (r.partialPercent === undefined) r.partialPercent = 0;
-        if (r.partialDate === undefined) r.partialDate = '';
       });
       if (!job.subtractions) job.subtractions = [];
       (job.subtractions || []).forEach(a => {
@@ -234,40 +240,9 @@
         if (!a.billingState) a.billingState = 'none';
         if (!a.squarePaymentIds) a.squarePaymentIds = [];
         if (!a.reconcileStatus) a.reconcileStatus = 'none';
-        if (a.partialState === undefined) a.partialState = '';
-        if (a.partialGroupId === undefined) a.partialGroupId = '';
-        if (a.partialParentAmount === undefined) a.partialParentAmount = 0;
-        if (a.partialParentLabel === undefined) a.partialParentLabel = '';
-        if (a.partialMode === undefined) a.partialMode = '';
-        if (a.partialPercent === undefined) a.partialPercent = 0;
-        if (a.partialDate === undefined) a.partialDate = '';
       });
       if (job.isItemized === undefined) job.isItemized = false;
       if (!job.quoteItems) job.quoteItems = [];
-      if (!job.partialCollections) job.partialCollections = [];
-      (job.partialCollections || []).forEach(p => {
-        if (!p.id) p.id = idFactory();
-        if (p.date === undefined) p.date = job.date || today();
-        if (p.note === undefined) p.note = '';
-        if (p.mode === undefined) p.mode = 'dollar';
-        if (p.partialPercent === undefined) p.partialPercent = 0;
-        if (p.paymentTotal === undefined) p.paymentTotal = 0;
-        if (p.tipAmount === undefined) p.tipAmount = 0;
-        if (p.autoSub === undefined) p.autoSub = false;
-        if (!p.presetByKey || typeof p.presetByKey !== 'object') p.presetByKey = {};
-        if (!p.snapshotBefore || typeof p.snapshotBefore !== 'object') {
-          p.snapshotBefore = {
-            milestones: JSON.parse(JSON.stringify(job.milestones || [])),
-            revenueItems: JSON.parse(JSON.stringify(job.revenueItems || [])),
-            addOns: JSON.parse(JSON.stringify(job.addOns || [])),
-            subtractions: JSON.parse(JSON.stringify(job.subtractions || []))
-          };
-        }
-        if (!Array.isArray(p.snapshotBefore.revenueItems)) {
-          p.snapshotBefore.revenueItems = JSON.parse(JSON.stringify(job.revenueItems || []));
-        }
-        if (p.createdAt === undefined) p.createdAt = '';
-      });
     });
     return s;
   }

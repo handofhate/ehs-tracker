@@ -34,18 +34,19 @@ test('exposes separate legacy and current normalization passes', () => {
   const state = fixture();
   normalizeLegacyState(state, { idFactory: () => 'legacy-id', today: () => '2026-09-25' });
 
-  assert.equal(state.settings.debtOriginal, 123);
-  assert.equal(state.jobs[0].jobType, 'hourly');
-  assert.equal(state.jobs[0].milestones[0].status, 'collected');
+  assert.equal(state.settings.historicalAdj, 123);
+  assert.equal(state.jobs[0].jobType, 'hourly2');
+  assert.equal(state.jobs[0].milestones[0].collected, true);
+  assert.equal(state.jobs[0].partialCollections[0].id, 'legacy-id');
   assert.equal(state.settings.square, null);
 
   normalizeCurrentState(state, { clientColumnKeys: ['email'] });
 
   assert.deepEqual(state.settings.square, { functionBaseUrl: '', highValueConfirmAmount: 1000 });
-  assert.equal(state.jobs[0].jobType, 'hourly');
+  assert.equal(state.jobs[0].jobType, 'quoted');
 });
 
-test('normalizes legacy state in place while preserving migration behavior', () => {
+test('keeps historical partial compatibility after retiring zero-count conversions', () => {
   const state = fixture();
   let nextId = 1;
   const result = migrateState(state, {
@@ -55,40 +56,30 @@ test('normalizes legacy state in place while preserving migration behavior', () 
   });
 
   assert.equal(result, state);
-  assert.equal(state.settings.debtOriginal, 123);
-  assert.equal(state.settings.historicalAdj, undefined);
+  assert.equal(state.settings.debtOriginal, 2256.58);
+  assert.equal(state.settings.historicalAdj, 123);
   assert.deepEqual(state.settings.square, { functionBaseUrl: '', highValueConfirmAmount: 1000 });
   assert.deepEqual(state.settings.clientExpandCols, ['email', 'phone']);
-  assert.equal(state.splitPayments[0].id, 'generated-3');
+  assert.equal(state.splitPayments[0].id, 'generated-2');
   assert.equal(state.splitPayments[0].date, '2026-09-25');
   assert.equal(state.debtPayments[0].linkedJobId, null);
   assert.equal(state.appointments[0].contactName, '');
-  assert.deepEqual(state.clients[0].clientNotes, [{
-    id: 'generated-1',
-    text: 'Old note',
-    date: '2026-09-25',
-    authorId: '',
-    authorName: 'Admin'
-  }]);
-  assert.equal(state.users[0].empShare, 0.7);
+  assert.deepEqual(state.clients[0].clientNotes, []);
+  assert.equal(state.users[0].empShare, undefined);
   assert.deepEqual(state.users[0].clientPrefs, {});
   assert.equal(state.users[0].uiPrefs.theme, 'default');
   assert.equal(state.homewatch[0].employeeId, 'employee-1');
   assert.equal(state.homewatch[0].payments[0].billingState, 'none');
   assert.equal(state.homewatch[0].advances[0].splitEventId, '');
-  assert.equal(state.jobs[0].jobType, 'hourly');
+  assert.equal(state.jobs[0].jobType, 'quoted');
   assert.equal(state.jobs[0].employeeId, 'employee-1');
-  assert.deepEqual(state.jobs[0].jobNotes, [{
-    id: 'generated-2',
-    text: 'Old job note',
-    date: '2026-01-01'
-  }]);
-  assert.equal(state.jobs[0].notes, undefined);
-  assert.equal(state.jobs[0].milestones[0].status, 'collected');
-  assert.equal(state.jobs[0].milestones[0].collected, undefined);
+  assert.deepEqual(state.jobs[0].jobNotes, []);
+  assert.equal(state.jobs[0].notes, 'Old job note');
+  assert.equal(state.jobs[0].milestones[0].status, 'pending');
+  assert.equal(state.jobs[0].milestones[0].collected, true);
   assert.equal(state.jobs[0].addOns[0].status, 'pending');
-  assert.equal(state.jobs[0].addOns[0].collected, undefined);
-  assert.equal(state.jobs[0].partialCollections[0].id, 'generated-4');
+  assert.equal(state.jobs[0].addOns[0].collected, false);
+  assert.equal(state.jobs[0].partialCollections[0].id, 'generated-1');
   assert.equal(state.jobs[0].partialCollections[0].snapshotBefore.revenueItems.length, 0);
 });
 
