@@ -27,6 +27,7 @@ const V2_PERSISTENCE = window.Tracker2Persistence.createPersistenceBoundary({
   mode: BUILD_CONFIG.mode,
   writeState: next => DOC.set(next)
 });
+const V2_HISTORY = window.Tracker2History;
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
 let state = {
@@ -7010,23 +7011,20 @@ function formatPhone(p) {
 }
 
 function jobsForClient(client) {
-  if (!client) return [];
-  return (state.jobs || []).filter(job => jobBelongsToClient(job, client))
-    .sort((a, b) => String(b.date || b.createdAt || '').localeCompare(String(a.date || a.createdAt || '')));
+  return V2_HISTORY.jobsForClient(state.jobs || [], client);
 }
 
 function jobBelongsToClient(job, client) {
-  if (!job || !client) return false;
-  if (job.clientId === client.id) return true;
-  if (job.clientId) return false;
-  const names = new Set(clientMatchNames(client).map(n => n.toLowerCase().trim()));
-  return names.has(String(job.name || '').toLowerCase().trim());
+  return V2_HISTORY.jobBelongsToClient(job, client);
 }
 
 function clientJobHistorySection(client) {
-  const jobs = jobsForClient(client);
-  const rows = jobs.map(job => {
-    const c = calcJob(job);
+  const history = V2_HISTORY.buildClientHistory({
+    client,
+    jobs: state.jobs || [],
+    calculateJob: calcJob
+  });
+  const rows = history.jobSummaries.map(({ job, calculations: c }) => {
     const date = job.date ? (fmtDate(job.date) || job.date) : 'No date';
     const status = job.status === 'complete' ? 'Completed' : 'In progress';
     const balance = Math.abs(Number(c.outstanding || 0)) > 0.005
@@ -7035,19 +7033,20 @@ function clientJobHistorySection(client) {
     const pay = Number(c.potentialEmpBalance || 0) > 0.005
       ? ` | Pay due ${fmt(c.potentialEmpBalance)}`
       : Number(c.potentialEmpBalance || 0) < -0.005 ? ` | Employee credit ${fmt(Math.abs(c.potentialEmpBalance))}` : '';
+    const historyLabel = job.legacy ? ' | Historical' : '';
     return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;margin-bottom:5px">
       <div style="min-width:0">
         <div style="font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(job.name || 'Untitled job')}</div>
-        <div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:2px">${esc(date)} | ${status} | Total ${fmt(c.contractTotal)} | ${balance}${pay}</div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:2px">${esc(date)} | ${status}${historyLabel} | Total ${fmt(c.contractTotal)} | ${balance}${pay}</div>
       </div>
       <button class="btn btn-ghost btn-sm" style="flex:none" onclick="event.stopPropagation();goToClientJob('${job.id}','${client.id}')">View</button>
     </div>`;
   }).join('');
-  const viewAll = jobs.length
+  const viewAll = history.jobs.length
     ? `<button class="btn btn-ghost btn-sm" style="margin-top:3px" onclick="event.stopPropagation();goToClientJobs('${client.id}')">View all</button>`
     : '';
   return `<div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
-    <div style="font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--text3);margin-bottom:8px">Job history (${jobs.length})</div>
+    <div style="font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--text3);margin-bottom:8px">Job history (${history.jobs.length})</div>
     ${rows || '<div style="color:var(--text3);font-size:13px">No jobs recorded for this client.</div>'}
     ${viewAll}
   </div>`;

@@ -86,6 +86,7 @@ async function main() {
       await page.waitForFunction(() => window.TRACKER_BUILD?.mode === 'local-preview');
       await page.waitForFunction(() => !!window.Tracker2JobDomain);
       await page.waitForFunction(() => !!window.Tracker2Persistence);
+      await page.waitForFunction(() => !!window.Tracker2History);
       await page.waitForFunction(() => document.body.innerText.includes('TRACKER 2.0 LOCAL PREVIEW'));
       await page.waitForFunction(() => {
         const overlay = document.getElementById('loginOverlay');
@@ -113,6 +114,7 @@ async function main() {
             .every(name => typeof domain[name] === 'function'),
           persistenceModule: typeof window.Tracker2Persistence.createPersistenceBoundary === 'function',
           previewPersistence: window.Tracker2Persistence.createPersistenceBoundary({ mode: 'local-preview', writeState: () => {} }).isPreview,
+          historyModule: typeof window.Tracker2History.buildClientHistory === 'function',
           validationOk: validation.ok,
           milestoneOk: milestones.ok
         };
@@ -125,6 +127,7 @@ async function main() {
       assert.equal(result.domainFunctions, true);
       assert.equal(result.persistenceModule, true);
       assert.equal(result.previewPersistence, true);
+      assert.equal(result.historyModule, true);
       assert.equal(result.validationOk, true);
       assert.equal(result.milestoneOk, true);
 
