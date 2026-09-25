@@ -28,6 +28,7 @@ const V2_PERSISTENCE = window.Tracker2Persistence.createPersistenceBoundary({
   writeState: next => DOC.set(next)
 });
 const V2_HISTORY = window.Tracker2History;
+const V2_FINANCIAL = window.Tracker2Financial;
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
 let state = {
@@ -773,204 +774,43 @@ async function callSquareFn(endpoint, payload = {}) {
 }
 
 // ─── CALCULATIONS ─────────────────────────────────────────────────────────────
-function calcSplit(gross, { empShare, feeRate, txnFee = 0, txnCount = 0 }) {
-  const normalizedGross = _roundMoney(gross);
-  const totalFees  = _roundMoney(normalizedGross * feeRate + txnFee * txnCount);
-  const netRevenue = _roundMoney(normalizedGross - totalFees);
-  const empOwed    = _roundMoney(netRevenue * empShare);
-  const ownerOwed  = _roundMoney(netRevenue * (1 - empShare));
-  return { totalFees, netRevenue, empOwed, ownerOwed };
-}
-
 function getEmp(userId) {
   return state.users.find(u => u.id === userId);
 }
+function calcSplit(gross, options) {
+  return V2_FINANCIAL.calcSplit(gross, options);
+}
 function _jobType(job) {
-  if (job?.jobType === 'hourly' || job?.jobType === 'hourly2') return 'hourly';
-  return 'quoted';
+  return V2_FINANCIAL.jobType(job);
 }
 function _jobWorkCompleted(job) {
-  return job?.workCompleted !== false;
+  return V2_FINANCIAL.jobWorkCompleted(job);
 }
-
-// Some older records retain their payment state in billingState/status as
-// "paid" while newer records use "collected". Treat both the same in the
-// financial calculations so the breakdown agrees with the billing display.
 function _isCollectedBillingItem(item, status = null) {
-  const itemStatus = status ?? item?.status;
-  return itemStatus === 'collected' || itemStatus === 'paid' || item?.billingState === 'paid';
+  return V2_FINANCIAL.isCollectedBillingItem(item, status);
 }
-
 function _milestoneBasis(job) {
-  return job?.milestoneBasis === 'amount' ? 'amount' : 'percent';
+  return V2_FINANCIAL.milestoneBasis(job);
 }
-
 function _milestoneAmount(job, milestone) {
-  if (_milestoneBasis(job) === 'amount' && milestone?.amount !== undefined) {
-    return _roundMoney(Number(milestone.amount || 0));
-  }
-  return _roundMoney((Number(milestone?.pct || 0) / 100) * Number(job?.quote || 0));
+  return V2_FINANCIAL.milestoneAmount(job, milestone);
 }
-
 function _milestonePercent(job, milestone) {
-  if (_milestoneBasis(job) === 'percent') return Number(milestone?.pct || 0);
-  const quote = Number(job?.quote || 0);
-  return quote > 0 ? (Number(milestone?.amount || 0) / quote) * 100 : 0;
+  return V2_FINANCIAL.milestonePercent(job, milestone);
 }
-
 function calcJob(job) {
-  const emp = getEmp(job.employeeId);
-  const empShare = emp?.empShare ?? 0.66;
-  const { feeRate, txnFee = 0, debtOwnerShare } = state.settings;
-  const normalOwnerShare = 1 - empShare;
-  const effectiveOwnerShare = job.repaymentMode ? (debtOwnerShare || 0.50) : normalOwnerShare;
-  const effectiveEmpShare   = 1 - effectiveOwnerShare;
-  const ownerShare = effectiveOwnerShare;
-  const jobType = _jobType(job);
-  const isLegacyHourly = false;
-  const isHourly = jobType === 'hourly';
-  const revenueItems = isLegacyHourly ? (job.revenueItems || []) : [];
-  const revenueTotal = revenueItems.reduce((s, r) => s + (r.amount || 0), 0);
-  const hourlyRate = Number(job.hourlyRate || 0);
-  const hoursTotal = (job.addOns || []).filter(a => !!a.isHours).reduce((s, a) => s + (a.amount || 0), 0);
-  const loggedHoursTotal = (job.hours || []).reduce((s, h) => s + (h.hours || 0), 0);
-  const loggedHoursAmount = _roundMoney(loggedHoursTotal * hourlyRate);
-  const materialChargeTotal = (job.materials || []).reduce((s, m) => s + Number(m.chargeAmount ?? m.amount ?? 0), 0);
-
-  const addOnTotal      = isHourly ? 0 : (job.addOns || []).reduce((s,a) => s + (a.amount||0), 0);
-  const subtractionTotal= isHourly ? 0 : (job.subtractions || []).reduce((s,a) => s + (a.amount||0), 0);
-  const contractTotal   = isHourly
-    ? _roundMoney(loggedHoursAmount + hoursTotal + materialChargeTotal)
-    : (isLegacyHourly ? revenueTotal : (job.quote || 0)) + addOnTotal - subtractionTotal;
-
-  let collectedGross = 0, estimatedFees = 0, collectedTxns = 0;
-  if (isHourly) {
-    if (_isCollectedBillingItem(job, job.hourlyStatus || 'pending')) {
-      collectedGross += contractTotal;
-      estimatedFees += contractTotal * feeRate;
-      collectedTxns++;
-    }
-  } else if (isLegacyHourly) {
-    revenueItems.forEach(r => {
-      if (_isCollectedBillingItem(r, r.status || 'pending')) {
-        const g = Number(r.amount || 0);
-        collectedGross += g;
-        estimatedFees += g * feeRate;
-        collectedTxns++;
-      }
-    });
-  } else {
-    (job.milestones || []).forEach(m => {
-      if (_isCollectedBillingItem(m)) {
-        const g = _milestoneAmount(job, m);
-        collectedGross += g; estimatedFees += g * feeRate; collectedTxns++;
-      }
-    });
-  }
-  if (!isHourly) {
-    (job.addOns || []).forEach(a => {
-      if (_isCollectedBillingItem(a)) {
-        collectedGross += a.amount||0; estimatedFees += (a.amount||0) * feeRate; collectedTxns++;
-      }
-    });
-    (job.subtractions || []).forEach(a => {
-      if (_isCollectedBillingItem(a)) {
-        collectedGross -= a.amount||0; estimatedFees -= (a.amount||0) * feeRate;
-      }
-    });
-  }
-  estimatedFees += txnFee * collectedTxns;
-  const manualFees = (job.fees || []).reduce((s,f) => s + (f.amount||0), 0);
-  const totalFees = estimatedFees + manualFees;
-  const netRevenue = collectedGross - totalFees;
-
-  let pendingGross = 0, pendingTxns = 0;
-  if (isHourly) {
-    if (!_isCollectedBillingItem(job, job.hourlyStatus || 'pending')) {
-      pendingGross += contractTotal;
-      pendingTxns++;
-    }
-  } else if (isLegacyHourly) {
-    revenueItems.forEach(r => {
-      if (_isCollectedBillingItem(r, r.status || 'pending')) return;
-      pendingGross += Number(r.amount || 0);
-      pendingTxns++;
-    });
-  } else {
-    (job.milestones || []).forEach(m => { if (!_isCollectedBillingItem(m)) pendingGross += _milestoneAmount(job, m); });
-    (job.milestones || []).forEach(m => { if (!_isCollectedBillingItem(m)) pendingTxns++; });
-  }
-  if (!isHourly) {
-    (job.addOns || []).forEach(a => { if (!_isCollectedBillingItem(a)) { pendingGross += a.amount||0; pendingTxns++; } });
-    (job.subtractions || []).forEach(a => { if (!_isCollectedBillingItem(a)) pendingGross -= a.amount||0; });
-  }
-
-  const ownerMats = (job.materials||[]).filter(m=>m.who==='owner').reduce((s,m)=>s+Number(m.costAmount ?? m.amount ?? 0),0);
-  const empMats   = (job.materials||[]).filter(m=>m.who==='emp').reduce((s,m)=>s+Number(m.costAmount ?? m.amount ?? 0),0);
-  const totalMats = ownerMats + empMats;
-
-  const profitPool  = Math.max(0, netRevenue - totalMats);
-  const empProfit   = profitPool * effectiveEmpShare;
-  const ownerProfit = profitPool * effectiveOwnerShare;
-  const debtContribution = job.repaymentMode ? Math.max(0, profitPool * ((debtOwnerShare||0.50) - normalOwnerShare)) : 0;
-  const tipsTotal       = (job.tips||[]).reduce((s,t)=>s+(t.amount||0),0);
-  const advancesPaid    = (job.advances||[]).reduce((s,a)=>s+(a.amount||0),0);
-  const workCompleted   = _jobWorkCompleted(job);
-  const empTotalOwed    = workCompleted ? empProfit + empMats + tipsTotal : 0;
-  const linkedDebtPaid  = (state.debtPayments||[]).filter(p=>p.linkedJobId===job.id).reduce((s,p)=>s+(p.amount||0),0);
-  const empBalance      = (workCompleted ? empTotalOwed : 0) - advancesPaid - linkedDebtPaid;
-  const outstanding     = contractTotal - collectedGross;
-  const projectedGross  = collectedGross + pendingGross;
-  const projectedTxns   = collectedTxns + pendingTxns;
-  const projectedFees   = projectedGross * feeRate + txnFee * projectedTxns + manualFees;
-  const projectedNetRevenue = projectedGross - projectedFees;
-  const projectedProfitPool = Math.max(0, projectedNetRevenue - totalMats);
-  const potentialEmpTotalOwed = workCompleted ? projectedProfitPool * effectiveEmpShare + empMats + tipsTotal : 0;
-  const potentialEmpBalance   = (workCompleted ? potentialEmpTotalOwed : 0) - advancesPaid - linkedDebtPaid;
-  const potentialOwnerProfit  = projectedProfitPool * effectiveOwnerShare;
-  const potentialOwnerTotal   = potentialOwnerProfit + ownerMats;
-  const potentialDebtContribution = job.repaymentMode
-    ? Math.max(0, projectedProfitPool * ((debtOwnerShare||0.50) - normalOwnerShare))
-    : 0;
-  const ownerTotal      = ownerProfit + ownerMats;
-  const totalHours      = (job.hours||[]).reduce((s,h)=>s+(h.hours||0),0);
-
-  return { contractTotal: _roundMoney(contractTotal), addOnTotal: _roundMoney(addOnTotal), subtractionTotal: _roundMoney(subtractionTotal), collectedGross: _roundMoney(collectedGross), pendingGross: _roundMoney(pendingGross), workCompleted,
-    totalFees: _roundMoney(totalFees), netRevenue: _roundMoney(netRevenue), totalMats: _roundMoney(totalMats), ownerMats: _roundMoney(ownerMats), empMats: _roundMoney(empMats),
-    profitPool: _roundMoney(profitPool), empProfit: _roundMoney(empProfit), ownerProfit: _roundMoney(ownerProfit), debtContribution: _roundMoney(debtContribution), tipsTotal: _roundMoney(tipsTotal),
-    empTotalOwed: _roundMoney(empTotalOwed), advancesPaid: _roundMoney(advancesPaid), linkedDebtPaid: _roundMoney(linkedDebtPaid), empBalance: _roundMoney(empBalance),
-    outstanding: _roundMoney(outstanding), projectedGross: _roundMoney(projectedGross), projectedFees: _roundMoney(projectedFees), projectedNetRevenue: _roundMoney(projectedNetRevenue), projectedProfitPool: _roundMoney(projectedProfitPool),
-    potentialEmpTotalOwed: _roundMoney(potentialEmpTotalOwed), potentialEmpBalance: _roundMoney(potentialEmpBalance),
-    potentialOwnerProfit: _roundMoney(potentialOwnerProfit), potentialOwnerTotal: _roundMoney(potentialOwnerTotal), potentialDebtContribution: _roundMoney(potentialDebtContribution),
-    ownerTotal: _roundMoney(ownerTotal), totalHours };
+  return V2_FINANCIAL.calcJob(job, {
+    employee: getEmp(job.employeeId),
+    settings: state.settings,
+    debtPayments: state.debtPayments
+  });
 }
-
 function calcHW(hw) {
-  const emp = getEmp(hw.employeeId);
-  const empShare = emp?.empShare ?? 0.66;
-  const { feeRate, txnFee = 0 } = state.settings;
-  const collectedPayments = (hw.payments||[]).filter(p=>p.status==='collected');
-  const collectedGross    = collectedPayments.reduce((s,p)=>s+(p.amount||0),0);
-  const txnCount          = collectedPayments.length;
-  const pendingGross      = (hw.payments||[]).filter(p=>p.status!=='collected').reduce((s,p)=>s+(p.amount||0),0);
-  const { totalFees, netRevenue, empOwed, ownerOwed } = calcSplit(collectedGross, { empShare, feeRate, txnFee, txnCount });
-  const advancesPaid   = (hw.advances||[]).reduce((s,a)=>s+(a.amount||0),0);
-  const linkedDebtPaid = (state.debtPayments||[]).filter(p=>p.linkedHWId===hw.id).reduce((s,p)=>s+(p.amount||0),0);
-  const empBalance     = empOwed - advancesPaid - linkedDebtPaid;
-  const { empOwed: potentialEmpOwed } = calcSplit(collectedGross + pendingGross, { empShare, feeRate, txnFee, txnCount: txnCount + (hw.payments||[]).filter(p=>p.status!=='collected').length });
-  const potentialEmpBalance = potentialEmpOwed - advancesPaid - linkedDebtPaid;
-  return {
-    collectedGross: _roundMoney(collectedGross),
-    pendingGross: _roundMoney(pendingGross),
-    totalFees: _roundMoney(totalFees),
-    netRevenue: _roundMoney(netRevenue),
-    empOwed: _roundMoney(empOwed),
-    ownerOwed: _roundMoney(ownerOwed),
-    advancesPaid: _roundMoney(advancesPaid),
-    linkedDebtPaid: _roundMoney(linkedDebtPaid),
-    empBalance: _roundMoney(empBalance),
-    potentialEmpBalance: _roundMoney(potentialEmpBalance)
-  };
+  return V2_FINANCIAL.calcHomewatch(hw, {
+    employee: getEmp(hw.employeeId),
+    settings: state.settings,
+    debtPayments: state.debtPayments
+  });
 }
 
 function getHWBillDateForMonth(hw, year, month) {
