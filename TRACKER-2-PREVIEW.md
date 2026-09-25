@@ -22,3 +22,13 @@ The script opens `http://127.0.0.1:8765/index.html` in the browser. A local web 
 - The production build remains on the `main` branch.
 
 The preview is still connected to the live database for reading, so it must be treated as a sensitive local tool. Do not use payment or other external-action workflows from it; those controls are intentionally blocked.
+
+## Automated checks
+
+From PowerShell in this folder, run:
+
+```powershell
+.\scripts\test-v2.ps1
+```
+
+This runs JavaScript syntax checks, the Tracker 2.0 domain tests, a headless browser smoke test against the local preview, and the local Square helper tests when the ignored `functions/` folder is present. The browser smoke test starts a temporary local server if port 8765 is not already in use.

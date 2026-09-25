@@ -13,6 +13,10 @@ try {
   npm test --prefix v2
   if ($LASTEXITCODE -ne 0) { throw 'Tracker 2.0 domain tests failed.' }
 
+  Write-Host 'Running local preview browser smoke test...'
+  node scripts/preview-smoke.js
+  if ($LASTEXITCODE -ne 0) { throw 'Local preview browser smoke test failed.' }
+
   if (Test-Path -LiteralPath 'functions/package.json') {
     Write-Host 'Running local Square/backend helper tests...'
     npm test --prefix functions
