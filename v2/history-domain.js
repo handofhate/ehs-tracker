@@ -47,6 +47,15 @@
     return ['collected', 'paid'].includes(item?.status) || item?.billingState === 'paid';
   }
 
+  // A partial payment is represented twice in the job data: once as the
+  // payment record and once as a collected child line. The payment record is
+  // the history event; the synthetic child must not create a second event.
+  function isSyntheticPartialItem(job, item) {
+    if (!item || !Array.isArray(job?.partialCollections) || !job.partialCollections.length) return false;
+    if (item.partialState === 'paid') return true;
+    return !!item.partialCollectionId && job.partialCollections.some(payment => payment?.id === item.partialCollectionId);
+  }
+
   function milestoneAmount(job, milestone) {
     if (job?.milestoneBasis === 'amount' && milestone?.amount !== undefined) {
       return roundMoney(milestone.amount);
@@ -57,7 +66,7 @@
   function paymentHistoryForJob(job) {
     const events = [];
     (job.milestones || []).forEach(item => {
-      if (!isCollected(item)) return;
+      if (!isCollected(item) || isSyntheticPartialItem(job, item)) return;
       events.push({
         id: item.id,
         source: 'milestone',
@@ -69,7 +78,7 @@
       });
     });
     (job.revenueItems || []).forEach(item => {
-      if (!isCollected(item)) return;
+      if (!isCollected(item) || isSyntheticPartialItem(job, item)) return;
       events.push({
         id: item.id,
         source: 'revenue',
@@ -81,7 +90,7 @@
       });
     });
     (job.addOns || []).forEach(item => {
-      if (!isCollected(item)) return;
+      if (!isCollected(item) || isSyntheticPartialItem(job, item)) return;
       events.push({
         id: item.id,
         source: 'addition',
@@ -93,7 +102,7 @@
       });
     });
     (job.subtractions || []).forEach(item => {
-      if (!isCollected(item)) return;
+      if (!isCollected(item) || isSyntheticPartialItem(job, item)) return;
       events.push({
         id: item.id,
         source: 'credit',

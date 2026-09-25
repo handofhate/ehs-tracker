@@ -109,3 +109,27 @@ test('preserves partial collection and tip details as history events', () => {
     item: job.partialCollections[0]
   }]);
 });
+
+test('does not duplicate a partial payment as a synthetic collected line', () => {
+  const { client } = mixedRecords();
+  const job = {
+    id: 'partial-split-job',
+    clientId: client.id,
+    name: 'Alex Example',
+    date: '2026-08-01',
+    createdVia: 'unified-v2',
+    milestoneBasis: 'amount',
+    milestones: [
+      { id: 'paid-child', label: 'Invoice', amount: 40, status: 'collected', partialState: 'paid' },
+      { id: 'remaining-child', label: 'Invoice', amount: 60, status: 'pending', partialState: 'remaining' },
+      { id: 'later-payment', label: 'Final invoice', amount: 20, status: 'collected' }
+    ],
+    partialCollections: [{ id: 'partial-2', date: '2026-08-10', paymentTotal: 40, tipAmount: 0, note: 'Deposit' }]
+  };
+  const history = buildClientHistory({ client, jobs: [job] });
+
+  assert.deepEqual(history.payments.map(payment => ({ source: payment.source, id: payment.id, amount: payment.amount })), [
+    { source: 'milestone', id: 'later-payment', amount: 20 },
+    { source: 'partial-collection', id: 'partial-2', amount: 40 }
+  ]);
+});

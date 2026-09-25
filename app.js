@@ -1352,6 +1352,7 @@ function setAllBillingStatus(jobId, status) {
       if (status === 'pending') job.hourlySquareInvoiceId = '';
     } else {
       item.status = status;
+      item.partialCollectionId = '';
     }
   });
   save();
@@ -2240,6 +2241,33 @@ function _buildLedgerFromStoredEvents() {
   const byEventId = {};
   (state.splitPayments || []).forEach(e => { if (e?.id) byEventId[e.id] = e; });
   (state.splitPayments || []).forEach(e => {
+    const linkedAdvances = _collectAdvanceRows().filter(({ advance }) => String(advance.splitEventId || '') === String(e.id));
+    const storedAllocations = e.allocations || [];
+    // New events carry advance IDs, so an event whose linked advances were
+    // deleted should disappear from the displayed ledger instead of becoming
+    // a ghost. Older events are kept as-is for backward compatibility.
+    const hasStoredAdvanceIds = storedAllocations.some(a => a?.advanceId);
+    if (!linkedAdvances.length && hasStoredAdvanceIds) return;
+    const allocations = linkedAdvances.length
+      ? linkedAdvances.map(({ sourceKind, sourceId, sourceName, advance }) => ({
+        sourceKind,
+        sourceId,
+        sourceName,
+        amount: Number(advance.amount || 0),
+        payType: advance.payType || '',
+        advanceId: advance.id || ''
+      }))
+      : storedAllocations.map(a => ({
+        sourceKind: a.sourceKind || '',
+        sourceId: a.sourceId || '',
+        sourceName: a.sourceName || '',
+        amount: Number(a.amount || 0),
+        payType: a.payType || '',
+        advanceId: a.advanceId || ''
+      }));
+    const total = linkedAdvances.length
+      ? allocations.reduce((sum, allocation) => sum + Number(allocation.amount || 0), 0)
+      : Number(e.total || 0);
     rows.push({
       id: `stored:${e.id}`,
       source: 'stored',
@@ -2247,14 +2275,8 @@ function _buildLedgerFromStoredEvents() {
       label: e.label || 'Split payment',
       mode: e.mode || 'split',
       employeeId: e.employeeId || '',
-      total: Number(e.total || 0),
-      allocations: (e.allocations || []).map(a => ({
-        sourceKind: a.sourceKind || '',
-        sourceId: a.sourceId || '',
-        sourceName: a.sourceName || '',
-        amount: Number(a.amount || 0),
-        payType: a.payType || ''
-      }))
+      total,
+      allocations
     });
   });
   return { rows, byEventId };
@@ -2638,8 +2660,9 @@ async function saveSplitPay() {
       const job = state.jobs.find(j => j.id === jobId);
       if (job) {
         if (!job.advances) job.advances = [];
-        job.advances.push({ id: uid(), label: eventLabel, amount, date, payType, splitEventId });
-        allocations.push({ sourceKind: 'job', sourceId: job.id, sourceName: job.name || 'Job', amount, payType: payType || '' });
+        const advanceId = uid();
+        job.advances.push({ id: advanceId, label: eventLabel, amount, date, payType, splitEventId });
+        allocations.push({ sourceKind: 'job', sourceId: job.id, sourceName: job.name || 'Job', amount, payType: payType || '', advanceId });
         if (job.employeeId) employeeIds.add(job.employeeId);
       }
     });
@@ -2647,8 +2670,9 @@ async function saveSplitPay() {
       const hw = (state.homewatch || []).find(h => h.id === hwId);
       if (hw) {
         if (!hw.advances) hw.advances = [];
-        hw.advances.push({ id: uid(), label: eventLabel, amount, date, payType, splitEventId });
-        allocations.push({ sourceKind: 'hw', sourceId: hw.id, sourceName: hw.name || 'HomeWatch', amount, payType: payType || '' });
+        const advanceId = uid();
+        hw.advances.push({ id: advanceId, label: eventLabel, amount, date, payType, splitEventId });
+        allocations.push({ sourceKind: 'hw', sourceId: hw.id, sourceName: hw.name || 'HomeWatch', amount, payType: payType || '', advanceId });
         if (hw.employeeId) employeeIds.add(hw.employeeId);
       }
     });
@@ -3031,6 +3055,7 @@ function _applyPartialToAmountList(list, idx, collectAmt, meta = {}) {
       item.partialPercent = meta.partialPercent || 0;
       item.partialDate = meta.partialDate || item.partialDate || '';
     }
+    if (meta.partialCollectionId) item.partialCollectionId = meta.partialCollectionId;
     return;
   }
   const baseGroup = item.partialGroupId || item.id || uid();
@@ -3048,6 +3073,7 @@ function _applyPartialToAmountList(list, idx, collectAmt, meta = {}) {
     partialMode: meta.partialMode || item.partialMode || '',
     partialPercent: meta.partialPercent || item.partialPercent || 0,
     partialDate: meta.partialDate || item.partialDate || '',
+    partialCollectionId: '',
     appliedByPartial: !!meta.appliedByPartial
   };
   const collected = {
@@ -3062,6 +3088,7 @@ function _applyPartialToAmountList(list, idx, collectAmt, meta = {}) {
     partialMode: meta.partialMode || item.partialMode || '',
     partialPercent: meta.partialPercent || item.partialPercent || 0,
     partialDate: meta.partialDate || item.partialDate || '',
+    partialCollectionId: meta.partialCollectionId || '',
     appliedByPartial: !!meta.appliedByPartial
   };
   _clearSquareFields(remaining);
@@ -3087,6 +3114,7 @@ function _applyPartialToMilestones(job, idx, collectAmt, meta = {}) {
       item.partialPercent = meta.partialPercent || 0;
       item.partialDate = meta.partialDate || item.partialDate || '';
     }
+    if (meta.partialCollectionId) item.partialCollectionId = meta.partialCollectionId;
     return;
   }
   const currentPct = _milestonePercent(job, item);
@@ -3115,7 +3143,8 @@ function _applyPartialToMilestones(job, idx, collectAmt, meta = {}) {
     partialParentAmount: item.partialParentAmount ?? total,
     partialMode: meta.partialMode || item.partialMode || '',
     partialPercent: meta.partialPercent || item.partialPercent || 0,
-    partialDate: meta.partialDate || item.partialDate || ''
+    partialDate: meta.partialDate || item.partialDate || '',
+    partialCollectionId: ''
   };
   const collected = {
     ...item,
@@ -3130,7 +3159,8 @@ function _applyPartialToMilestones(job, idx, collectAmt, meta = {}) {
     partialParentAmount: item.partialParentAmount ?? total,
     partialMode: meta.partialMode || item.partialMode || '',
     partialPercent: meta.partialPercent || item.partialPercent || 0,
-    partialDate: meta.partialDate || item.partialDate || ''
+    partialDate: meta.partialDate || item.partialDate || '',
+    partialCollectionId: meta.partialCollectionId || ''
   };
   _clearSquareFields(remaining);
   _clearSquareFields(collected);
@@ -3199,6 +3229,7 @@ function savePartialCollect() {
       subtractions: JSON.parse(JSON.stringify(job.subtractions || [])),
       tips: JSON.parse(JSON.stringify(job.tips || []))
     };
+    const partialId = uid();
     const byType = { milestones: [], revenueItems: [], addOns: [] };
     plan.allocs.forEach(a => {
       const row = partialCollectCtx.rows[a.rowIdx];
@@ -3206,13 +3237,13 @@ function savePartialCollect() {
       byType[row.itemType].push({ idx: row.idx, gross: a.gross });
     });
     byType.milestones.sort((a,b) => b.idx - a.idx).forEach(a =>
-      _applyPartialToMilestones(job, a.idx, a.gross, { partialMode: mode, partialPercent, partialDate: date })
+      _applyPartialToMilestones(job, a.idx, a.gross, { partialMode: mode, partialPercent, partialDate: date, partialCollectionId: partialId })
     );
     byType.revenueItems.sort((a,b) => b.idx - a.idx).forEach(a =>
-      _applyPartialToAmountList(job.revenueItems, a.idx, a.gross, { partialMode: mode, partialPercent, partialDate: date })
+      _applyPartialToAmountList(job.revenueItems, a.idx, a.gross, { partialMode: mode, partialPercent, partialDate: date, partialCollectionId: partialId })
     );
     byType.addOns.sort((a,b) => b.idx - a.idx).forEach(a =>
-      _applyPartialToAmountList(job.addOns, a.idx, a.gross, { partialMode: mode, partialPercent, partialDate: date })
+      _applyPartialToAmountList(job.addOns, a.idx, a.gross, { partialMode: mode, partialPercent, partialDate: date, partialCollectionId: partialId })
     );
     addTipRecord();
     if (partialCollectCtx.autoSub && plan.subCollectedTotal > 0.0001) {
@@ -3227,7 +3258,7 @@ function savePartialCollect() {
       presetByKey[r.key] = { included: !!r.included, alloc: Number(r.alloc || 0) };
     });
     job.partialCollections.push({
-      id: uid(),
+      id: partialId,
       date,
       note,
       mode,
@@ -3241,7 +3272,7 @@ function savePartialCollect() {
     });
     if (!job.jobNotes) job.jobNotes = [];
     const summary = note || `Revenue collection logged: ${fmt(plan.paymentTotal)}${plan.tipAmount > 0 ? ` plus ${fmt(plan.tipAmount)} tip` : ''} on ${date}.`;
-    job.jobNotes.push({ id: uid(), text: summary, date, authorId: currentUser?.id || '', authorName: currentUser?.name || 'Admin' });
+    job.jobNotes.push({ id: uid(), text: summary, date, authorId: currentUser?.id || '', authorName: currentUser?.name || 'Admin', source: 'partial-collection', partialCollectionId: partialId });
     save(); renderJobs(); closeModal('partialCollectModal');
     partialCollectCtx = null;
   };
@@ -3271,6 +3302,7 @@ function deletePartialCollection(jobId, partialId) {
     job.subtractions = JSON.parse(JSON.stringify(snap.subtractions || []));
     job.tips = JSON.parse(JSON.stringify(snap.tips || []));
     job.partialCollections = arr.filter(p => p.id !== partialId);
+    job.jobNotes = (job.jobNotes || []).filter(note => note?.partialCollectionId !== partialId);
     save(); renderJobs();
   }, { title:'Delete Partial Payment', okLabel:'Delete', danger:true });
 }
@@ -3293,6 +3325,7 @@ function editPartialCollection(jobId, partialId) {
   job.subtractions = JSON.parse(JSON.stringify(snap.subtractions || []));
   job.tips = JSON.parse(JSON.stringify(snap.tips || []));
   job.partialCollections = arr.filter(p => p.id !== partialId);
+  job.jobNotes = (job.jobNotes || []).filter(note => note?.partialCollectionId !== partialId);
   save();
   openPartialCollect(jobId, {
     mode: entry.mode || 'dollar',
@@ -3336,12 +3369,14 @@ function cycleStatus(jobId, itemType, idx) {
     showConfirm(msg, () => {
       const cycle = { pending:'invoiced', invoiced:'collected', collected:'pending' };
       item.status = cycle[item.status||'pending'];
+      item.partialCollectionId = '';
       save(); renderJobs();
     });
     return;
   }
   const cycle = { pending:'invoiced', invoiced:'collected', collected:'pending' };
   item.status = cycle[item.status||'pending'];
+  item.partialCollectionId = '';
   save(); renderJobs();
 }
 function cycleHourlyStatus(jobId) {
