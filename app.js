@@ -5071,182 +5071,38 @@ function setUnifiedPaymentMode(mode, editMilestones = null) {
 function _readUnifiedMilestones(existing = null) {
   const mode = document.getElementById('uj_paymentMode')?.value || 'single';
   const basis = _unifiedMilestoneBasis();
-  if (mode === 'single') {
-    const prior = Array.isArray(existing) && existing.length === 1 ? existing[0] : null;
-    return [{ ...(prior ? JSON.parse(JSON.stringify(prior)) : {}), id:prior?.id || uid(), label:'Invoice',
-      ...(basis === 'amount' ? { amount:_unifiedMilestoneTarget(), pct:100 } : { pct:100 }),
-      status:prior?.status || 'pending' }];
-  }
-  const milestones = [];
-  let total = 0;
+  const entries = [];
   document.querySelectorAll('#uj_milestoneList [id^="uj_mlpct_"]').forEach((el, i) => {
     const id = el.id.slice('uj_mlpct_'.length);
     const row = el.closest('.milestone-row');
     const preset = row?._preset || {};
     const value = parseFloat(el.value) || 0;
     const label = document.getElementById(`uj_mllabel_${id}`)?.value.trim() || `Milestone ${i + 1}`;
-    if (value > 0) {
-      milestones.push({ ...preset, id:preset.id || uid(), label,
-        ...(basis === 'amount' ? { amount:_roundMoney(value), pct:100 * value / Math.max(0.01, _unifiedMilestoneTarget()) } : { pct:_roundPct(value) }),
-        status:preset.status || 'pending' });
-    }
-    total += value;
+    entries.push({ value, label, preset });
   });
-  const target = basis === 'amount' ? _unifiedMilestoneTarget() : 100;
-  if (!milestones.length || Math.abs(total - target) > 0.01) {
-    showAlert(basis === 'amount'
-      ? `Milestone dollar amounts add up to ${fmt(total)}, not ${fmt(target)}.`
-      : `Milestone percentages add up to ${total}%, not 100%.`);
+  const result = V2_JOB_DOMAIN.buildMilestones({
+    mode,
+    basis,
+    target: _unifiedMilestoneTarget(),
+    existing,
+    entries,
+    idFactory: uid
+  });
+  if (!result.ok) {
+    showAlert(result.error.basis === 'amount'
+      ? `Milestone dollar amounts add up to ${fmt(result.error.total)}, not ${fmt(result.error.expected)}.`
+      : `Milestone percentages add up to ${result.error.total}%, not 100%.`);
     return null;
   }
-  return milestones;
+  return result.milestones;
 }
 
 function _unifiedClone(value) {
   return value === undefined || value === null ? {} : JSON.parse(JSON.stringify(value));
 }
 
-function _unifiedFindRecord(job, id) {
-  if (!job || !id) return null;
-  const groups = [
-    ['quoteItems', job.quoteItems],
-    ['materials', job.materials],
-    ['subtractions', job.subtractions],
-    ['addOns', job.addOns]
-  ];
-  for (const [kind, items] of groups) {
-    const item = (items || []).find(entry => entry?.id === id);
-    if (item) return { kind, item };
-  }
-  return null;
-}
-
 function _unifiedBuildCollections(job, lines, date, hourlyOnly) {
-  const source = job || {};
-  const storedLines = _unifiedStoredLines(source);
-  const originalIds = new Set(storedLines.map(line => line?.id).filter(Boolean));
-  if (!originalIds.size) lines.forEach(line => { if (line?.id) originalIds.add(line.id); });
-  const originalMaterialIds = new Set(storedLines.filter(line => line?.type === 'material').map(line => line.id).filter(Boolean));
-  if (!originalMaterialIds.size) lines.filter(line => line?.type === 'material').forEach(line => originalMaterialIds.add(line.id));
-  const previousTypeById = new Map(storedLines.map(line => [line?.id, line?.type]));
-  const find = (items, id) => (items || []).find(item => item?.id === id);
-  const findLinkedMaterialCharge = id => (source.addOns || []).find(item => item?.chargeType === 'materials' && item?.sourceItemId === id);
-  const cleanCopy = value => _unifiedClone(value);
-
-  const extraQuoteItems = (source.quoteItems || [])
-    .filter(item => !originalIds.has(item?.id))
-    .map(cleanCopy);
-  const extraMaterials = (source.materials || [])
-    .filter(item => !originalIds.has(item?.id))
-    .map(cleanCopy);
-  const extraSubtractions = (source.subtractions || [])
-    .filter(item => !originalIds.has(item?.id))
-    .map(cleanCopy);
-  const extraAddOns = (source.addOns || [])
-    .filter(item => !originalIds.has(item?.id) && !(item?.chargeType === 'materials' && originalMaterialIds.has(item?.sourceItemId)))
-    .map(cleanCopy);
-  const quoteItems = [];
-  const materials = [];
-  const addOns = [];
-  const subtractions = [];
-
-  lines.forEach(line => {
-    const type = line.type;
-    const previousType = previousTypeById.get(line.id);
-    const priorDirect = _unifiedFindRecord(source, line.id)?.item;
-    const priorAddOn = find(source.addOns, line.id) || (previousType === 'material' ? findLinkedMaterialCharge(line.id) : null);
-
-    if (type === 'fixed') {
-      if (line.unifiedAddition) {
-        addOns.push({
-          ...(priorAddOn ? cleanCopy(priorAddOn) : {}),
-          id: line.id,
-          label: line.label,
-          description: line.description,
-          amount: line.amount,
-          date: priorAddOn?.date || date,
-          status: priorAddOn?.status || 'pending',
-          isHours: false,
-          hours: 0,
-          rate: 0,
-          chargeType: 'other'
-        });
-        return;
-      }
-      quoteItems.push({ ...(priorDirect ? cleanCopy(priorDirect) : {}), id:line.id, label:line.label, description:line.description, amount:line.amount });
-      return;
-    }
-    if (type === 'material') {
-      const priorMaterial = find(source.materials, line.id);
-      materials.push({
-        ...(priorMaterial ? cleanCopy(priorMaterial) : {}),
-        id:line.id,
-        label:line.label,
-        description:line.description,
-        amount:line.reimbursementAmount,
-        who:line.who,
-        billClient:!!line.billClient,
-        clientAmount:line.amount,
-        reimbursementAmount:line.reimbursementAmount,
-        chargeAmount:line.billClient ? line.amount : 0,
-        costAmount:line.reimbursementAmount
-      });
-      if (!hourlyOnly && line.billClient) {
-        addOns.push({
-          ...(priorAddOn ? cleanCopy(priorAddOn) : {}),
-          id:priorAddOn?.id || uid(),
-          label:line.label,
-          description:line.description,
-          amount:line.amount,
-          date:priorAddOn?.date || date,
-          status:priorAddOn?.status || 'pending',
-          isHours:false,
-          hours:0,
-          rate:0,
-          chargeType:'materials',
-          sourceItemId:line.id
-        });
-      }
-      return;
-    }
-    if (type === 'hourly' || type === 'other') {
-      const next = {
-        ...(priorAddOn ? cleanCopy(priorAddOn) : {}),
-        id:line.id,
-        label:line.label,
-        description:line.description,
-        amount:line.amount,
-        date:priorAddOn?.date || date,
-        status:priorAddOn?.status || 'pending',
-        isHours:type === 'hourly',
-        hours:type === 'hourly' ? line.hours : 0,
-        rate:type === 'hourly' ? line.rate : 0,
-        chargeType:type === 'hourly' ? 'hourly' : 'other'
-      };
-      delete next.sourceItemId;
-      addOns.push(next);
-      return;
-    }
-    if (type === 'credit') {
-      subtractions.push({
-        ...(priorDirect ? cleanCopy(priorDirect) : {}),
-        id:line.id,
-        label:line.label,
-        description:line.description,
-        amount:line.amount,
-        date:priorDirect?.date || date,
-        status:priorDirect?.status || 'pending',
-        sourceItemId:null
-      });
-    }
-  });
-
-  quoteItems.push(...extraQuoteItems);
-  materials.push(...extraMaterials);
-  addOns.push(...extraAddOns);
-  subtractions.push(...extraSubtractions);
-
-  return { quoteItems, materials, addOns, subtractions };
+  return V2_JOB_DOMAIN.buildCollections({ job, lines, date, hourlyOnly, idFactory: uid });
 }
 
 function _updateUnifiedPrimaryNote(job, text, date) {

@@ -2,6 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   applyProtectedEdits,
+  buildCollections,
+  buildMilestones,
   buildUnifiedJobRecord,
   normalizeLegacyJob,
   validateJobDraft
@@ -190,4 +192,98 @@ test('normalizes legacy jobs into read-only unified views without mutating them'
   assert.equal(normalized.readOnly, true);
   assert.deepEqual(normalized.unifiedLines.map(line => line.type), ['fixed', 'hourly', 'material', 'credit']);
   assert.equal(legacy.unifiedLines, undefined);
+});
+
+test('builds unified collections while preserving prior billing history and unrelated additions', () => {
+  const existing = {
+    unifiedLines: [
+      { id: 'labor-1', type: 'fixed' },
+      { id: 'material-1', type: 'material' }
+    ],
+    quoteItems: [{ id: 'labor-1', label: 'Install', amount: 300, status: 'paid' }],
+    materials: [{ id: 'material-1', label: 'Part', amount: 80, reimbursementAmount: 80, who: 'owner' }],
+    addOns: [
+      { id: 'charge-1', sourceItemId: 'material-1', chargeType: 'materials', amount: 100, status: 'collected' },
+      { id: 'old-addition', label: 'Legacy addition', amount: 15, status: 'paid' }
+    ],
+    subtractions: [{ id: 'old-credit', label: 'Legacy credit', amount: 5, status: 'collected' }]
+  };
+  const before = JSON.parse(JSON.stringify(existing));
+  const collections = buildCollections({
+    job: existing,
+    date: '2026-09-25',
+    lines: [
+      { id: 'labor-1', type: 'fixed', label: 'Install updated', description: 'Updated install', amount: 350 },
+      { id: 'material-1', type: 'material', label: 'Part', description: 'Part', amount: 120, reimbursementAmount: 90, who: 'employee', billClient: true },
+      { id: 'hour-1', type: 'hourly', label: 'Extra time', description: 'Extra time', amount: 50, hours: 2, rate: 25 },
+      { id: 'credit-1', type: 'credit', label: 'Courtesy credit', description: 'Credit', amount: 20 }
+    ],
+    idFactory: ids()
+  });
+
+  assert.equal(collections.quoteItems[0].amount, 350);
+  assert.equal(collections.quoteItems[0].status, 'paid');
+  assert.equal(collections.materials[0].reimbursementAmount, 90);
+  assert.equal(collections.addOns.find(item => item.sourceItemId === 'material-1').id, 'charge-1');
+  assert.equal(collections.addOns.find(item => item.id === 'hour-1').chargeType, 'hourly');
+  assert.equal(collections.addOns.find(item => item.id === 'old-addition').status, 'paid');
+  assert.equal(collections.subtractions.find(item => item.id === 'credit-1').status, 'pending');
+  assert.deepEqual(existing, before);
+});
+
+test('omits client-facing material charges for hourly-only jobs', () => {
+  const collections = buildCollections({
+    hourlyOnly: true,
+    date: '2026-09-25',
+    lines: [{ id: 'material-1', type: 'material', label: 'Part', amount: 100, reimbursementAmount: 75, billClient: true }],
+    idFactory: ids()
+  });
+
+  assert.equal(collections.materials.length, 1);
+  assert.equal(collections.addOns.length, 0);
+});
+
+test('builds single and custom milestone schedules with stable statuses', () => {
+  const single = buildMilestones({
+    mode: 'single',
+    basis: 'amount',
+    target: 450,
+    existing: [{ id: 'milestone-1', label: 'Old invoice', amount: 200, status: 'collected' }],
+    idFactory: ids()
+  });
+  assert.deepEqual(single.milestones[0], {
+    id: 'milestone-1',
+    label: 'Invoice',
+    amount: 450,
+    pct: 100,
+    status: 'collected'
+  });
+
+  const custom = buildMilestones({
+    mode: 'custom',
+    basis: 'percent',
+    entries: [
+      { value: 25, label: 'Start', preset: { id: 'start-1', status: 'collected' } },
+      { value: 75, label: 'Finish', preset: {} }
+    ],
+    idFactory: ids()
+  });
+  assert.deepEqual(custom.milestones.map(item => ({ id: item.id, label: item.label, pct: item.pct, status: item.status })), [
+    { id: 'start-1', label: 'Start', pct: 25, status: 'collected' },
+    { id: 'test-1', label: 'Finish', pct: 75, status: 'pending' }
+  ]);
+});
+
+test('rejects custom milestone schedules that do not reach their target', () => {
+  const result = buildMilestones({
+    mode: 'custom',
+    basis: 'amount',
+    target: 100,
+    entries: [{ value: 40, label: 'Deposit' }],
+    idFactory: ids()
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.milestones, null);
+  assert.deepEqual(result.error, { basis: 'amount', total: 40, expected: 100 });
 });

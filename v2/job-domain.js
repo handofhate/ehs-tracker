@@ -265,6 +265,202 @@
     return job;
   }
 
+  function roundPercent(value) {
+    return Math.round((Number(value) + Number.EPSILON) * 1000000) / 1000000;
+  }
+
+  function buildMilestones({
+    mode = 'single',
+    basis = 'percent',
+    target = 0,
+    existing = [],
+    entries = [],
+    idFactory = () => globalThis.crypto.randomUUID()
+  } = {}) {
+    const valueBasis = basis === 'amount' ? 'amount' : 'percent';
+    const prior = Array.isArray(existing) && existing.length === 1 ? clone(existing[0]) : null;
+    if (mode === 'single') {
+      return {
+        ok: true,
+        milestones: [{
+          ...(prior || {}),
+          id: prior?.id || idFactory(),
+          label: 'Invoice',
+          ...(valueBasis === 'amount'
+            ? { amount: roundMoney(target), pct: 100 }
+            : { pct: 100 }),
+          status: prior?.status || 'pending'
+        }],
+        error: ''
+      };
+    }
+
+    const milestones = [];
+    let total = 0;
+    (Array.isArray(entries) ? entries : []).forEach(entry => {
+      const value = Number(entry?.value || 0);
+      const preset = clone(entry?.preset || {});
+      const label = String(entry?.label || '').trim() || `Milestone ${milestones.length + 1}`;
+      if (value > 0) {
+        milestones.push({
+          ...preset,
+          id: preset.id || idFactory(),
+          label,
+          ...(valueBasis === 'amount'
+            ? { amount: roundMoney(value), pct: 100 * value / Math.max(0.01, Number(target || 0)) }
+            : { pct: roundPercent(value) }),
+          status: preset.status || 'pending'
+        });
+      }
+      total += value;
+    });
+
+    const expected = valueBasis === 'amount' ? Number(target || 0) : 100;
+    if (!milestones.length || Math.abs(total - expected) > 0.01) {
+      return {
+        ok: false,
+        milestones: null,
+        error: {
+          basis: valueBasis,
+          total: valueBasis === 'amount' ? roundMoney(total) : roundPercent(total),
+          expected: valueBasis === 'amount' ? roundMoney(expected) : 100
+        }
+      };
+    }
+    return { ok: true, milestones, error: '' };
+  }
+
+  function buildCollections({ job = null, lines = [], date = '', hourlyOnly = false, idFactory = () => globalThis.crypto.randomUUID() } = {}) {
+    const source = job || {};
+    const storedLines = Array.isArray(source.unifiedLines) && source.unifiedLines.length
+      ? clone(source.unifiedLines)
+      : legacyLines(source);
+    const originalIds = new Set(storedLines.map(line => line?.id).filter(Boolean));
+    if (!originalIds.size) lines.forEach(line => { if (line?.id) originalIds.add(line.id); });
+    const originalMaterialIds = new Set(storedLines.filter(line => line?.type === 'material').map(line => line.id).filter(Boolean));
+    if (!originalMaterialIds.size) lines.filter(line => line?.type === 'material').forEach(line => originalMaterialIds.add(line.id));
+    const previousTypeById = new Map(storedLines.map(line => [line?.id, line?.type]));
+    const find = (items, id) => (items || []).find(item => item?.id === id);
+    const findLinkedMaterialCharge = id => (source.addOns || []).find(item => item?.chargeType === 'materials' && item?.sourceItemId === id);
+    const cleanCopy = value => clone(value);
+    const findRecord = (id) => {
+      const groups = [source.quoteItems, source.materials, source.subtractions, source.addOns];
+      for (const items of groups) {
+        const item = (items || []).find(entry => entry?.id === id);
+        if (item) return item;
+      }
+      return null;
+    };
+
+    const extraQuoteItems = (source.quoteItems || []).filter(item => !originalIds.has(item?.id)).map(cleanCopy);
+    const extraMaterials = (source.materials || []).filter(item => !originalIds.has(item?.id)).map(cleanCopy);
+    const extraSubtractions = (source.subtractions || []).filter(item => !originalIds.has(item?.id)).map(cleanCopy);
+    const extraAddOns = (source.addOns || [])
+      .filter(item => !originalIds.has(item?.id) && !(item?.chargeType === 'materials' && originalMaterialIds.has(item?.sourceItemId)))
+      .map(cleanCopy);
+    const quoteItems = [];
+    const materials = [];
+    const addOns = [];
+    const subtractions = [];
+
+    lines.forEach(line => {
+      const type = line.type;
+      const previousType = previousTypeById.get(line.id);
+      const priorDirect = findRecord(line.id);
+      const priorAddOn = find(source.addOns, line.id) || (previousType === 'material' ? findLinkedMaterialCharge(line.id) : null);
+
+      if (type === 'fixed') {
+        if (line.unifiedAddition) {
+          addOns.push({
+            ...(priorAddOn ? cleanCopy(priorAddOn) : {}),
+            id: line.id,
+            label: line.label,
+            description: line.description,
+            amount: line.amount,
+            date: priorAddOn?.date || date,
+            status: priorAddOn?.status || 'pending',
+            isHours: false,
+            hours: 0,
+            rate: 0,
+            chargeType: 'other'
+          });
+          return;
+        }
+        quoteItems.push({ ...(priorDirect ? cleanCopy(priorDirect) : {}), id: line.id, label: line.label, description: line.description, amount: line.amount });
+        return;
+      }
+      if (type === 'material') {
+        const priorMaterial = find(source.materials, line.id);
+        materials.push({
+          ...(priorMaterial ? cleanCopy(priorMaterial) : {}),
+          id: line.id,
+          label: line.label,
+          description: line.description,
+          amount: line.reimbursementAmount,
+          who: line.who,
+          billClient: !!line.billClient,
+          clientAmount: line.amount,
+          reimbursementAmount: line.reimbursementAmount,
+          chargeAmount: line.billClient ? line.amount : 0,
+          costAmount: line.reimbursementAmount
+        });
+        if (!hourlyOnly && line.billClient) {
+          addOns.push({
+            ...(priorAddOn ? cleanCopy(priorAddOn) : {}),
+            id: priorAddOn?.id || idFactory(),
+            label: line.label,
+            description: line.description,
+            amount: line.amount,
+            date: priorAddOn?.date || date,
+            status: priorAddOn?.status || 'pending',
+            isHours: false,
+            hours: 0,
+            rate: 0,
+            chargeType: 'materials',
+            sourceItemId: line.id
+          });
+        }
+        return;
+      }
+      if (type === 'hourly' || type === 'other') {
+        const next = {
+          ...(priorAddOn ? cleanCopy(priorAddOn) : {}),
+          id: line.id,
+          label: line.label,
+          description: line.description,
+          amount: line.amount,
+          date: priorAddOn?.date || date,
+          status: priorAddOn?.status || 'pending',
+          isHours: type === 'hourly',
+          hours: type === 'hourly' ? line.hours : 0,
+          rate: type === 'hourly' ? line.rate : 0,
+          chargeType: type === 'hourly' ? 'hourly' : 'other'
+        };
+        delete next.sourceItemId;
+        addOns.push(next);
+        return;
+      }
+      if (type === 'credit') {
+        subtractions.push({
+          ...(priorDirect ? cleanCopy(priorDirect) : {}),
+          id: line.id,
+          label: line.label,
+          description: line.description,
+          amount: line.amount,
+          date: priorDirect?.date || date,
+          status: priorDirect?.status || 'pending',
+          sourceItemId: null
+        });
+      }
+    });
+
+    quoteItems.push(...extraQuoteItems);
+    materials.push(...extraMaterials);
+    addOns.push(...extraAddOns);
+    subtractions.push(...extraSubtractions);
+    return { quoteItems, materials, addOns, subtractions };
+  }
+
   function legacyLines(job) {
     if (Array.isArray(job?.unifiedLines) && job.unifiedLines.length) return clone(job.unifiedLines);
     return [
@@ -317,11 +513,14 @@
 
   return Object.freeze({
     applyProtectedEdits,
+    buildCollections,
+    buildMilestones,
     buildUnifiedJobRecord,
     clone,
     legacyLines,
     normalizeLegacyJob,
     roundMoney,
+    roundPercent,
     validateJobDraft
   });
 });
