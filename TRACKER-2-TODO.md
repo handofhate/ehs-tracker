@@ -24,7 +24,7 @@ This is the working plan for the Tracker 2.0 rebuild and cutover. Tracker 1.0 re
 - [x] Review the 2 jobs with legacy partial-payment state and preserve them as explicit historical exceptions; block new partial collections on those records.
 - [x] Re-run the audit after cleanup and record which legacy checks reached zero, which records were intentionally retained, and the final archive location.
 - [ ] Remove the remaining compatibility code only after the post-cleanup audit, client-history review, and rollback verification pass. Old JSON backup import is intentionally out of scope.
-- [ ] Archive or delete the one-time cleanup tool and temporary migration-only tests after the retirement boundary is accepted.
+- [x] Archive the completed one-time cleanup tools and temporary migration-only tests outside the active application and test suite.
 
 ## Unified job workflow
 
