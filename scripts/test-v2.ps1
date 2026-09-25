@@ -14,6 +14,10 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'v2/migration-audit.js syntax check failed.' }
   node --check scripts/migration-audit.js
   if ($LASTEXITCODE -ne 0) { throw 'scripts/migration-audit.js syntax check failed.' }
+  node --check v2/legacy-cleanup.js
+  if ($LASTEXITCODE -ne 0) { throw 'v2/legacy-cleanup.js syntax check failed.' }
+  node --check scripts/legacy-cleanup-dry-run.js
+  if ($LASTEXITCODE -ne 0) { throw 'scripts/legacy-cleanup-dry-run.js syntax check failed.' }
   node --check v2/persistence-domain.js
   if ($LASTEXITCODE -ne 0) { throw 'v2/persistence-domain.js syntax check failed.' }
   node --check v2/history-domain.js
@@ -48,6 +52,9 @@ try {
     'v2/migration-audit.js',
     'v2/migration-audit.test.js',
     'scripts/migration-audit.js',
+    'v2/legacy-cleanup.js',
+    'v2/legacy-cleanup.test.js',
+    'scripts/legacy-cleanup-dry-run.js',
     'v2/persistence-domain.js',
     'v2/persistence-domain.test.js',
     'v2/history-domain.js',

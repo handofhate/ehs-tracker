@@ -17,8 +17,8 @@ This is the working plan for the Tracker 2.0 rebuild and cutover. Tracker 1.0 re
 ## Legacy cleanup and compatibility retirement
 
 - [ ] Create an archive/export and verify that it can be restored before changing any historical records.
-- [ ] Extend the separate migration audit with a dry-run cleanup report that lists every proposed record change and every ambiguous match.
-- [ ] Build the cleanup as a one-time, idempotent tool that is separate from the tracker and refuses to write unless the dry-run has been reviewed.
+- [x] Add a separate read-only dry-run cleanup planner that lists every proposed record change and every ambiguous match.
+- [ ] Build the cleanup apply step as a one-time, idempotent tool that is separate from the tracker and requires review of the dry-run first.
 - [ ] Add an explicit `createdVia: 'legacy'` marker to older jobs without changing their financial history or making them editable as unified jobs.
 - [ ] Backfill `clientId` only where the client match is exact and unambiguous; leave uncertain historical jobs name-linked and read-only.
 - [ ] Review the 2 jobs with legacy partial-payment state and decide whether each should be safely rebuilt or permanently preserved as a historical exception.
