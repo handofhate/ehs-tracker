@@ -37,6 +37,8 @@ This is the working plan for the Tracker 2.0 rebuild and cutover. Tracker 1.0 re
 ## Feature and UI review
 
 - [ ] Inventory current features and classify each as keep, optimize, shelve, or remove before deeper Tracker 2.0 restructuring.
+- [x] Review the Settings baseline: keep admin backup/restore, make client display choices user-scoped with hidden defaults, keep debt isolated as a removable one-off, and clearly disable Square actions in the local preview.
+- [ ] Revisit the client field list after the Square integration review to confirm every field is still populated and useful.
 - [ ] Review Square, exports/imports, history, payments, employee pay, Homewatch, notes, filters, undo/redo, and settings for duplicated or obsolete behavior.
 - [ ] Review the UI for unnecessary controls, duplicated flows, confusing labels, stale terminology, layout cleanup, and responsive/accessibility issues.
 - [ ] Prioritize feature and UI changes by user value and risk, keeping financial and historical behavior covered by tests before implementation.
@@ -63,5 +65,6 @@ This is the working plan for the Tracker 2.0 rebuild and cutover. Tracker 1.0 re
 - [ ] Review whether the legacy name-matching fallback is still needed for imported or restored states; all current live jobs now have stable `clientId` links.
 - [x] Isolate legacy partial-payment compatibility behind a small historical-boundary module and preserve the 2 affected jobs and their 12 legacy items as read-only exceptions.
 - [ ] Re-test backup import, realtime snapshots, undo/redo, and historical client views after separating migration compatibility.
+- [x] Cover backup serialization and malformed-file rejection with automated tests; add admin-only import/export guards and an automatic pre-import backup.
 - [ ] Remove migration-only compatibility code once the archive/cutover boundary is established.
 - [ ] Keep the local no-write preview build as a rollback and validation tool until Tracker 2.0 is proven.

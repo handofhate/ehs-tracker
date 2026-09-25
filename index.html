@@ -360,6 +360,13 @@
   .settings-panel { display: none; flex: 1; overflow-y: auto; padding: 20px 24px; }
   .settings-panel.active { display: block; }
   .settings-modal-footer { padding: 14px 24px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; align-items: center; flex-shrink: 0; }
+  .client-settings-grid { display: grid; grid-template-columns: minmax(0, 1fr) 84px 84px; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+  .client-settings-heading, .client-settings-field, .client-settings-check { min-height: 34px; display: flex; align-items: center; border-bottom: 1px solid var(--border); }
+  .client-settings-heading { padding: 7px 10px; background: var(--bg3); color: var(--text3); font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+  .client-settings-field { padding: 7px 10px; color: var(--text2); font-family: var(--mono); font-size: 12px; }
+  .client-settings-check { justify-content: center; }
+  .client-settings-grid > :nth-last-child(-n+3) { border-bottom: none; }
+  .client-settings-check input { accent-color: var(--accent); cursor: pointer; }
   .settings-theme-row { display: flex; flex-direction: column; gap: 12px; padding: 0 0 14px; border-bottom: 1px solid var(--border); }
   .settings-theme-label { font-family: var(--mono); font-size: 14px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text); margin-bottom: 5px; }
   .settings-theme-desc { color: var(--text3); font-size: 15px; line-height: 1.35; }
@@ -1217,9 +1224,9 @@
           </div>
           <div class="form-group">
             <div style="display:flex;gap:8px;flex-wrap:wrap">
-              <button class="btn btn-ghost btn-sm" onclick="checkSquareHealth()">Check Health</button>
-              <button class="btn btn-ghost btn-sm" onclick="runSquareReconcileNow()">Run Reconcile Now</button>
-              <button class="btn btn-ghost btn-sm" onclick="refreshSquareAlerts()">Refresh Alerts</button>
+              <button id="squareHealthBtn" class="btn btn-ghost btn-sm" onclick="checkSquareHealth()">Check Health</button>
+              <button id="squareReconcileBtn" class="btn btn-ghost btn-sm" onclick="runSquareReconcileNow()">Run Reconcile Now</button>
+              <button id="squareAlertsBtn" class="btn btn-ghost btn-sm" onclick="refreshSquareAlerts()">Refresh Alerts</button>
             </div>
             <div id="squareHealthOut" style="font-family:var(--mono);font-size:12px;color:var(--text3);margin-top:8px"></div>
           </div>
@@ -1261,14 +1268,9 @@
         </div>
         <div id="stab-clients" class="settings-panel">
           <div class="form-group">
-            <label class="form-label">Expanded Row Fields</label>
-            <div class="form-hint" style="margin-bottom:8px">Choose which fields appear when a client row is expanded.</div>
-            <div id="s_expandColsList" style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px"></div>
-          </div>
-          <div class="form-group" style="margin-top:16px;border-top:1px solid var(--border);padding-top:16px">
-            <label class="form-label">Quick View Fields</label>
-            <div class="form-hint" style="margin-bottom:8px">Choose which fields appear in the quick popup (pin button).</div>
-            <div id="s_quickColsList" style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px"></div>
+            <label class="form-label">Client fields</label>
+            <div class="form-hint" style="margin-bottom:8px">Expanded controls the details shown when a row opens. Quick view controls the compact popup from the pin button. These are your personal settings; employees can customize their own views.</div>
+            <div id="s_clientColsList"></div>
           </div>
         </div>
         <div id="stab-appearance" class="settings-panel">
@@ -1291,7 +1293,7 @@
               <button class="btn btn-ghost btn-sm" onclick="exportData()"><i class="ph ph-download-simple"></i> Export Backup</button>
               <button class="btn btn-ghost btn-sm" onclick="closeModal('settingsModal');document.getElementById('importFile').click()"><i class="ph ph-upload-simple"></i> Import Backup</button>
             </div>
-            <div class="form-hint">Export saves all data - jobs, HomeWatch clients, appointments, clients, users, debt payments, and settings - as a JSON file.</div>
+            <div class="form-hint">Admin-only. Export includes the complete persistent tracker state, including jobs, history, payments, clients, users, Square IDs, debt, and settings. Import replaces all current data and automatically downloads a safety backup first. Backup files include user PINs, so keep them secure.</div>
           </div>
         </div>
       </div>
@@ -1899,12 +1901,9 @@
         </div>
         <div id="mstab-clients" class="settings-panel">
           <div class="form-group">
-            <label class="form-label">Expanded Row Fields</label>
-            <div id="ms_expandColsList" style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px"></div>
-          </div>
-          <div class="form-group" style="margin-top:16px;border-top:1px solid var(--border);padding-top:16px">
-            <label class="form-label">Quick View Fields</label>
-            <div id="ms_quickColsList" style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px"></div>
+            <label class="form-label">Client fields</label>
+            <div class="form-hint" style="margin-bottom:8px">Expanded controls the details shown when a row opens. Quick view controls the compact popup from the pin button.</div>
+            <div id="ms_clientColsList"></div>
           </div>
         </div>
       </div>
@@ -1961,6 +1960,7 @@
 <script src="v2/history-domain.js?v=20260925-1"></script>
 <script src="v2/financial-domain.js?v=20260925-1"></script>
 <script src="v2/legacy-partial-domain.js?v=20260925-1"></script>
+<script src="v2/backup-domain.js?v=20260925-1"></script>
 <script src="app.js?v=20260925-preview-1"></script>
 
 <div id="undoToast">Undo applied</div>

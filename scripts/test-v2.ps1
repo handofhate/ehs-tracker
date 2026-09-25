@@ -22,6 +22,8 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'v2/financial-domain.js syntax check failed.' }
   node --check v2/legacy-partial-domain.js
   if ($LASTEXITCODE -ne 0) { throw 'v2/legacy-partial-domain.js syntax check failed.' }
+  node --check v2/backup-domain.js
+  if ($LASTEXITCODE -ne 0) { throw 'v2/backup-domain.js syntax check failed.' }
 
   Write-Host 'Running Tracker 2.0 domain tests...'
   npm test --prefix v2
@@ -50,6 +52,7 @@ try {
     'v2/migration-audit.js',
     'v2/migration-audit.test.js',
     'scripts/migration-audit.js',
+    'scripts/preview-smoke.js',
     'v2/persistence-domain.js',
     'v2/persistence-domain.test.js',
     'v2/history-domain.js',
@@ -58,6 +61,8 @@ try {
     'v2/financial-domain.test.js',
     'v2/legacy-partial-domain.js',
     'v2/legacy-partial-domain.test.js',
+    'v2/backup-domain.js',
+    'v2/backup-domain.test.js',
     'v2/package.json'
   )
 

@@ -146,6 +146,32 @@ test('does not replace existing normalized values', () => {
   assert.equal(state.jobs[0].milestoneBasis, 'amount');
 });
 
+test('keeps client display defaults separate from each users personal preferences', () => {
+  const state = {
+    settings: {
+      clientColumns: ['city'],
+      clientExpandCols: ['email', 'phone'],
+      clientQuickCols: ['lastVisit']
+    },
+    debtPayments: [],
+    splitPayments: [],
+    users: [{ id: 'admin-1', isAdmin: true, clientPrefs: { clientColumns: ['email'] } }],
+    appointments: [],
+    clients: [],
+    homewatch: [],
+    jobs: []
+  };
+
+  migrateState(state, { clientColumnKeys: ['email', 'phone', 'city', 'lastVisit'] });
+
+  assert.deepEqual(state.settings.clientDefaults, {
+    columns: ['city'],
+    expandCols: ['email', 'phone'],
+    quickCols: ['lastVisit']
+  });
+  assert.deepEqual(state.users[0].clientPrefs, { clientColumns: ['email'] });
+});
+
 test('seeds the default admin when no users exist', () => {
   const state = {
     settings: {},

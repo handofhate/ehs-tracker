@@ -149,6 +149,23 @@
     if (!s.settings.clientColumns) s.settings.clientColumns = [...DEFAULT_CLIENT_COLUMNS];
     if (!s.settings.clientExpandCols) s.settings.clientExpandCols = [...clientColumnKeys];
     if (!s.settings.clientQuickCols) s.settings.clientQuickCols = [...DEFAULT_CLIENT_QUICK_COLUMNS];
+    const cleanClientKeys = (keys, fallback) => {
+      if (!Array.isArray(keys)) return [...fallback];
+      const allowed = new Set(clientColumnKeys);
+      return keys.filter(key => allowed.has(key));
+    };
+    if (!s.settings.clientDefaults || typeof s.settings.clientDefaults !== 'object' || Array.isArray(s.settings.clientDefaults)) {
+      s.settings.clientDefaults = {};
+    }
+    if (!Array.isArray(s.settings.clientDefaults.columns)) {
+      s.settings.clientDefaults.columns = cleanClientKeys(s.settings.clientColumns, DEFAULT_CLIENT_COLUMNS);
+    }
+    if (!Array.isArray(s.settings.clientDefaults.expandCols)) {
+      s.settings.clientDefaults.expandCols = cleanClientKeys(s.settings.clientExpandCols, clientColumnKeys);
+    }
+    if (!Array.isArray(s.settings.clientDefaults.quickCols)) {
+      s.settings.clientDefaults.quickCols = cleanClientKeys(s.settings.clientQuickCols, DEFAULT_CLIENT_QUICK_COLUMNS);
+    }
     // Ensure there's always at least one admin user seeded
     if (s.users.length === 0) {
       s.users.push({ id: 'admin_default', name: 'Ty', pin: '1234', isAdmin: true });

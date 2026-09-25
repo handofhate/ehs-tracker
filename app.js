@@ -31,6 +31,7 @@ const V2_PERSISTENCE = window.Tracker2Persistence.createPersistenceBoundary({
 const V2_HISTORY = window.Tracker2History;
 const V2_FINANCIAL = window.Tracker2Financial;
 const V2_LEGACY_PARTIAL = window.Tracker2LegacyPartial;
+const V2_BACKUP = window.Tracker2Backup;
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
 let state = {
@@ -5358,7 +5359,10 @@ function settingsTab(name, btn) {
   btn.classList.add('active');
   document.getElementById('stab-' + name).classList.add('active');
   if (name === 'clients') _populateClientColSettings();
-  if (name === 'square') refreshSquareAlerts();
+  if (name === 'square') {
+    _setSquarePreviewAvailability();
+    refreshSquareAlerts();
+  }
 }
 function mySettingsTab(name, btn) {
   document.querySelectorAll('#mySettingsModal .settings-nav-btn').forEach(b => b.classList.remove('active'));
@@ -5369,52 +5373,43 @@ function mySettingsTab(name, btn) {
   if (name === 'clients') _populateMyClientPrefs();
 }
 function _populateClientColSettings() {
-  const expandCols = state.settings.clientExpandCols || CLIENT_COLS.map(c=>c.key);
-  const quickCols  = state.settings.clientQuickCols  || [];
-  const el1 = document.getElementById('s_expandColsList');
-  const el2 = document.getElementById('s_quickColsList');
-  if (el1) el1.innerHTML = CLIENT_COLS.map(col=>`
-    <label style="display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12px;cursor:pointer">
-      <input type="checkbox" ${expandCols.includes(col.key)?'checked':''} style="accent-color:var(--accent)"
-        onchange="toggleClientExpandCol('${col.key}',this.checked)" />
-      ${col.label}
-    </label>`).join('');
-  if (el2) el2.innerHTML = CLIENT_COLS.map(col=>`
-    <label style="display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12px;cursor:pointer">
-      <input type="checkbox" ${quickCols.includes(col.key)?'checked':''} style="accent-color:var(--accent)"
-        onchange="toggleClientQuickCol('${col.key}',this.checked)" />
-      ${col.label}
-    </label>`).join('');
+  _renderClientColumnSettings('s_clientColsList', _clientExpandColsForView(), _clientQuickColsForView(), 'toggleClientExpandCol', 'toggleClientQuickCol');
 }
 function toggleClientExpandCol(key, on) {
-  let cols = [...(state.settings.clientExpandCols || CLIENT_COLS.map(c=>c.key))];
+  let cols = [..._clientExpandColsForView()];
   if (on) { if (!cols.includes(key)) cols.push(key); }
   else { cols = cols.filter(k=>k!==key); }
-  state.settings.clientExpandCols = cols;
+  _writeClientPref('clientExpandCols', cols);
   save(); renderClients();
 }
 function toggleClientQuickCol(key, on) {
-  let cols = [...(state.settings.clientQuickCols || [])];
+  let cols = [..._clientQuickColsForView()];
   if (on) { if (!cols.includes(key)) cols.push(key); }
   else { cols = cols.filter(k=>k!==key); }
-  state.settings.clientQuickCols = cols;
+  _writeClientPref('clientQuickCols', cols);
   save();
 }
+function _renderClientColumnSettings(containerId, expandKeys, quickKeys, expandFn, quickFn) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = `
+    <div class="client-settings-grid">
+      <div class="client-settings-heading">Field</div>
+      <div class="client-settings-heading">Expanded</div>
+      <div class="client-settings-heading">Quick view</div>
+      ${CLIENT_COLS.map(col => `
+        <div class="client-settings-field">${col.label}</div>
+        <label class="client-settings-check" aria-label="${col.label} in expanded rows">
+          <input type="checkbox" ${expandKeys.includes(col.key) ? 'checked' : ''} onchange="${expandFn}('${col.key}',this.checked)" />
+        </label>
+        <label class="client-settings-check" aria-label="${col.label} in quick view">
+          <input type="checkbox" ${quickKeys.includes(col.key) ? 'checked' : ''} onchange="${quickFn}('${col.key}',this.checked)" />
+        </label>
+      `).join('')}
+    </div>`;
+}
 function _populateMyClientPrefs() {
-  const expandKeys = _clientExpandColsForView();
-  const quickKeys = _clientQuickColsForView();
-  const renderList = (containerId, activeKeys, toggleFn) => {
-    const el = document.getElementById(containerId);
-    if (!el) return;
-    el.innerHTML = CLIENT_COLS.map(col => `
-      <label style="display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12px;cursor:pointer">
-        <input type="checkbox" ${activeKeys.includes(col.key) ? 'checked' : ''} style="accent-color:var(--accent)"
-          onchange="${toggleFn}('${col.key}',this.checked)" />
-        ${col.label}
-      </label>`).join('');
-  };
-  renderList('ms_expandColsList', expandKeys, 'toggleMyClientExpandCol');
-  renderList('ms_quickColsList', quickKeys, 'toggleMyClientQuickCol');
+  _renderClientColumnSettings('ms_clientColsList', _clientExpandColsForView(), _clientQuickColsForView(), 'toggleMyClientExpandCol', 'toggleMyClientQuickCol');
 }
 function toggleMyClientExpandCol(key, on) {
   let cols = [..._clientExpandColsForView()];
@@ -5449,6 +5444,7 @@ function openSettings() {
   setDefaultMilestoneBasis(defaultBasis);
   (state.settings.defaultMilestones || []).forEach(m => addDmField(m.label, defaultBasis === 'amount' ? m.amount : m.pct, defaultBasis));
   applyTheme();
+  _setSquarePreviewAvailability();
   // Reset to Account tab
   settingsTab('employees', document.querySelector('#settingsModal .settings-nav-btn'));
   renderUserList();
@@ -5515,6 +5511,10 @@ async function checkSquareHealth() {
 async function refreshSquareAlerts() {
   const el = document.getElementById('squareAlertsList');
   if (!el) return;
+  if (PREVIEW_MODE) {
+    el.innerHTML = '<div style="color:var(--text3);font-size:13px">Square integration is disabled in the local Tracker 2.0 preview. These controls remain available in the production tracker.</div>';
+    return;
+  }
   el.innerHTML = '<div style="color:var(--text3);font-size:13px">Loading alerts...</div>';
   try {
     const rsp = await callSquareFn('squareAlerts', { limit: 25 });
@@ -5717,6 +5717,15 @@ function signOut() {
   _storageRemove('ehs_user_persist');
   applyTheme('default');
   showLogin();
+}
+
+function _setSquarePreviewAvailability() {
+  ['squareHealthBtn', 'squareReconcileBtn', 'squareAlertsBtn'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.disabled = PREVIEW_MODE;
+    btn.title = PREVIEW_MODE ? 'Disabled in the local Tracker 2.0 preview' : '';
+  });
 }
 
 function loadExpandedState() {
@@ -6340,36 +6349,58 @@ async function deleteAppt(id) {
 }
 
 // ─── EXPORT / IMPORT ──────────────────────────────────────────────────────────
-function exportData() {
-  const filename = `ehs-tracker-backup-${today()}.json`;
-  const json = JSON.stringify(state, null, 2);
+function _downloadStateBackup(filename) {
+  const json = V2_BACKUP.serializeState(state);
   const blob = new Blob([json], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = filename; a.click();
+  a.href = url;
+  a.download = filename;
+  a.click();
   URL.revokeObjectURL(url);
+  return true;
+}
+
+function exportData() {
+  if (!currentUser?.isAdmin) {
+    showAlert('Only an admin can export or import backups.');
+    return;
+  }
+  const filename = `ehs-tracker-backup-${today()}.json`;
+  try {
+    _downloadStateBackup(filename);
+    showAlert('Backup downloaded. Keep this file somewhere secure because it contains tracker data and user PINs.');
+  } catch (err) {
+    showAlert('Backup failed: ' + (err.message || 'could not create the file.'));
+  }
 }
 function importData(event) {
+  if (!currentUser?.isAdmin) {
+    showAlert('Only an admin can export or import backups.');
+    if (event?.target) event.target.value = '';
+    return;
+  }
   const file = event.target.files[0];
   if (!file) return;
-  showConfirm(`Import "${file.name}"? This will overwrite all current data.`, () => {
+  showConfirm(`Import "${file.name}"? This will replace all current tracker data. A full backup will be downloaded automatically before anything is changed.`, () => {
     const reader = new FileReader();
     reader.onload = async e => {
       try {
-        const imported = JSON.parse(e.target.result);
-        if (!Array.isArray(imported.jobs) || !imported.settings || typeof imported.settings !== 'object') throw new Error('Invalid backup file.');
+        const imported = V2_BACKUP.parseBackup(e.target.result);
+        const beforeImport = `ehs-tracker-backup-before-import-${today()}-${Date.now()}.json`;
+        _downloadStateBackup(beforeImport);
         state = migrateState(imported);
         await save();
         renderAll();
-        showAlert('Import successful!');
+        showAlert(`Import successful. A safety backup was downloaded first (${beforeImport}).`);
       } catch(err) {
         showAlert('Import failed: ' + err.message);
       }
-      event.target.value = '';
+      if (event?.target) event.target.value = '';
     };
     reader.readAsText(file);
   }, { okLabel: 'Import', danger: true });
-  event.target.value = '';
+  if (event?.target) event.target.value = '';
 }
 
 // ─── CLIENTS ──────────────────────────────────────────────────────────────────
@@ -6408,7 +6439,6 @@ function _sanitizeClientKeys(keys) {
   return keys.filter(k => allowed.has(k));
 }
 function _readClientPref(prefKey, fallback) {
-  if (!currentUser || currentUser.isAdmin) return fallback;
   const user = _getCurrentUserRecord();
   const raw = user?.clientPrefs?.[prefKey];
   const clean = _sanitizeClientKeys(raw);
@@ -6416,23 +6446,26 @@ function _readClientPref(prefKey, fallback) {
 }
 function _writeClientPref(prefKey, keys) {
   const user = _getCurrentUserRecord();
-  if (!user || user.isAdmin) return;
+  if (!user) return;
   if (!user.clientPrefs || typeof user.clientPrefs !== 'object') user.clientPrefs = {};
   user.clientPrefs[prefKey] = _sanitizeClientKeys(keys) || [];
   currentUser = user;
 }
 function _clientColumnsForView() {
-  const base = state.settings.clientColumns && state.settings.clientColumns.length
-    ? state.settings.clientColumns
+  const defaults = state.settings.clientDefaults || {};
+  const base = Array.isArray(defaults.columns) && defaults.columns.length
+    ? defaults.columns
     : CLIENT_DEFAULT_COLS;
   return _readClientPref('clientColumns', base);
 }
 function _clientExpandColsForView() {
-  const base = state.settings.clientExpandCols || CLIENT_COLS.map(c=>c.key);
+  const defaults = state.settings.clientDefaults || {};
+  const base = Array.isArray(defaults.expandCols) ? defaults.expandCols : CLIENT_COLS.map(c=>c.key);
   return _readClientPref('clientExpandCols', base);
 }
 function _clientQuickColsForView() {
-  const base = state.settings.clientQuickCols || [];
+  const defaults = state.settings.clientDefaults || {};
+  const base = Array.isArray(defaults.quickCols) ? defaults.quickCols : [];
   return _readClientPref('clientQuickCols', base);
 }
 
@@ -6601,8 +6634,7 @@ function toggleClientCol(key, on) {
   let cols = [..._clientColumnsForView()];
   if (on) { if (!cols.includes(key)) cols.push(key); }
   else { cols = cols.filter(k => k !== key); }
-  if (currentUser?.isAdmin) state.settings.clientColumns = cols;
-  else _writeClientPref('clientColumns', cols);
+  _writeClientPref('clientColumns', cols);
   save(); renderClients();
 }
 

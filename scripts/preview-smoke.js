@@ -89,6 +89,7 @@ async function main() {
       await page.waitForFunction(() => !!window.Tracker2Persistence);
       await page.waitForFunction(() => !!window.Tracker2History);
       await page.waitForFunction(() => !!window.Tracker2Financial);
+      await page.waitForFunction(() => !!window.Tracker2Backup);
       await page.waitForFunction(() => document.body.innerText.includes('TRACKER 2.0 LOCAL PREVIEW'));
       await page.waitForFunction(() => {
         const overlay = document.getElementById('loginOverlay');
@@ -119,6 +120,8 @@ async function main() {
           previewPersistence: window.Tracker2Persistence.createPersistenceBoundary({ mode: 'local-preview', writeState: () => {} }).isPreview,
           historyModule: typeof window.Tracker2History.buildClientHistory === 'function',
           financialModule: typeof window.Tracker2Financial.calcJob === 'function',
+          backupModule: typeof window.Tracker2Backup.serializeState === 'function' &&
+            typeof window.Tracker2Backup.parseBackup === 'function',
           validationOk: validation.ok,
           milestoneOk: milestones.ok
         };
@@ -134,6 +137,7 @@ async function main() {
       assert.equal(result.previewPersistence, true);
       assert.equal(result.historyModule, true);
       assert.equal(result.financialModule, true);
+      assert.equal(result.backupModule, true);
       assert.equal(result.validationOk, true);
       assert.equal(result.milestoneOk, true);
 
