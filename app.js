@@ -1,4 +1,16 @@
 // ─── FIREBASE ─────────────────────────────────────────────────────────────────
+const BUILD_CONFIG = window.TRACKER_BUILD || { mode: 'production', label: 'Job Tracker', storagePrefix: '' };
+const PREVIEW_MODE = BUILD_CONFIG.mode === 'local-preview';
+const STORAGE_PREFIX = String(BUILD_CONFIG.storagePrefix || '');
+
+function _storageKey(key) { return `${STORAGE_PREFIX}${key}`; }
+function _storageGet(key) { return localStorage.getItem(_storageKey(key)); }
+function _storageSet(key, value) { return localStorage.setItem(_storageKey(key), value); }
+function _storageRemove(key) { return localStorage.removeItem(_storageKey(key)); }
+function _sessionGet(key) { return sessionStorage.getItem(_storageKey(key)); }
+function _sessionSet(key, value) { return sessionStorage.setItem(_storageKey(key), value); }
+function _sessionRemove(key) { return sessionStorage.removeItem(_storageKey(key)); }
+
 const firebaseConfig = {
   apiKey: "AIzaSyCZyxBVvINYbPeWSDkNPZsxnw9f_6uGEV4",
   authDomain: "ehs-tracker-7d6ed.firebaseapp.com",
@@ -55,7 +67,70 @@ let calMonth = new Date().getMonth(); // 0-indexed
 let schedView = 'list'; // 'list' | 'month'
 let selectedCalDay = null;
 let selectedDayFilter = null; // mobile day-drill-down
+let previewDirty = false;
+let previewLatestServerState = null;
 const OWED_INCLUDE_DEFAULTS = { jobs: true, homewatch: true, potential: true };
+
+function _cloneState(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function _setPreviewStatus(message) {
+  if (!PREVIEW_MODE) return;
+  const el = document.getElementById('previewBannerStatus');
+  if (el) el.textContent = message;
+}
+
+function _updatePreviewStatus() {
+  if (!PREVIEW_MODE) return;
+  _setPreviewStatus(previewDirty
+    ? 'Temporary edits active; nothing has been saved.'
+    : 'Live data connected; no temporary edits.');
+}
+
+function _clearPreviewHistory() {
+  undoStack.length = 0;
+  redoStack.length = 0;
+  _lastSavedState = _cloneState(state);
+  _updateUndoBtn();
+  _updateRedoBtn();
+}
+
+function discardPreviewChanges() {
+  if (!PREVIEW_MODE) return;
+  const applyLatest = (latest) => {
+    if (!latest) {
+      showAlert('Live data is not available yet.');
+      return;
+    }
+    state = migrateState(_cloneState(latest));
+    previewLatestServerState = _cloneState(state);
+    previewDirty = false;
+    if (currentUser) {
+      const fresh = state.users.find(u => u.id === currentUser.id);
+      if (fresh) currentUser = { id: fresh.id, name: fresh.name, isAdmin: fresh.isAdmin };
+    }
+    _clearPreviewHistory();
+    applyTheme();
+    renderAll();
+    _updatePreviewStatus();
+  };
+
+  if (previewDirty) {
+    showConfirm('Discard all temporary preview edits and refresh from the live database?', () => applyLatest(previewLatestServerState), {
+      title: 'Refresh live data', okLabel: 'Refresh', danger: false
+    });
+  } else {
+    applyLatest(previewLatestServerState);
+  }
+}
+
+async function _writeStateToFirestore(next) {
+  if (PREVIEW_MODE) {
+    throw new Error('Blocked Firestore write from the local Tracker 2.0 preview.');
+  }
+  return DOC.set(next);
+}
 
 function normalizeOwedInclude(raw) {
   const src = raw && typeof raw === 'object' ? raw : {};
@@ -70,11 +145,11 @@ function _uiUserId() { return currentUser?.id || 'default'; }
 function _uiKey(name) { return `${name}_${_uiUserId()}`; }
 function loadUserUiState() {
   try {
-    const tf = localStorage.getItem(_uiKey('empSummaryTF'));
+    const tf = _storageGet(_uiKey('empSummaryTF'));
     empSummaryTimeframe = tf || '30';
   } catch(e) { empSummaryTimeframe = '30'; }
   try {
-    const sched = JSON.parse(localStorage.getItem(_uiKey('schedUI')) || '{}');
+    const sched = JSON.parse(_storageGet(_uiKey('schedUI')) || '{}');
     schedView = (sched.view === 'month' || sched.view === 'list') ? sched.view : 'list';
     if (typeof sched.calYear === 'number') calYear = sched.calYear;
     if (typeof sched.calMonth === 'number' && sched.calMonth >= 0 && sched.calMonth <= 11) calMonth = sched.calMonth;
@@ -88,7 +163,7 @@ function loadUserUiState() {
     selectedDayFilter = null;
   }
   try {
-    expandedClients = new Set(JSON.parse(localStorage.getItem(_uiKey('expClients')) || '[]'));
+    expandedClients = new Set(JSON.parse(_storageGet(_uiKey('expClients')) || '[]'));
   } catch(e) { expandedClients = new Set(); }
 }
 function _currentUserRecord() {
@@ -127,7 +202,7 @@ function setTheme(theme) {
   save();
 }
 function saveEmpSummaryTimeframe() {
-  try { localStorage.setItem(_uiKey('empSummaryTF'), empSummaryTimeframe); } catch(e) {}
+  try { _storageSet(_uiKey('empSummaryTF'), empSummaryTimeframe); } catch(e) {}
 }
 function setEmpSummaryTimeframe(value) {
   empSummaryTimeframe = value || '30';
@@ -136,7 +211,7 @@ function setEmpSummaryTimeframe(value) {
 }
 function saveScheduleUiState() {
   try {
-    localStorage.setItem(_uiKey('schedUI'), JSON.stringify({
+    _storageSet(_uiKey('schedUI'), JSON.stringify({
       view: schedView,
       calYear,
       calMonth,
@@ -146,7 +221,7 @@ function saveScheduleUiState() {
   } catch(e) {}
 }
 function saveExpandedClientsState() {
-  try { localStorage.setItem(_uiKey('expClients'), JSON.stringify([...expandedClients])); } catch(e) {}
+  try { _storageSet(_uiKey('expClients'), JSON.stringify([...expandedClients])); } catch(e) {}
 }
 
 // ─── PERSIST ─────────────────────────────────────────────────────────────────
@@ -378,11 +453,19 @@ async function save() {
   redoStack.length = 0;
   _updateUndoBtn();
   _updateRedoBtn();
+  if (PREVIEW_MODE) {
+    // Keep the normal UI flow and local undo history, but never persist the
+    // mutated state outside this browser session.
+    _lastSavedState = _cloneState(state);
+    previewDirty = true;
+    _updatePreviewStatus();
+    return true;
+  }
   isSaving = true;
   try {
-    await DOC.set(JSON.parse(JSON.stringify(state)));
+    await _writeStateToFirestore(_cloneState(state));
     // Record the just-written state as the new baseline
-    _lastSavedState = JSON.parse(JSON.stringify(state));
+    _lastSavedState = _cloneState(state);
   } catch(e) {
     console.error('Save failed:', e);
     showAlert('Save failed - check your connection.');
@@ -400,9 +483,15 @@ async function undoAction() {
   _updateUndoBtn();
   _updateRedoBtn();
   _showUndoToast('Undo: ' + description);
+  if (PREVIEW_MODE) {
+    _applyRestoredState(prev);
+    previewDirty = true;
+    _updatePreviewStatus();
+    return;
+  }
   isSaving = true;
   try {
-    await DOC.set(prev);
+    await _writeStateToFirestore(prev);
     // Apply directly - do not rely on onSnapshot (it fires before set() resolves and gets suppressed by isSaving)
     _applyRestoredState(prev);
   } catch(e) {
@@ -427,9 +516,15 @@ async function redoAction() {
   _updateUndoBtn();
   _updateRedoBtn();
   _showUndoToast('Redo: ' + description);
+  if (PREVIEW_MODE) {
+    _applyRestoredState(next);
+    previewDirty = true;
+    _updatePreviewStatus();
+    return;
+  }
   isSaving = true;
   try {
-    await DOC.set(next);
+    await _writeStateToFirestore(next);
     _applyRestoredState(next);
   } catch(e) {
     console.error('Redo failed:', e);
@@ -561,23 +656,32 @@ function _describeUndoAction(prev, curr) {
 
 function load() {
   // Check for old localStorage data to migrate on first run
-  const legacy = localStorage.getItem('jobtracker_v2');
+  const legacy = PREVIEW_MODE ? null : _storageGet('jobtracker_v2');
 
   DOC.get().then(doc => {
     if (doc.exists) {
       state = migrateState(doc.data());
-      _lastSavedState = JSON.parse(JSON.stringify(state));
-      if (syncHomewatchAutoInvoices()) {
+      _lastSavedState = _cloneState(state);
+      if (syncHomewatchAutoInvoices() && !PREVIEW_MODE) {
         save();
       }
+      previewLatestServerState = _cloneState(state);
+      previewDirty = false;
+      if (PREVIEW_MODE) _lastSavedState = _cloneState(state);
+      _updatePreviewStatus();
     } else if (legacy) {
       // First time using Firebase - migrate local data up
       try {
         state = migrateState(JSON.parse(legacy));
         syncHomewatchAutoInvoices();
         save(); // push to Firestore
-        localStorage.removeItem('jobtracker_v2');
+        _storageRemove('jobtracker_v2');
       } catch(e) {}
+    } else {
+      previewLatestServerState = _cloneState(state);
+      previewDirty = false;
+      _lastSavedState = _cloneState(state);
+      _updatePreviewStatus();
     }
     document.getElementById('loadingOverlay').style.display = 'none';
     showLogin();
@@ -591,11 +695,20 @@ function load() {
   // Real-time listener - keeps all open tabs/devices in sync
   DOC.onSnapshot(doc => {
     if (doc.exists && !isSaving) {
-      _lastSavedState = JSON.parse(JSON.stringify(doc.data()));
-      state = migrateState(doc.data());
-      if (syncHomewatchAutoInvoices()) {
+      const incoming = migrateState(doc.data());
+      previewLatestServerState = _cloneState(incoming);
+      if (PREVIEW_MODE && previewDirty) {
+        _setPreviewStatus('Live data changed; temporary edits are still active.');
+        return;
+      }
+      state = incoming;
+      _lastSavedState = _cloneState(state);
+      if (syncHomewatchAutoInvoices() && !PREVIEW_MODE) {
         save();
       }
+      previewLatestServerState = _cloneState(state);
+      if (PREVIEW_MODE) _lastSavedState = _cloneState(state);
+      _updatePreviewStatus();
       if (currentUser) {
         // Refresh currentUser data in case PIN/name changed
         const fresh = state.users.find(u => u.id === currentUser.id);
@@ -627,6 +740,9 @@ function _squareBaseUrl() {
 }
 
 async function callSquareFn(endpoint, payload = {}) {
+  if (PREVIEW_MODE) {
+    throw new Error('Square actions are disabled in the local Tracker 2.0 preview.');
+  }
   const base = _squareBaseUrl();
   if (!base) throw new Error('Square Functions Base URL is not configured in Settings to Square API.');
   const u = firebase.auth().currentUser;
@@ -6195,7 +6311,7 @@ function showLogin() {
   document.getElementById('loginError').textContent = '';
 
   // Try auto-login from localStorage (persistent) or sessionStorage (session)
-  const saved = localStorage.getItem('ehs_user_persist') || sessionStorage.getItem('ehs_user');
+  const saved = _storageGet('ehs_user_persist') || _sessionGet('ehs_user');
   if (saved) {
     try {
       const u = JSON.parse(saved);
@@ -6237,9 +6353,9 @@ function doLogin() {
   currentUser = { id: user.id, name: user.name, isAdmin: user.isAdmin };
   const keepIn = document.getElementById('keepLoggedIn');
   if (keepIn && keepIn.checked) {
-    localStorage.setItem('ehs_user_persist', JSON.stringify(currentUser));
+    _storageSet('ehs_user_persist', JSON.stringify(currentUser));
   } else {
-    sessionStorage.setItem('ehs_user', JSON.stringify(currentUser));
+    _sessionSet('ehs_user', JSON.stringify(currentUser));
   }
   document.getElementById('loginOverlay').style.display = 'none';
   applyUserView();
@@ -6249,8 +6365,8 @@ function doLogin() {
 function signOut() {
   currentUser = null;
   selectedLoginUserId = null;
-  sessionStorage.removeItem('ehs_user');
-  localStorage.removeItem('ehs_user_persist');
+  _sessionRemove('ehs_user');
+  _storageRemove('ehs_user_persist');
   applyTheme('default');
   showLogin();
 }
@@ -6258,19 +6374,19 @@ function signOut() {
 function loadExpandedState() {
   try {
     const uid = currentUser?.id || 'default';
-    expandedJobs = new Set(JSON.parse(localStorage.getItem(`exp_${uid}`)   || '[]'));
+    expandedJobs = new Set(JSON.parse(_storageGet(`exp_${uid}`)   || '[]'));
     if (expandedJobs.size > 1) {
       const latest = Array.from(expandedJobs).slice(-1);
       expandedJobs = new Set(latest);
     }
-    expandedHW   = new Set(JSON.parse(localStorage.getItem(`expHW_${uid}`) || '[]'));
+    expandedHW   = new Set(JSON.parse(_storageGet(`expHW_${uid}`) || '[]'));
   } catch(e) { expandedJobs = new Set(); expandedHW = new Set(); }
 }
 function saveExpandedState() {
   try {
     const uid = currentUser?.id || 'default';
-    localStorage.setItem(`exp_${uid}`,   JSON.stringify([...expandedJobs]));
-    localStorage.setItem(`expHW_${uid}`, JSON.stringify([...expandedHW]));
+    _storageSet(`exp_${uid}`,   JSON.stringify([...expandedJobs]));
+    _storageSet(`expHW_${uid}`, JSON.stringify([...expandedHW]));
   } catch(e) {}
 }
 function applyUserView() {
