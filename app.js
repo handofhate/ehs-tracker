@@ -2,6 +2,7 @@
 const BUILD_CONFIG = window.TRACKER_BUILD || { mode: 'production', label: 'Job Tracker', storagePrefix: '' };
 const PREVIEW_MODE = BUILD_CONFIG.mode === 'local-preview';
 const STORAGE_PREFIX = String(BUILD_CONFIG.storagePrefix || '');
+const V2_JOB_DOMAIN = window.Tracker2JobDomain;
 
 function _storageKey(key) { return `${STORAGE_PREFIX}${key}`; }
 function _storageGet(key) { return localStorage.getItem(_storageKey(key)); }
@@ -5288,115 +5289,19 @@ function _recordUnifiedMaterialSettlementChange(material, before) {
 }
 
 function _applyUnifiedProtectedEdits(job, lines, { contactName, date, notes }) {
-  const next = _unifiedClone(job);
-  const originalLines = _unifiedStoredLines(job);
-  const originalIds = new Set(originalLines.map(line => line?.id).filter(Boolean));
-  const originalById = new Map(originalLines.map(line => [line.id, line]));
-  const storedLines = lines.map(line => {
-    const stored = { ...line };
-    const prior = originalById.get(line.id);
-    if (!originalIds.has(line.id) && line.type === 'fixed') {
-      stored.unifiedAddition = true;
-    } else if (prior && line.type === 'material') {
-      const billingLocked = _unifiedMaterialBillingLocked(job, line.id);
-      if (billingLocked) {
-        stored.amount = prior.amount;
-        stored.clientAmount = prior.clientAmount ?? prior.amount;
-        stored.billClient = prior.billClient !== false;
-      }
-    } else if (prior) {
-      stored.amount = prior.amount;
-      stored.hours = prior.hours || 0;
-      stored.rate = prior.rate || 0;
-      stored.reimbursementAmount = prior.reimbursementAmount || 0;
-      stored.who = prior.who;
-      stored.billClient = prior.billClient !== false;
-    }
-    return stored;
+  return V2_JOB_DOMAIN.applyProtectedEdits({
+    job,
+    lines,
+    contactName,
+    date,
+    notes,
+    primaryNoteId: unifiedEditPrimaryNoteId,
+    author: { id: currentUser?.id || '', name: currentUser?.name || 'Admin' },
+    idFactory: uid,
+    isMaterialBillingLocked: (candidate, materialId) => _unifiedMaterialBillingLocked(candidate, materialId),
+    syncMaterialCharge: _syncUnifiedMaterialCharge,
+    recordMaterialChange: _recordUnifiedMaterialSettlementChange
   });
-  next.contactName = contactName;
-  next.unifiedLines = storedLines;
-  next.workSummary = lines.map(line => line.description).filter(Boolean).join(', ');
-  _updateUnifiedPrimaryNote(next, notes, job.date || date);
-
-  const updateDescription = (line, item) => {
-    if (!item) return;
-    item.label = line.label;
-    item.description = line.description;
-  };
-
-  lines.forEach(line => {
-    const isNew = !originalIds.has(line.id);
-    if (isNew) {
-      if (line.type === 'material') {
-        const material = {
-          id: line.id,
-          label: line.label,
-          description: line.description,
-          amount: line.reimbursementAmount,
-          who: line.who,
-          billClient: !!line.billClient,
-          clientAmount: line.amount,
-          reimbursementAmount: line.reimbursementAmount,
-          chargeAmount: line.billClient ? line.amount : 0,
-          costAmount: line.reimbursementAmount
-        };
-        if (!Array.isArray(next.materials)) next.materials = [];
-        next.materials.push(material);
-        _syncUnifiedMaterialCharge(next, material);
-        return;
-      }
-      if (line.type === 'credit') {
-        if (!Array.isArray(next.subtractions)) next.subtractions = [];
-        next.subtractions.push({
-          id: line.id,
-          label: line.label,
-          description: line.description,
-          amount: line.amount,
-          date: next.date || date,
-          status: 'pending',
-          sourceItemId: null
-        });
-        return;
-      }
-      if (!Array.isArray(next.addOns)) next.addOns = [];
-      next.addOns.push({
-        id: line.id,
-        label: line.label,
-        description: line.description,
-        amount: line.amount,
-        date: next.date || date,
-        status: 'pending',
-        isHours: line.type === 'hourly',
-        hours: line.type === 'hourly' ? line.hours : 0,
-        rate: line.type === 'hourly' ? line.rate : 0,
-        chargeType: line.type === 'hourly' ? 'hourly' : 'other'
-      });
-      return;
-    }
-
-    (next.quoteItems || []).filter(item => item.id === line.id).forEach(item => updateDescription(line, item));
-    (next.materials || []).filter(item => item.id === line.id).forEach(item => updateDescription(line, item));
-    (next.subtractions || []).filter(item => item.id === line.id || item.partialGroupId === line.id).forEach(item => updateDescription(line, item));
-    (next.addOns || []).filter(item => item.id === line.id || item.partialGroupId === line.id || item.sourceItemId === line.id).forEach(item => updateDescription(line, item));
-
-    if (line.type !== 'material') return;
-    const material = (next.materials || []).find(item => item.id === line.id);
-    if (!material) return;
-    const before = { reimbursementAmount: material.reimbursementAmount, costAmount: material.costAmount, amount: material.amount, who: material.who };
-    material.amount = line.reimbursementAmount;
-    material.reimbursementAmount = line.reimbursementAmount;
-    material.costAmount = line.reimbursementAmount;
-    material.who = line.who;
-    if (!_unifiedMaterialBillingLocked(next, line.id)) {
-      material.clientAmount = line.amount;
-      material.billClient = !!line.billClient;
-      material.chargeAmount = line.billClient ? line.amount : 0;
-    }
-    _recordUnifiedMaterialSettlementChange(material, before);
-    _syncUnifiedMaterialCharge(next, material);
-  });
-  return next;
 }
 
 async function saveUnifiedJob() {
@@ -5437,22 +5342,15 @@ async function saveUnifiedJob() {
   }
 
   const lines = readUnifiedLines();
-  if (!lines.length) { showAlert('Add at least one work or charge line.'); return; }
-  if (lines.some(line => line.type !== 'material' && line.amount <= 0)) { showAlert('Every work and charge line needs an amount greater than $0.'); return; }
-  if (lines.some(line => line.type === 'material' && line.reimbursementAmount <= 0)) {
-    showAlert('Materials need a reimbursement / cost amount greater than $0.');
+  const validation = V2_JOB_DOMAIN.validateJobDraft({
+    name,
+    lines,
+    existingJob: editingJob,
+    financialLocked: unifiedEditFinancialLocked
+  });
+  if (!validation.ok) {
+    showAlert(validation.errors[0]);
     return;
-  }
-  if (lines.some(line => line.type === 'material' && line.billClient && line.amount <= 0)) {
-    showAlert('Billed materials need a client charge greater than $0, or turn off billing for that material.');
-    return;
-  }
-  if (editingJob && unifiedEditFinancialLocked && _jobType(editingJob) === 'hourly') {
-    const originalIds = new Set(_unifiedStoredLines(editingJob).map(line => line?.id).filter(Boolean));
-    if (lines.some(line => !originalIds.has(line.id) && !['hourly', 'material'].includes(line.type))) {
-      showAlert('Hourly jobs can add hours or materials only.');
-      return;
-    }
   }
 
   const notes = document.getElementById('uj_notes').value.trim();
@@ -5473,7 +5371,7 @@ async function saveUnifiedJob() {
   const hourlyItems = lines.filter(line => line.type === 'hourly');
   const hourlyOnly = hourlyItems.length > 0 && !lines.some(line => ['fixed','other','credit'].includes(line.type));
   const collections = _unifiedBuildCollections(editingJob, lines, date, hourlyOnly);
-  const { quoteItems, materials, addOns, subtractions } = collections;
+  const { quoteItems } = collections;
   const quote = _roundMoney(quoteItems.reduce((sum, line) => sum + line.amount, 0));
   const milestones = hourlyOnly || quote <= 0
     ? []
@@ -5484,46 +5382,30 @@ async function saveUnifiedJob() {
     state.clients.push(client);
   }
   const hourlyRate = hourlyItems.length ? hourlyItems[0].rate : 0;
-  const workSummary = lines.map(line => line.description).filter(Boolean).join(', ');
   const contactClient = clientByName(contactName);
 
-  const jobId = editingJob?.id || uid();
-  const job = editingJob ? _unifiedClone(editingJob) : {
-    id: jobId,
-    status:'active',
-    advances:[],
-    tips:[],
-    fees:[],
-    jobNotes:[],
-    hours:[],
-    partialCollections:[],
-    repaymentMode:false,
-    revenueItems:[],
-    hourlyStatus:'pending',
-    hourlySquareInvoiceId:'',
-    createdVia:'unified-v2'
-  };
-  job.name = name;
-  job.contactName = contactName;
-  job.clientId = client.id;
-  job.contactClientId = contactClient?.id || '';
-  job.quote = quote;
-  job.date = date;
-  job.isItemized = quoteItems.length > 0;
-  job.quoteItems = quoteItems;
-  job.milestones = milestones;
-  job.milestoneBasis = hourlyOnly ? 'percent' : _unifiedMilestoneBasis();
-  job.workCompleted = unifiedWorkCompleted;
-  job.addOns = addOns;
-  job.subtractions = subtractions;
-  job.materials = materials;
-  job.workSummary = workSummary;
-  job.jobType = hourlyOnly ? 'hourly' : 'quoted';
-  job.hourlyRate = hourlyRate;
-  job.employeeId = _unifiedEmployeeId();
-  job.createdVia = 'unified-v2';
-  job.unifiedLines = lines;
-  _updateUnifiedPrimaryNote(job, notes, date);
+  const job = V2_JOB_DOMAIN.buildUnifiedJobRecord({
+    existingJob: editingJob,
+    draft: {
+      name,
+      contactName,
+      date,
+      clientId: client.id,
+      contactClientId: contactClient?.id || '',
+      workCompleted: unifiedWorkCompleted,
+      jobType: hourlyOnly ? 'hourly' : 'quoted',
+      hourlyRate,
+      employeeId: _unifiedEmployeeId(),
+      milestoneBasis: hourlyOnly ? 'percent' : _unifiedMilestoneBasis(),
+      notes,
+      primaryNoteId: unifiedEditPrimaryNoteId,
+      lines,
+      author: { id: currentUser?.id || '', name: currentUser?.name || 'Admin' }
+    },
+    collections,
+    milestones,
+    idFactory: uid
+  });
   if (editingJob) {
     state.jobs[state.jobs.findIndex(item => item.id === editingJob.id)] = job;
   } else {
@@ -5531,7 +5413,7 @@ async function saveUnifiedJob() {
   }
   if (!editingJob) {
     expandedJobs.clear();
-    expandedJobs.add(jobId);
+    expandedJobs.add(job.id);
     saveExpandedState();
   }
   await save();

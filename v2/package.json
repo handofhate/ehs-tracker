@@ -1,0 +1,7 @@
+{
+  "name": "ehs-tracker-v2-domain",
+  "private": true,
+  "scripts": {
+    "test": "node --test"
+  }
+}
