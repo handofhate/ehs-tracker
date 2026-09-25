@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { migrateState } = require('./state-domain');
+const { migrateState, normalizeCurrentState, normalizeLegacyState } = require('./state-domain');
 
 function fixture() {
   return {
@@ -30,6 +30,21 @@ function fixture() {
   };
 }
 
+test('exposes separate legacy and current normalization passes', () => {
+  const state = fixture();
+  normalizeLegacyState(state, { idFactory: () => 'legacy-id', today: () => '2026-09-25' });
+
+  assert.equal(state.settings.debtOriginal, 123);
+  assert.equal(state.jobs[0].jobType, 'hourly');
+  assert.equal(state.jobs[0].milestones[0].status, 'collected');
+  assert.equal(state.settings.square, null);
+
+  normalizeCurrentState(state, { clientColumnKeys: ['email'] });
+
+  assert.deepEqual(state.settings.square, { functionBaseUrl: '', highValueConfirmAmount: 1000 });
+  assert.equal(state.jobs[0].jobType, 'hourly');
+});
+
 test('normalizes legacy state in place while preserving migration behavior', () => {
   const state = fixture();
   let nextId = 1;
@@ -44,12 +59,12 @@ test('normalizes legacy state in place while preserving migration behavior', () 
   assert.equal(state.settings.historicalAdj, undefined);
   assert.deepEqual(state.settings.square, { functionBaseUrl: '', highValueConfirmAmount: 1000 });
   assert.deepEqual(state.settings.clientExpandCols, ['email', 'phone']);
-  assert.equal(state.splitPayments[0].id, 'generated-1');
+  assert.equal(state.splitPayments[0].id, 'generated-3');
   assert.equal(state.splitPayments[0].date, '2026-09-25');
   assert.equal(state.debtPayments[0].linkedJobId, null);
   assert.equal(state.appointments[0].contactName, '');
   assert.deepEqual(state.clients[0].clientNotes, [{
-    id: 'generated-2',
+    id: 'generated-1',
     text: 'Old note',
     date: '2026-09-25',
     authorId: '',
@@ -64,7 +79,7 @@ test('normalizes legacy state in place while preserving migration behavior', () 
   assert.equal(state.jobs[0].jobType, 'hourly');
   assert.equal(state.jobs[0].employeeId, 'employee-1');
   assert.deepEqual(state.jobs[0].jobNotes, [{
-    id: 'generated-3',
+    id: 'generated-2',
     text: 'Old job note',
     date: '2026-01-01'
   }]);

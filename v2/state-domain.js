@@ -27,7 +27,51 @@
     };
   }
 
-  function migrateState(s, options = {}) {
+  function normalizeLegacyState(s, options = {}) {
+    const idFactory = options.idFactory || (() => 'generated-id');
+    const today = options.today || (() => '');
+
+    if (s.settings.historicalAdj !== undefined && s.settings.debtOriginal === undefined) {
+      s.settings.debtOriginal = s.settings.historicalAdj;
+      delete s.settings.historicalAdj;
+    }
+    (s.clients || []).forEach(c => {
+      if (typeof c.clientNotes === 'string') {
+        c.clientNotes = c.clientNotes.trim()
+          ? [{ id: idFactory(), text: c.clientNotes, date: today(), authorId: '', authorName: 'Admin' }]
+          : [];
+      }
+    });
+    const legacyEmpShare = s.settings.empShare ?? 0.66;
+    (s.users || []).forEach(u => {
+      if (!u.isAdmin && u.empShare === undefined) u.empShare = legacyEmpShare;
+    });
+    (s.jobs || []).forEach(job => {
+      if (job.jobType === 'hourly2') job.jobType = 'hourly';
+      if (!job.jobNotes) {
+        job.jobNotes = [];
+        if (job.notes && typeof job.notes === 'string' && job.notes.trim()) {
+          job.jobNotes.push({ id: idFactory(), text: job.notes, date: job.date || today() });
+        }
+      }
+      delete job.notes;
+      (job.milestones || []).forEach(m => {
+        if (m.status === undefined && m.collected !== undefined) {
+          m.status = m.collected ? 'collected' : 'pending';
+          delete m.collected;
+        }
+      });
+      (job.addOns || []).forEach(a => {
+        if (a.status === undefined && a.collected !== undefined) {
+          a.status = a.collected ? 'collected' : 'pending';
+          delete a.collected;
+        }
+      });
+    });
+    return s;
+  }
+
+  function normalizeCurrentState(s, options = {}) {
     const idFactory = options.idFactory || (() => 'generated-id');
     const today = options.today || (() => '');
     const clientColumnKeys = Array.isArray(options.clientColumnKeys)
@@ -37,10 +81,6 @@
     const sanitizeUserTheme = options.sanitizeTheme || sanitizeTheme;
 
     if (!s.settings.empName) s.settings.empName = 'Employee';
-    if (s.settings.historicalAdj !== undefined && s.settings.debtOriginal === undefined) {
-      s.settings.debtOriginal = s.settings.historicalAdj;
-      delete s.settings.historicalAdj;
-    }
     if (s.settings.debtOriginal === undefined) s.settings.debtOriginal = 2256.58;
     if (s.settings.debtOwnerShare === undefined) s.settings.debtOwnerShare = 0.50;
     if (s.settings.txnFee === undefined) s.settings.txnFee = 0.30;
@@ -74,11 +114,7 @@
     });
     if (!s.clients) s.clients = [];
     (s.clients || []).forEach(c => {
-      if (typeof c.clientNotes === 'string') {
-        c.clientNotes = c.clientNotes.trim()
-          ? [{ id: idFactory(), text: c.clientNotes, date: today(), authorId: '', authorName: 'Admin' }]
-          : [];
-      } else if (!Array.isArray(c.clientNotes)) {
+      if (!Array.isArray(c.clientNotes)) {
         c.clientNotes = [];
       }
     });
@@ -89,10 +125,7 @@
     if (s.users.length === 0) {
       s.users.push({ id: 'admin_default', name: 'Ty', pin: '1234', isAdmin: true });
     }
-    // Seed empShare on existing non-admin users from legacy global setting
-    const legacyEmpShare = s.settings.empShare ?? 0.66;
     (s.users).forEach(u => {
-      if (!u.isAdmin && u.empShare === undefined) u.empShare = legacyEmpShare;
       if (!u.clientPrefs || typeof u.clientPrefs !== 'object') u.clientPrefs = {};
       if (!u.uiPrefs || typeof u.uiPrefs !== 'object') u.uiPrefs = {};
       if (!u.uiPrefs.theme) u.uiPrefs.theme = u.uiPrefs.highContrast ? 'highContrast' : 'default';
@@ -123,7 +156,6 @@
     (s.jobs || []).forEach(job => {
       delete job._expanded; // moved to local localStorage - not stored in Firestore
       if (!job.employeeId && defaultEmp) job.employeeId = defaultEmp.id;
-      if (job.jobType === 'hourly2') job.jobType = 'hourly';
       if (job.jobType !== 'hourly' && job.jobType !== 'quoted') job.jobType = 'quoted';
       if (job.hourlyRate === undefined) job.hourlyRate = 0;
       if (job.workCompleted === undefined) job.workCompleted = true;
@@ -132,13 +164,7 @@
       if (!job.hourlySquareInvoiceId) job.hourlySquareInvoiceId = '';
       if (job.repaymentMode === undefined) job.repaymentMode = false;
       if (job.contactName === undefined) job.contactName = '';
-      if (!job.jobNotes) {
-        job.jobNotes = [];
-        if (job.notes && typeof job.notes === 'string' && job.notes.trim()) {
-          job.jobNotes.push({ id: idFactory(), text: job.notes, date: job.date || today() });
-        }
-      }
-      delete job.notes;
+      if (!job.jobNotes) job.jobNotes = [];
       if (!job.hours) job.hours = [];
       if (!job.advances) job.advances = [];
       if (!job.tips) job.tips = [];
@@ -155,7 +181,7 @@
         if (t.date === undefined) t.date = '';
       });
       (job.milestones || []).forEach(m => {
-        if (m.status === undefined) { m.status = m.collected ? 'collected' : 'pending'; delete m.collected; }
+        if (m.status === undefined) m.status = 'pending';
         if (!m.billingState) m.billingState = 'none';
         if (!m.squarePaymentIds) m.squarePaymentIds = [];
         if (!m.reconcileStatus) m.reconcileStatus = 'none';
@@ -169,7 +195,7 @@
         if (m.partialDate === undefined) m.partialDate = '';
       });
       (job.addOns || []).forEach(a => {
-        if (a.status === undefined) { a.status = a.collected ? 'collected' : 'pending'; delete a.collected; }
+        if (a.status === undefined) a.status = 'pending';
         if (a.date === undefined) a.date = '';
         if (!a.billingState) a.billingState = 'none';
         if (!a.squarePaymentIds) a.squarePaymentIds = [];
@@ -246,5 +272,17 @@
     return s;
   }
 
-  return Object.freeze({ migrateState, normalizeOwedInclude, sanitizeTheme });
+  function migrateState(s, options = {}) {
+    normalizeLegacyState(s, options);
+    normalizeCurrentState(s, options);
+    return s;
+  }
+
+  return Object.freeze({
+    migrateState,
+    normalizeCurrentState,
+    normalizeLegacyState,
+    normalizeOwedInclude,
+    sanitizeTheme
+  });
 });
