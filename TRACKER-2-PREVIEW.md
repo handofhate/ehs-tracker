@@ -10,7 +10,7 @@ From PowerShell in this folder, run:
 .\run-tracker2-preview.ps1
 ```
 
-The script opens `http://127.0.0.1:8080/index.html` in the browser. A local web server is used because Firebase authentication and Firestore are not reliable from a `file://` URL.
+The script opens `http://127.0.0.1:8765/index.html` in the browser. A local web server is used because Firebase authentication and Firestore are not reliable from a `file://` URL.
 
 ## Safety behavior
 

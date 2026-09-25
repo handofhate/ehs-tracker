@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 
-$port = 8080
+$port = 8765
 $serverCommand = Get-Command py -ErrorAction SilentlyContinue
 if (-not $serverCommand) {
   $serverCommand = Get-Command python -ErrorAction SilentlyContinue
