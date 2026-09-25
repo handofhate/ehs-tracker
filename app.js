@@ -23,6 +23,10 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const DOC = db.collection('jobtracker').doc('state');
+const V2_PERSISTENCE = window.Tracker2Persistence.createPersistenceBoundary({
+  mode: BUILD_CONFIG.mode,
+  writeState: next => DOC.set(next)
+});
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
 let state = {
@@ -100,11 +104,12 @@ function _clearPreviewHistory() {
 function discardPreviewChanges() {
   if (!PREVIEW_MODE) return;
   const applyLatest = (latest) => {
-    if (!latest) {
+    const restored = V2_PERSISTENCE.discard(latest);
+    if (!restored) {
       showAlert('Live data is not available yet.');
       return;
     }
-    state = migrateState(_cloneState(latest));
+    state = migrateState(restored);
     previewLatestServerState = _cloneState(state);
     previewDirty = false;
     if (currentUser) {
@@ -127,10 +132,7 @@ function discardPreviewChanges() {
 }
 
 async function _writeStateToFirestore(next) {
-  if (PREVIEW_MODE) {
-    throw new Error('Blocked Firestore write from the local Tracker 2.0 preview.');
-  }
-  return DOC.set(next);
+  return V2_PERSISTENCE.write(next);
 }
 
 function normalizeOwedInclude(raw) {
@@ -457,16 +459,17 @@ async function save() {
   if (PREVIEW_MODE) {
     // Keep the normal UI flow and local undo history, but never persist the
     // mutated state outside this browser session.
-    _lastSavedState = _cloneState(state);
+    const result = await V2_PERSISTENCE.save(state);
+    _lastSavedState = result.snapshot;
     previewDirty = true;
     _updatePreviewStatus();
     return true;
   }
   isSaving = true;
   try {
-    await _writeStateToFirestore(_cloneState(state));
+    const result = await V2_PERSISTENCE.save(state);
     // Record the just-written state as the new baseline
-    _lastSavedState = _cloneState(state);
+    _lastSavedState = result.snapshot;
   } catch(e) {
     console.error('Save failed:', e);
     showAlert('Save failed - check your connection.');

@@ -8,6 +8,8 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'app.js syntax check failed.' }
   node --check v2/job-domain.js
   if ($LASTEXITCODE -ne 0) { throw 'v2/job-domain.js syntax check failed.' }
+  node --check v2/persistence-domain.js
+  if ($LASTEXITCODE -ne 0) { throw 'v2/persistence-domain.js syntax check failed.' }
 
   Write-Host 'Running Tracker 2.0 domain tests...'
   npm test --prefix v2
@@ -31,6 +33,8 @@ try {
     'index.html',
     'v2/job-domain.js',
     'v2/job-domain.test.js',
+    'v2/persistence-domain.js',
+    'v2/persistence-domain.test.js',
     'v2/package.json'
   )
 
