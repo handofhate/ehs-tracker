@@ -1,10 +1,10 @@
 (function attachTracker2Financial(root, factory) {
   if (typeof module === 'object' && module.exports) {
-    module.exports = factory(require('./debt-feature'));
+    module.exports = factory(require('./debt-feature'), require('./fee-domain'));
   } else {
-    root.Tracker2Financial = factory(root.Tracker2DebtFeature);
+    root.Tracker2Financial = factory(root.Tracker2DebtFeature, root.Tracker2Fees);
   }
-})(typeof globalThis !== 'undefined' ? globalThis : this, function createFinancialDomain(debtFeature) {
+})(typeof globalThis !== 'undefined' ? globalThis : this, function createFinancialDomain(debtFeature, feeDomain) {
   'use strict';
 
   function roundMoney(value) {
@@ -52,7 +52,7 @@
 
   function calcJob(job, { employee = null, settings = {}, debtPayments = [] } = {}) {
     const empShare = employee?.empShare ?? 0.66;
-    const { feeRate = 0, txnFee = 0 } = settings;
+    const { feeRate, txnFee } = feeDomain.forJob(job, settings);
     const normalOwnerShare = 1 - empShare;
     const effectiveOwnerShare = debtFeature.effectiveOwnerShare(job, employee, settings);
     const effectiveEmpShare = 1 - effectiveOwnerShare;
@@ -188,21 +188,24 @@
 
   function calcHomewatch(homewatch, { employee = null, settings = {}, debtPayments = [] } = {}) {
     const empShare = employee?.empShare ?? 0.66;
-    const { feeRate = 0, txnFee = 0 } = settings;
     const collectedPayments = (homewatch.payments || []).filter(payment => payment.status === 'collected');
     const collectedGross = collectedPayments.reduce((sum, payment) => sum + (payment.amount || 0), 0);
-    const txnCount = collectedPayments.length;
-    const pendingGross = (homewatch.payments || []).filter(payment => payment.status !== 'collected').reduce((sum, payment) => sum + (payment.amount || 0), 0);
-    const { totalFees, netRevenue, empOwed, ownerOwed } = calcSplit(collectedGross, { empShare, feeRate, txnFee, txnCount });
+    const pendingPayments = (homewatch.payments || []).filter(payment => payment.status !== 'collected');
+    const pendingGross = pendingPayments.reduce((sum, payment) => sum + (payment.amount || 0), 0);
+    const paymentFees = payments => payments.reduce((sum, payment) => {
+      const { feeRate, txnFee } = feeDomain.forPayment(payment, settings);
+      return sum + Number(payment.amount || 0) * feeRate + txnFee;
+    }, 0);
+    const totalFees = roundMoney(paymentFees(collectedPayments));
+    const netRevenue = roundMoney(collectedGross - totalFees);
+    const empOwed = roundMoney(netRevenue * empShare);
+    const ownerOwed = roundMoney(netRevenue * (1 - empShare));
     const advancesPaid = (homewatch.advances || []).reduce((sum, advance) => sum + (advance.amount || 0), 0);
     const linkedDebtPaid = (debtPayments || []).filter(payment => payment.linkedHWId === homewatch.id).reduce((sum, payment) => sum + (payment.amount || 0), 0);
     const empBalance = empOwed - advancesPaid - linkedDebtPaid;
-    const potentialEmpOwed = calcSplit(collectedGross + pendingGross, {
-      empShare,
-      feeRate,
-      txnFee,
-      txnCount: txnCount + (homewatch.payments || []).filter(payment => payment.status !== 'collected').length
-    }).empOwed;
+    const projectedFees = roundMoney(paymentFees([...(collectedPayments || []), ...(pendingPayments || [])]));
+    const projectedNetRevenue = roundMoney(collectedGross + pendingGross - projectedFees);
+    const potentialEmpOwed = roundMoney(projectedNetRevenue * empShare);
     return {
       collectedGross: roundMoney(collectedGross), pendingGross: roundMoney(pendingGross), totalFees: roundMoney(totalFees),
       netRevenue: roundMoney(netRevenue), empOwed: roundMoney(empOwed), ownerOwed: roundMoney(ownerOwed),

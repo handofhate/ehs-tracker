@@ -85,6 +85,7 @@ async function main() {
       await page.goto(`${baseUrl}/index.html`, { waitUntil: 'networkidle2', timeout: 30000 });
       await page.waitForFunction(() => window.TRACKER_BUILD?.mode === 'local-preview');
       await page.waitForFunction(() => !!window.Tracker2JobDomain);
+      await page.waitForFunction(() => !!window.Tracker2Fees);
       await page.waitForFunction(() => !!window.Tracker2State);
       await page.waitForFunction(() => !!window.Tracker2Persistence);
       await page.waitForFunction(() => !!window.Tracker2History);
@@ -116,6 +117,8 @@ async function main() {
           loginVisible: getComputedStyle(document.getElementById('loginOverlay')).display !== 'none',
           domainFunctions: ['validateJobDraft', 'buildCollections', 'buildMilestones', 'buildUnifiedJobRecord']
             .every(name => typeof domain[name] === 'function'),
+          feeModule: typeof window.Tracker2Fees.migrateStateFees === 'function' &&
+            typeof window.Tracker2Fees.createFeeConfig === 'function',
           stateModule: typeof window.Tracker2State.migrateState === 'function',
           persistenceModule: typeof window.Tracker2Persistence.createPersistenceBoundary === 'function',
           previewPersistence: window.Tracker2Persistence.createPersistenceBoundary({ mode: 'local-preview', writeState: () => {} }).isPreview,
@@ -134,6 +137,7 @@ async function main() {
       assert.equal(result.bannerVisible, true);
       assert.equal(result.loginVisible, true);
       assert.equal(result.domainFunctions, true);
+      assert.equal(result.feeModule, true);
       assert.equal(result.stateModule, true);
       assert.equal(result.persistenceModule, true);
       assert.equal(result.previewPersistence, true);
@@ -265,8 +269,8 @@ async function main() {
       });
       assert.equal(feeProtection.unchanged, true);
       assert.equal(feeProtection.visible, true);
-      assert.match(feeProtection.confirmation, /existing as well as new records/i);
-      assert.match(feeProtection.confirmation, /not currently stored per job/i);
+        assert.match(feeProtection.confirmation, /new jobs and new HomeWatch payments/i);
+        assert.match(feeProtection.confirmation, /locked fee snapshots/i);
       await page.evaluate(() => {
         closeModal('confirmModal');
         closeModal('settingsModal');

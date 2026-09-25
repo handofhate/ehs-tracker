@@ -177,7 +177,7 @@ test('calculates homewatch balances using collected and pending payments', () =>
   assert.equal(result.potentialEmpBalance, 56.46);
 });
 
-test('applies the current fee settings to both historical and projected job totals', () => {
+test('uses the locked job fee snapshot for historical and projected totals', () => {
   const job = {
     id: 'fee-setting-job',
     quote: 100,
@@ -188,15 +188,59 @@ test('applies the current fee settings to both historical and projected job tota
     addOns: [], subtractions: [], materials: [], tips: [], advances: [], fees: [],
     workCompleted: true,
     repaymentMode: false,
-    jobType: 'quoted'
+    jobType: 'quoted',
+    feeConfig: { feeRate: 0.10, txnFee: 2, lockedAt: '2026-01-01', source: 'migration' }
   };
 
   const result = calcJob(job, {
     employee,
-    settings: { feeRate: 0.10, txnFee: 2 },
+    settings: { feeRate: 0.20, txnFee: 5 },
     debtPayments: []
   });
 
   assert.equal(result.totalFees, 7);
   assert.equal(result.projectedFees, 14);
+});
+
+test('charges one fixed transaction fee for each separate job invoice', () => {
+  const job = {
+    id: 'multi-invoice-job',
+    quote: 200,
+    milestones: [
+      { pct: 50, status: 'collected' },
+      { pct: 50, status: 'collected' }
+    ],
+    addOns: [], subtractions: [], materials: [], tips: [], advances: [], fees: [],
+    workCompleted: true,
+    jobType: 'quoted',
+    feeConfig: { feeRate: 0.10, txnFee: 2, lockedAt: '2026-01-01', source: 'migration' }
+  };
+  const result = calcJob(job, {
+    employee,
+    settings: { feeRate: 0.20, txnFee: 5 },
+    debtPayments: []
+  });
+
+  assert.equal(result.collectedGross, 200);
+  assert.equal(result.totalFees, 24);
+});
+
+test('uses each HomeWatch payment snapshot for mixed-rate recurring history', () => {
+  const homewatch = {
+    id: 'mixed-hw-1',
+    payments: [
+      { amount: 100, status: 'collected', feeConfig: { feeRate: 0.10, txnFee: 2, lockedAt: '2026-01-01' } },
+      { amount: 50, status: 'pending', feeConfig: { feeRate: 0.20, txnFee: 5, lockedAt: '2026-09-25' } }
+    ],
+    advances: []
+  };
+  const result = calcHomewatch(homewatch, {
+    employee,
+    settings: { feeRate: 0.30, txnFee: 9 },
+    debtPayments: []
+  });
+
+  assert.equal(result.totalFees, 12);
+  assert.equal(result.empOwed, 58.08);
+  assert.equal(result.potentialEmpBalance, 81.18);
 });

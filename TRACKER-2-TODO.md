@@ -39,7 +39,7 @@ This is the working plan for the Tracker 2.0 rebuild and cutover. Tracker 1.0 re
 - [ ] Inventory current features and classify each as keep, optimize, shelve, or remove before deeper Tracker 2.0 restructuring.
 - [x] Review the Settings baseline: keep admin backup/restore, make client display choices user-scoped with hidden defaults, keep debt isolated as a removable one-off, and clearly disable Square actions in the local preview.
 - [ ] Revisit the client field list after the Square integration review to confirm every field is still populated and useful.
-- [x] Protect the global fee settings with an explicit retroactive-impact warning, confirmation step, and audit log.
+- [x] Lock job fees and HomeWatch payment fees per record, backfill existing records from the unchanged current rate, and limit future fee-setting changes to new records.
 - [x] Verify all three user themes apply consistently and add browser smoke coverage for their state/class changes.
 - [x] Add code-level admin guards for global settings and employee/debt administration actions.
 - [ ] Review Square, exports/imports, history, payments, employee pay, Homewatch, notes, filters, undo/redo, and settings for duplicated or obsolete behavior.
@@ -52,7 +52,7 @@ This is the working plan for the Tracker 2.0 rebuild and cutover. Tracker 1.0 re
 - [ ] Decide whether Square remains part of Tracker 2.0 immediately or is temporarily shelved behind a later milestone.
 - [ ] Confirm deployed function status, Square credentials, environment, location ID, integration flags, admin authorization, and webhook configuration.
 - [ ] Test customer sync, draft invoice creation, sent invoices, partial payments, reconciliation, webhook updates, audit logs, and failure handling in Square sandbox.
-- [ ] Replace global fee recalculation with effective-dated or per-record fee snapshots before any production cutover that requires historical financials to remain frozen.
+- [ ] Validate per-record fee snapshots against Square's actual invoice/payment fees in sandbox before production cutover.
 - [ ] Ensure Square invoice/customer IDs and billing states survive the historical migration and unified job model.
 - [ ] Keep CSV client import/export available regardless of the API decision.
 - [ ] Remove obsolete Square UI/backend paths only after the final integration decision is made.

@@ -235,6 +235,9 @@
       createdVia: 'unified-v2'
     };
 
+    if (!existingJob && draft.feeConfig) job.feeConfig = clone(draft.feeConfig);
+    if (existingJob && !job.feeConfig && draft.feeConfig) job.feeConfig = clone(draft.feeConfig);
+
     job.name = String(draft.name || '').trim();
     job.contactName = String(draft.contactName || '').trim();
     job.clientId = draft.clientId || '';

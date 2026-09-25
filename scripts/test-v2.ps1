@@ -8,6 +8,8 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'app.js syntax check failed.' }
   node --check v2/job-domain.js
   if ($LASTEXITCODE -ne 0) { throw 'v2/job-domain.js syntax check failed.' }
+  node --check v2/fee-domain.js
+  if ($LASTEXITCODE -ne 0) { throw 'v2/fee-domain.js syntax check failed.' }
   node --check v2/state-domain.js
   if ($LASTEXITCODE -ne 0) { throw 'v2/state-domain.js syntax check failed.' }
   node --check v2/migration-audit.js
@@ -49,6 +51,8 @@ try {
     'index.html',
     'v2/job-domain.js',
     'v2/job-domain.test.js',
+    'v2/fee-domain.js',
+    'v2/fee-domain.test.js',
     'v2/state-domain.js',
     'v2/state-domain.test.js',
     'v2/migration-audit.js',

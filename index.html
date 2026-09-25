@@ -1202,7 +1202,7 @@
               <input class="form-input" id="s_feeRate" type="number" step="0.1" min="0" max="100" style="max-width:120px" />
               <span style="font-family:var(--mono);color:var(--text3)">%</span>
             </div>
-            <div class="form-hint">Standard Square rate is 2.9%. This is a global calculation setting.</div>
+            <div class="form-hint">Standard Square rate is 2.9%. This is the default for new records; existing jobs and payments keep their locked fee snapshots.</div>
           </div>
           <div class="form-group">
             <label class="form-label">Fixed fee per transaction</label>
@@ -1212,7 +1212,7 @@
             </div>
             <div class="form-hint">Standard Square rate is $0.30 per transaction. Both fees are deducted before the profit split.</div>
           </div>
-          <div class="settings-warning">Changing either fee recalculates financial results for existing historical jobs, current jobs, projected jobs, and HomeWatch records. Fees are not currently frozen per job, so only change these values when you intend to restate those calculations. Every confirmed change is recorded in the backup audit trail.</div>
+          <div class="settings-warning">These values are copied into new jobs and new HomeWatch payments. Existing records keep their locked fee snapshots, so changing either value will not recalculate historical, completed, pending, or already-created recurring payments. Every confirmed change is recorded in the backup audit trail.</div>
         </div>
         <div id="stab-square" class="settings-panel">
           <div id="squarePreviewNotice" class="settings-warning" style="display:none;margin-bottom:14px">Square API actions are disabled in the local Tracker 2.0 preview. The production tracker retains the integration controls.</div>
@@ -1963,6 +1963,7 @@
 
 <script src="preview-build.js?v=20260925-1"></script>
 <script src="v2/job-domain.js?v=20260925-1"></script>
+<script src="v2/fee-domain.js?v=20260925-1"></script>
 <script src="v2/state-domain.js?v=20260925-1"></script>
 <script src="v2/persistence-domain.js?v=20260925-1"></script>
 <script src="v2/history-domain.js?v=20260925-1"></script>
