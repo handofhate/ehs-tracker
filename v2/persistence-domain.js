@@ -15,14 +15,21 @@
   function createPersistenceBoundary({ mode = 'production', writeState } = {}) {
     const preview = mode === 'local-preview';
     if (typeof writeState !== 'function') throw new TypeError('writeState must be a function.');
+    let latestServerState = null;
+    let dirty = false;
 
     return Object.freeze({
       isPreview: preview,
 
       async save(next) {
         const snapshot = clone(next);
-        if (preview) return { persisted: false, snapshot };
+        if (preview) {
+          dirty = true;
+          return { persisted: false, snapshot };
+        }
         await writeState(snapshot);
+        latestServerState = clone(snapshot);
+        dirty = false;
         return { persisted: true, snapshot };
       },
 
@@ -31,8 +38,35 @@
         return writeState(clone(next));
       },
 
-      discard(latestServerState) {
+      setServerSnapshot(next) {
+        latestServerState = next == null ? null : clone(next);
+        dirty = false;
         return latestServerState == null ? null : clone(latestServerState);
+      },
+
+      receiveServerSnapshot(next) {
+        latestServerState = next == null ? null : clone(next);
+        const apply = !preview || !dirty;
+        if (apply) dirty = false;
+        return {
+          apply,
+          changedWhileDirty: !apply,
+          snapshot: latestServerState == null ? null : clone(latestServerState)
+        };
+      },
+
+      markDirty() {
+        dirty = true;
+      },
+
+      isDirty() {
+        return dirty;
+      },
+
+      discard() {
+        const restored = latestServerState == null ? null : clone(latestServerState);
+        dirty = false;
+        return restored;
       }
     });
   }

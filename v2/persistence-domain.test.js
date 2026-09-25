@@ -48,9 +48,40 @@ test('production save and write clone data before sending it to the writer', asy
 test('discard returns a cloned live snapshot and handles an unavailable snapshot', () => {
   const boundary = createPersistenceBoundary({ mode: 'local-preview', writeState: () => {} });
   const latest = { jobs: [{ id: 'job-1', name: 'Live' }] };
-  const restored = boundary.discard(latest);
+  boundary.setServerSnapshot(latest);
+  const restored = boundary.discard();
   latest.jobs[0].name = 'Changed source';
 
   assert.equal(restored.jobs[0].name, 'Live');
-  assert.equal(boundary.discard(null), null);
+  assert.equal(createPersistenceBoundary({ mode: 'local-preview', writeState: () => {} }).discard(), null);
+});
+
+test('preview keeps the newest server snapshot underneath local edits', async () => {
+  const boundary = createPersistenceBoundary({ mode: 'local-preview', writeState: () => {} });
+  boundary.setServerSnapshot({ jobs: [{ id: 'job-1', name: 'Live v1' }] });
+  await boundary.save({ jobs: [{ id: 'job-1', name: 'Temporary edit' }] });
+
+  const update = boundary.receiveServerSnapshot({ jobs: [{ id: 'job-1', name: 'Live v2' }] });
+  assert.equal(update.apply, false);
+  assert.equal(update.changedWhileDirty, true);
+  assert.equal(update.snapshot.jobs[0].name, 'Live v2');
+  assert.equal(boundary.isDirty(), true);
+
+  const restored = boundary.discard();
+  assert.equal(restored.jobs[0].name, 'Live v2');
+  assert.equal(boundary.isDirty(), false);
+
+  const cleanUpdate = boundary.receiveServerSnapshot({ jobs: [{ id: 'job-1', name: 'Live v3' }] });
+  assert.equal(cleanUpdate.apply, true);
+  assert.equal(cleanUpdate.snapshot.jobs[0].name, 'Live v3');
+});
+
+test('production accepts incoming server snapshots while preview dirty mode is disabled', async () => {
+  const boundary = createPersistenceBoundary({ mode: 'production', writeState: () => {} });
+  await boundary.save({ jobs: [{ id: 'job-1', name: 'Saved' }] });
+  const update = boundary.receiveServerSnapshot({ jobs: [{ id: 'job-1', name: 'Remote update' }] });
+
+  assert.equal(update.apply, true);
+  assert.equal(update.changedWhileDirty, false);
+  assert.equal(boundary.isDirty(), false);
 });

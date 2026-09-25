@@ -104,7 +104,7 @@ function _clearPreviewHistory() {
 function discardPreviewChanges() {
   if (!PREVIEW_MODE) return;
   const applyLatest = (latest) => {
-    const restored = V2_PERSISTENCE.discard(latest);
+    const restored = V2_PERSISTENCE.discard();
     if (!restored) {
       showAlert('Live data is not available yet.');
       return;
@@ -489,6 +489,7 @@ async function undoAction() {
   _showUndoToast('Undo: ' + description);
   if (PREVIEW_MODE) {
     _applyRestoredState(prev);
+    V2_PERSISTENCE.markDirty();
     previewDirty = true;
     _updatePreviewStatus();
     return;
@@ -522,6 +523,7 @@ async function redoAction() {
   _showUndoToast('Redo: ' + description);
   if (PREVIEW_MODE) {
     _applyRestoredState(next);
+    V2_PERSISTENCE.markDirty();
     previewDirty = true;
     _updatePreviewStatus();
     return;
@@ -669,7 +671,7 @@ function load() {
       if (syncHomewatchAutoInvoices() && !PREVIEW_MODE) {
         save();
       }
-      previewLatestServerState = _cloneState(state);
+      previewLatestServerState = V2_PERSISTENCE.setServerSnapshot(state);
       previewDirty = false;
       if (PREVIEW_MODE) _lastSavedState = _cloneState(state);
       _updatePreviewStatus();
@@ -682,7 +684,7 @@ function load() {
         _storageRemove('jobtracker_v2');
       } catch(e) {}
     } else {
-      previewLatestServerState = _cloneState(state);
+      previewLatestServerState = V2_PERSISTENCE.setServerSnapshot(state);
       previewDirty = false;
       _lastSavedState = _cloneState(state);
       _updatePreviewStatus();
@@ -700,17 +702,18 @@ function load() {
   DOC.onSnapshot(doc => {
     if (doc.exists && !isSaving) {
       const incoming = migrateState(doc.data());
-      previewLatestServerState = _cloneState(incoming);
-      if (PREVIEW_MODE && previewDirty) {
+      const serverUpdate = V2_PERSISTENCE.receiveServerSnapshot(incoming);
+      previewLatestServerState = serverUpdate.snapshot;
+      if (PREVIEW_MODE && !serverUpdate.apply) {
         _setPreviewStatus('Live data changed; temporary edits are still active.');
         return;
       }
-      state = incoming;
+      state = serverUpdate.snapshot;
       _lastSavedState = _cloneState(state);
       if (syncHomewatchAutoInvoices() && !PREVIEW_MODE) {
         save();
       }
-      previewLatestServerState = _cloneState(state);
+      previewLatestServerState = V2_PERSISTENCE.setServerSnapshot(state);
       if (PREVIEW_MODE) _lastSavedState = _cloneState(state);
       _updatePreviewStatus();
       if (currentUser) {

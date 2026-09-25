@@ -189,6 +189,7 @@ async function main() {
         };
         currentUser = { id: 'browser-smoke-admin', name: 'Smoke Admin', isAdmin: true };
         document.getElementById('loginOverlay').style.display = 'none';
+        V2_PERSISTENCE.setServerSnapshot(state);
         previewLatestServerState = _cloneState(state);
         _lastSavedState = _cloneState(state);
         previewDirty = false;
