@@ -548,6 +548,25 @@ function fmt(n) {
   const s = Math.abs(n).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 });
   return (n < 0 ? '-$' : '$') + s;
 }
+function employeePayActivityFmt(amount) {
+  const n = Number(amount || 0);
+  if (!Number.isFinite(n) || Math.abs(n) < 0.005) return '$0.00';
+  return n < 0 ? `-${fmt(Math.abs(n))}` : fmt(n);
+}
+function employeePayActivityClass(amount) {
+  return Number(amount || 0) < -0.005 ? 'green' : 'red';
+}
+function employeePayNetLabel(amount) {
+  return Number(amount || 0) < -0.005 ? 'Employee credit' : 'Net paid out';
+}
+function employeePayNetFmt(amount) {
+  return fmt(Math.abs(Number(amount || 0)));
+}
+function employeePaySettlementFmt(amount) {
+  const n = Number(amount || 0);
+  if (!Number.isFinite(n) || Math.abs(n) < 0.005) return '$0.00';
+  return n > 0 ? `-${fmt(n)}` : `+${fmt(Math.abs(n))}`;
+}
 function fmtDate(d) {
   if (!d) return '';
   const p = d.split('-');
@@ -754,7 +773,7 @@ function hwDetail(hw, c) {
             <span class="hw-pay-spacer"></span>
             <div class="hw-pay-right">
               <span class="hw-pay-meta">${fmtDate(a.date)||a.date||'-'}</span>
-              <span class="hw-pay-amount green">-${fmt(a.amount)}</span>
+              <span class="hw-pay-amount ${employeePayActivityClass(a.amount)}">${employeePayActivityFmt(a.amount)}</span>
               <button class="btn btn-danger btn-sm btn-icon-only" onclick="removeHWAdvance('${hw.id}','${a.id}')" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
             </div>
           </div>`).join('')
@@ -1261,7 +1280,7 @@ function jobCard(job) {
                 <div class="job-emp-pay-popover-title">Employee Pay</div>
                 <div class="job-emp-pay-row"><span>Total pay for job</span><strong>${fmt(employeePayTotal)}</strong></div>
                 <div class="job-emp-pay-row"><span>Tips earned</span><strong style="color:var(--green)">${fmt(c.tipsTotal)}</strong></div>
-                <div class="job-emp-pay-row"><span>Already paid</span><strong>${fmt(c.advancesPaid)}</strong></div>
+                <div class="job-emp-pay-row"><span>${employeePayNetLabel(c.advancesPaid)}</span><strong>${employeePayNetFmt(c.advancesPaid)}</strong></div>
                 ${c.linkedDebtPaid > 0 ? `<div class="job-emp-pay-row"><span>Applied to debt</span><strong>${fmt(c.linkedDebtPaid)}</strong></div>` : ''}
                 <div class="job-emp-pay-row current"><span>${employeePayBalance < -0.005 ? 'Employee credit' : 'Currently owed'}</span><strong style="color:${employeePayBalance < 0 ? 'var(--red)' : 'var(--accent)'}">${fmt(employeePayBalance < -0.005 ? Math.abs(employeePayBalance) : employeePayBalance)}</strong></div>
               </div>
@@ -1973,7 +1992,7 @@ function jobDetail(job, c) {
     <div class="line-item">
       <div class="line-item-label">${esc(a.label||'Pay')} <span style="font-size:15px;color:var(--text3)">${fmtDate(a.date)||''}</span></div>
       <div class="line-item-actions" style="display:flex;align-items:center;gap:8px">
-        <div class="line-item-value red">-${fmt(a.amount)}</div>
+        <div class="line-item-value ${employeePayActivityClass(a.amount)}">${employeePayActivityFmt(a.amount)}</div>
         ${payTypeBadgeHtml(a.payType||'', job.id, i)}
         <button class="btn btn-ghost btn-sm admin-only job-icon-btn" onclick="openAddItem('${job.id}','advance','${a.id}')" title="Edit" aria-label="Edit">${jobIconSvg('edit')}</button>
         <button class="btn btn-danger btn-sm btn-icon-only admin-only" onclick="removeItem('${job.id}','advances',${i})" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
@@ -2099,7 +2118,7 @@ function jobDetail(job, c) {
           <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','advance')">+</button>
         </div>
         ${advHtml||'<div style="color:var(--text3);font-size:16px;padding:4px 0">No employee payments logged</div>'}
-        <div class="total-line"><span style="color:var(--text2)">Paid out</span><span class="line-item-value red">-${fmt(c.advancesPaid)}</span></div>
+        <div class="total-line"><span style="color:var(--text2)">${employeePayNetLabel(c.advancesPaid)}</span><span class="line-item-value ${employeePayActivityClass(c.advancesPaid)}">${employeePayNetFmt(c.advancesPaid)}</span></div>
       </div>
 
     </div>
@@ -2133,10 +2152,10 @@ function jobDetail(job, c) {
               <div class="settlement-breakdown-row"><span>Mats back</span><strong>${fmt(c.empMats)}</strong></div>
               <div class="settlement-breakdown-row tip"><span>Tips (100%)</span><strong>${fmt(c.tipsTotal)}</strong></div>
               <div class="settlement-breakdown-row total"><span>Employee total owed</span><strong>${fmt(c.potentialEmpTotalOwed)}</strong></div>
-              <div class="settlement-breakdown-row"><span>Paid out</span><strong>-${fmt(c.advancesPaid)}</strong></div>
+              <div class="settlement-breakdown-row"><span>Paid out</span><strong>${employeePaySettlementFmt(c.advancesPaid)}</strong></div>
               ${c.linkedDebtPaid>0?`<div class="settlement-breakdown-row"><span>Debt repayment</span><strong>-${fmt(c.linkedDebtPaid)}</strong></div>`:''}
             ` : `<div style="color:var(--text3);font-size:13px;padding:4px 0">Employee pay will be calculated when the work is marked completed.</div>
-              ${c.advancesPaid > 0 ? `<div class="settlement-breakdown-row"><span>Paid out</span><strong>-${fmt(c.advancesPaid)}</strong></div>` : ''}
+              ${Math.abs(c.advancesPaid) > 0.005 ? `<div class="settlement-breakdown-row"><span>${employeePayNetLabel(c.advancesPaid)}</span><strong>${employeePayNetFmt(c.advancesPaid)}</strong></div>` : ''}
               ${c.linkedDebtPaid > 0 ? `<div class="settlement-breakdown-row"><span>Debt repayment</span><strong>-${fmt(c.linkedDebtPaid)}</strong></div>` : ''}`}
           </div>
         </div>
