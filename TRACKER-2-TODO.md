@@ -2,6 +2,8 @@
 
 This is the working plan for the Tracker 2.0 rebuild and cutover. Tracker 1.0 remains available until the cutover is deliberately completed.
 
+The running implementation history is maintained in `TRACKER-2-CHANGELOG.md`; feature decisions are maintained in `TRACKER-2-FEATURE-REVIEW.md`.
+
 ## Cutover and historical data
 
 - [ ] Choose a cutover date, preferably when there are no pending jobs or unsettled work.
@@ -75,6 +77,7 @@ The detailed keep/fix/defer/remove decisions are maintained in `TRACKER-2-FEATUR
 
 - [ ] Add browser-level regression coverage for the main job and client workflows.
 - [x] Add browser smoke coverage for Overview cards, employee invoice visibility, Recent Pay controls, workspace notes, themes, and the preview no-write boundary.
+- [x] Create and maintain a running Tracker 2.0 changelog alongside the TODO and feature-review documents.
 - [x] Add automated browser regression coverage for manual payments, partial payments, generated-note cleanup, payout-ledger updates, and preview no-write behavior.
 - [ ] Split the large frontend into behavior-focused modules after the data model stabilizes.
 - [ ] Separate read models, calculations, persistence, and rendering so Tracker 2.0 changes do not require editing one monolithic file.

@@ -38,3 +38,5 @@ From PowerShell in this folder, run:
 This runs JavaScript syntax checks, the Tracker 2.0 domain tests, a headless browser smoke test against the local preview, and the local Square helper tests when the ignored `functions/` folder is present. The browser smoke test starts a temporary local server if port 8765 is not already in use.
 
 The browser smoke test currently covers the preview mode and no-write boundary, Overview layout, shared employee invoice visibility, Recent Pay controls, workspace-note behavior, themes, unified New Job entry, fee-rate protection, manual payments, partial collections, and generated-note cleanup.
+
+See [TRACKER-2-CHANGELOG.md](TRACKER-2-CHANGELOG.md) for the running implementation history and [TRACKER-2-TODO.md](TRACKER-2-TODO.md) for remaining work.
