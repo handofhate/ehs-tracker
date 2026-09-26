@@ -61,7 +61,7 @@ This is the working plan for the Tracker 2.0 rebuild and cutover. Tracker 1.0 re
 ## Codebase cleanup
 
 - [ ] Add browser-level regression coverage for the main job and client workflows.
-- [ ] Add automated browser regression coverage for manual payments, partial payments, generated-note cleanup, payout-ledger updates, and preview no-write behavior.
+- [x] Add automated browser regression coverage for manual payments, partial payments, generated-note cleanup, payout-ledger updates, and preview no-write behavior.
 - [ ] Split the large frontend into behavior-focused modules after the data model stabilizes.
 - [ ] Separate read models, calculations, persistence, and rendering so Tracker 2.0 changes do not require editing one monolithic file.
 - [ ] Review the full-state Firestore write model for conflict and accidental-overwrite risks.

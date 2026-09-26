@@ -160,7 +160,7 @@ async function main() {
           date: '2026-01-01',
           isItemized: true,
           quoteItems: [{ id: 'browser-smoke-line', label: 'Initial work', description: 'Initial work', amount: 125 }],
-          milestones: [{ id: 'browser-smoke-milestone', label: 'Invoice', pct: 100, status: 'pending' }],
+          milestones: [{ id: 'browser-smoke-milestone', label: 'Invoice', amount: 125, status: 'pending' }],
           addOns: [],
           subtractions: [],
           materials: [],
@@ -188,7 +188,7 @@ async function main() {
           hourlyStatus: 'pending',
           hourlySquareInvoiceId: '',
           workCompleted: true,
-          milestoneBasis: 'percent',
+          milestoneBasis: 'amount',
           unifiedLines: [{
             id: 'browser-smoke-line',
             type: 'fixed',
@@ -205,6 +205,8 @@ async function main() {
             { id: 'browser-smoke-employee', name: 'Smoke Employee', isAdmin: false, empShare: 0.66 }
           ],
           clients: [{ id: 'browser-smoke-client', firstName: 'Browser', surname: 'Test Client', email: '', phone: '' }],
+          homewatch: [],
+          splitPayments: [],
           jobs: [fixtureJob]
         };
         currentUser = { id: 'browser-smoke-admin', name: 'Smoke Admin', isAdmin: true };
@@ -274,6 +276,137 @@ async function main() {
       await page.evaluate(() => {
         closeModal('confirmModal');
         closeModal('settingsModal');
+      });
+
+      await page.evaluate(() => {
+        const job = state.jobs.find(item => item.id === 'browser-smoke-job');
+        openPartialCollect(job.id);
+        document.getElementById('pc_total').value = '40.00';
+        setPartialAlloc(0, '40.00');
+        document.getElementById('pc_note').value = 'Deposit';
+        savePartialCollect();
+      });
+      await page.waitForFunction(() => {
+        const job = state.jobs.find(item => item.id === 'browser-smoke-job');
+        return job?.partialCollections?.length === 1 &&
+          job.milestones?.some(item => item.partialState === 'paid') &&
+          document.getElementById('partialCollectModal').classList.contains('hidden');
+      });
+      const dollarPartialResult = await page.evaluate(() => {
+        const job = state.jobs.find(item => item.id === 'browser-smoke-job');
+        const history = Tracker2History.paymentHistoryForJob(job);
+        const paid = job.milestones.find(item => item.partialState === 'paid');
+        const note = job.jobNotes.find(item => item.partialCollectionId === job.partialCollections[0].id);
+        return {
+          paymentTotal: job.partialCollections[0].paymentTotal,
+          paidAmount: paid?.amount,
+          history: history.map(item => ({ source: item.source, amount: item.amount })),
+          linkedNote: !!note,
+          dirty: previewDirty
+        };
+      });
+      assert.deepEqual(dollarPartialResult, {
+        paymentTotal: 40,
+        paidAmount: 40,
+        history: [{ source: 'partial-collection', amount: 40 }],
+        linkedNote: true,
+        dirty: true
+      });
+
+      const dollarPartialId = await page.evaluate(() => state.jobs.find(item => item.id === 'browser-smoke-job').partialCollections[0].id);
+      await page.evaluate(partialId => deletePartialCollection('browser-smoke-job', partialId), dollarPartialId);
+      await page.waitForFunction(() => !document.getElementById('confirmModal').classList.contains('hidden'));
+      await page.click('#confirmModalOk');
+      await page.waitForFunction(() => {
+        const job = state.jobs.find(item => item.id === 'browser-smoke-job');
+        return job?.partialCollections?.length === 0 &&
+          job?.milestones?.length === 1 &&
+          job.milestones[0].status === 'pending' &&
+          !job.jobNotes.some(item => item.partialCollectionId);
+      });
+
+      await page.evaluate(() => {
+        const job = state.jobs.find(item => item.id === 'browser-smoke-job');
+        openPartialCollect(job.id);
+        document.getElementById('pc_mode').value = 'percent';
+        onPartialModeChange();
+        togglePartialInclude(0);
+        document.getElementById('pc_percent').value = '50';
+        updatePartialCollectTotals();
+        document.getElementById('pc_note').value = 'Half payment';
+        savePartialCollect();
+      });
+      await page.waitForFunction(() => state.jobs.find(item => item.id === 'browser-smoke-job')?.partialCollections?.length === 1);
+      const percentPartialResult = await page.evaluate(() => {
+        const job = state.jobs.find(item => item.id === 'browser-smoke-job');
+        const history = Tracker2History.paymentHistoryForJob(job);
+        return {
+          mode: job.partialCollections[0].mode,
+          partialPercent: job.partialCollections[0].partialPercent,
+          paymentTotal: job.partialCollections[0].paymentTotal,
+          historyCount: history.length,
+          historySource: history[0]?.source
+        };
+      });
+      assert.deepEqual(percentPartialResult, {
+        mode: 'percent',
+        partialPercent: 50,
+        paymentTotal: 62.5,
+        historyCount: 1,
+        historySource: 'partial-collection'
+      });
+
+      await page.evaluate(() => {
+        openSplitPay();
+        document.getElementById('sp_total').value = '25.00';
+        const allocation = document.getElementById('sp_job_browser-smoke-job');
+        allocation.value = '25.00';
+        updateSplitTotals();
+        saveSplitPay();
+      });
+      await page.waitForFunction(() => state.splitPayments?.length === 1 && state.jobs[0].advances?.length === 1);
+      const payoutLedgerInitial = await page.evaluate(() => {
+        const rows = _getSplitLedgerEntries();
+        return { total: rows[0]?.total, allocation: rows[0]?.allocations?.[0]?.amount };
+      });
+      assert.deepEqual(payoutLedgerInitial, { total: 25, allocation: 25 });
+
+      await page.evaluate(() => {
+        const job = state.jobs.find(item => item.id === 'browser-smoke-job');
+        const advance = job.advances[0];
+        openAddItem(job.id, 'advance', advance.id);
+        document.getElementById('ai_amount').value = '10.00';
+        saveItem();
+      });
+      await page.waitForFunction(() => state.jobs[0].advances[0].amount === 10);
+      const payoutLedgerEdited = await page.evaluate(() => {
+        const rows = _getSplitLedgerEntries();
+        return { total: rows[0]?.total, allocation: rows[0]?.allocations?.[0]?.amount };
+      });
+      assert.deepEqual(payoutLedgerEdited, { total: 10, allocation: 10 });
+
+      await page.evaluate(() => removeItem('browser-smoke-job', 'advances', 0));
+      await page.waitForFunction(() => _getSplitLedgerEntries().length === 0);
+
+      const signedPayDisplay = await page.evaluate(() => {
+        const job = state.jobs.find(item => item.id === 'browser-smoke-job');
+        job.advances = [
+          { id: 'browser-smoke-advance', label: 'Advance', amount: 100, date: '2026-01-02', payType: 'advance' },
+          { id: 'browser-smoke-adjustment', label: 'Advance reversal', amount: -100, date: '2026-01-03', payType: 'adjustment' }
+        ];
+        const html = jobDetail(job, calcJob(job));
+        return {
+          hasDoubleNegative: html.includes('--$100.00'),
+          hasReversalAmount: html.includes('>-$100.00<'),
+          hasNetPaidLabel: html.includes('Net paid out'),
+          netAdvanceAmount: calcJob(job).advancesPaid
+        };
+      });
+      assert.deepEqual(signedPayDisplay, {
+        hasDoubleNegative: false,
+        hasReversalAmount: true,
+        hasNetPaidLabel: true,
+        netAdvanceAmount: 0
       });
 
       await page.$eval('#uj_desc_1', element => {
