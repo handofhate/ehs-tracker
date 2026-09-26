@@ -113,6 +113,7 @@ async function main() {
         return {
           title: document.title,
           previewMode: window.TRACKER_BUILD.mode,
+          duotoneStylesheet: !!document.querySelector('link[href*="@phosphor-icons/web@2.1.1/src/duotone/style.css"]'),
           bannerVisible: document.body.innerText.includes('changes are temporary'),
           loginVisible: getComputedStyle(document.getElementById('loginOverlay')).display !== 'none',
           domainFunctions: ['validateJobDraft', 'buildCollections', 'buildMilestones', 'buildUnifiedJobRecord']
@@ -134,6 +135,7 @@ async function main() {
 
       assert.equal(result.title, 'Job Tracker');
       assert.equal(result.previewMode, 'local-preview');
+      assert.equal(result.duotoneStylesheet, true);
       assert.equal(result.bannerVisible, true);
       assert.equal(result.loginVisible, true);
       assert.equal(result.domainFunctions, true);
@@ -230,6 +232,150 @@ async function main() {
         clientName: 'Browser Test Client',
         initialDescription: 'Initial work',
         initialNote: 'Original note'
+      });
+
+      const workspaceResult = await page.evaluate(() => {
+        renderAll();
+        switchTab('overview', document.querySelector('.tabs .tab[data-tab="overview"]'));
+        openSettings();
+        const settingsLabels = [...document.querySelectorAll('#settingsModal .settings-nav-btn')].map(btn => btn.textContent.trim());
+        closeModal('settingsModal');
+        return {
+          overviewActive: document.getElementById('tab-overview').classList.contains('active'),
+          overviewTitleRemoved: !document.querySelector('#tab-overview .overview-title'),
+          overviewSubtitle: document.querySelector('#tab-overview .overview-subtitle')?.textContent.trim(),
+          attentionWidget: !!document.getElementById('summaryCards'),
+          notesWidget: !!document.getElementById('overviewNotes'),
+          activityLayout: (() => {
+            const card = document.querySelector('#summaryCards .summary-card:first-child');
+            return !!card && card.querySelector('.summary-label')?.textContent.trim() === 'Active Jobs' &&
+              card.querySelector('.attention-secondary-block .summary-label')?.textContent.trim() === 'Recurring Services' &&
+              !card.querySelector('.attention-secondary-block .summary-value')?.classList.contains('orange');
+          })(),
+          invoiceLayout: (() => {
+            const card = document.querySelector('#summaryCards .summary-card:nth-child(2)');
+            return !!card && card.querySelector('.summary-value.orange')?.textContent.includes('(') &&
+              card.querySelector('.invoice-pending-label')?.textContent.trim() === 'Pending Invoices' &&
+              card.querySelector('.invoice-pending-block .summary-value.orange')?.textContent.includes('(') &&
+              card.querySelector('.invoice-pending-label')?.classList.contains('summary-label');
+          })(),
+          employeeHeaderControls: document.querySelectorAll('#summaryCards .summary-card-header .summary-card-select').length === 3,
+          recentPayFilterPosition: (() => {
+            const card = [...document.querySelectorAll('#summaryCards .summary-card')].find(item => item.querySelector('.summary-label')?.textContent.trim() === 'Recent Pay');
+            const controls = card?.querySelector('.summary-card-header-controls');
+            return !!card && controls?.querySelectorAll('.summary-card-select').length === 2 &&
+              card.querySelector('.summary-card-header')?.nextElementSibling?.classList.contains('summary-value');
+          })(),
+          quickLinksRemoved: !document.querySelector('#tab-overview .overview-quick-links'),
+          newNoteLabel: document.querySelector('#overviewNoteForm')?.parentElement?.querySelector('.overview-panel-header button')?.textContent.trim(),
+          newJobLabel: document.getElementById('newJobBtn')?.textContent.trim(),
+          newJobUsesUnified: document.getElementById('newJobBtn')?.getAttribute('onclick') === 'openUnifiedJobModal()',
+          quickJobButtonRemoved: !document.getElementById('newUnifiedJobBtn'),
+          settingsLabels
+        };
+      });
+      assert.equal(workspaceResult.overviewActive, true);
+      assert.equal(workspaceResult.overviewTitleRemoved, true);
+      assert.equal(workspaceResult.overviewSubtitle, 'Your starting point for jobs, money, and the things that need attention.');
+      assert.equal(workspaceResult.attentionWidget, true);
+      assert.equal(workspaceResult.notesWidget, true);
+      assert.equal(workspaceResult.activityLayout, true);
+      assert.equal(workspaceResult.invoiceLayout, true);
+      assert.equal(workspaceResult.employeeHeaderControls, true);
+      assert.equal(workspaceResult.recentPayFilterPosition, true);
+      assert.equal(workspaceResult.quickLinksRemoved, true);
+      assert.equal(workspaceResult.newNoteLabel, '+ New Note');
+      assert.equal(workspaceResult.newJobLabel, '+ New Job');
+      assert.equal(workspaceResult.newJobUsesUnified, true);
+      assert.equal(workspaceResult.quickJobButtonRemoved, true);
+      assert.deepEqual(workspaceResult.settingsLabels, [
+        'Appearance', 'Client display', 'Job defaults', 'Team & permissions',
+        'Financial rules', 'Square integration', 'Data & backup', 'Temporary tools'
+      ]);
+
+      const employeeOverviewResult = await page.evaluate(() => {
+        const employee = state.users.find(user => !user.isAdmin);
+        currentUser = { id: employee.id, name: employee.name, isAdmin: false };
+        applyUserView();
+        renderAll();
+        const cards = [...document.querySelectorAll('#empSummaryCards .summary-card')];
+        const invoiceCard = cards.find(card => card.querySelector('.summary-label')?.textContent.trim() === 'Outstanding Invoices');
+        const recentPayCard = cards.find(card => card.querySelector('.summary-label')?.textContent.trim() === 'Recent Pay');
+        const result = {
+          invoiceCardVisible: !!invoiceCard,
+          invoiceCardHasPendingSection: !!invoiceCard?.querySelector('.invoice-pending-label'),
+          recentPayFilterInHeader: !!recentPayCard?.querySelector('.summary-card-header > .summary-card-select'),
+          recentPayValueBelowHeader: recentPayCard?.querySelector('.summary-card-header')?.nextElementSibling?.classList.contains('summary-value') === true
+        };
+        currentUser = { id: 'browser-smoke-admin', name: 'Smoke Admin', isAdmin: true };
+        applyUserView();
+        renderAll();
+        return result;
+      });
+      assert.deepEqual(employeeOverviewResult, {
+        invoiceCardVisible: true,
+        invoiceCardHasPendingSection: true,
+        recentPayFilterInHeader: true,
+        recentPayValueBelowHeader: true
+      });
+
+      const overviewNoteResult = await page.evaluate(() => {
+        state.dashboardNotes = [];
+        openOverviewNoteForm();
+        document.getElementById('overviewNoteText').value = 'Browser smoke workspace note';
+        toggleOverviewNoteToggle('overviewNotePinned');
+        saveOverviewNote();
+        const note = state.dashboardNotes[0];
+        const pinnedClassBeforeEdit = document.querySelector('.overview-note-item')?.classList.contains('pinned');
+        const pinIconBeforeEdit = !!document.querySelector('.overview-note-item .ph-push-pin');
+        openOverviewNote(note.id);
+        const openedText = document.getElementById('overviewNoteModalText').value;
+        const modalPinnedBeforeEdit = document.getElementById('overviewNoteModalPinned').classList.contains('on');
+        startOverviewNoteEdit();
+        document.getElementById('overviewNoteModalText').value = 'Edited workspace note';
+        toggleOverviewNoteToggle('overviewNoteModalPinned');
+        saveOverviewNoteEdit();
+        const modalStaysOpenAfterSave = !document.getElementById('overviewNoteModal').classList.contains('hidden') &&
+          document.getElementById('overviewNoteModalText').readOnly;
+        closeModal('overviewNoteModal');
+        const expandedSavedText = state.dashboardNotes[0]?.text;
+        document.querySelector('.overview-note-item button[title="Edit note"]')?.click();
+        document.getElementById('overviewNoteModalText').value = 'Workspace-origin edited note';
+        saveOverviewNoteEdit();
+        return {
+          openedText,
+          savedText: expandedSavedText,
+          pinnedClassBeforeEdit,
+          pinIconBeforeEdit,
+          modalPinnedBeforeEdit,
+          modalPinnedClass: document.getElementById('overviewNoteModal').classList.contains('pinned'),
+          savedPinned: state.dashboardNotes[0]?.pinned,
+          modalStaysOpenAfterSave,
+          workspaceOriginEditCloses: document.getElementById('overviewNoteModal').classList.contains('hidden'),
+          workspaceOriginSavedText: state.dashboardNotes[0]?.text,
+          cardCount: document.querySelectorAll('.overview-note-item').length,
+          previewClamp: getComputedStyle(document.querySelector('.overview-note-text')).webkitLineClamp,
+          cardIcons: [...document.querySelectorAll('.overview-note-item .ph-duotone')].map(icon => icon.className).sort(),
+          modalCloseIcon: document.querySelector('#overviewNoteModal .overview-note-close .ph-duotone')?.className,
+          saveButtonStyle: document.getElementById('overviewNoteModalSaveBtn')?.classList.contains('btn-ghost')
+        };
+      });
+      assert.deepEqual(overviewNoteResult, {
+        openedText: 'Browser smoke workspace note',
+        savedText: 'Edited workspace note',
+        pinnedClassBeforeEdit: true,
+        pinIconBeforeEdit: true,
+        modalPinnedBeforeEdit: true,
+        modalPinnedClass: false,
+        savedPinned: false,
+        modalStaysOpenAfterSave: true,
+        workspaceOriginEditCloses: true,
+        workspaceOriginSavedText: 'Workspace-origin edited note',
+        cardCount: 1,
+        previewClamp: '5',
+        cardIcons: ['ph-duotone ph-check-fat', 'ph-duotone ph-pencil-simple', 'ph-duotone ph-trash'],
+        modalCloseIcon: 'ph-duotone ph-x',
+        saveButtonStyle: true
       });
 
       const themeResult = await page.evaluate(() => {

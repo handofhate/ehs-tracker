@@ -172,6 +172,31 @@ test('keeps client display defaults separate from each users personal preference
   assert.deepEqual(state.users[0].clientPrefs, { clientColumns: ['email'] });
 });
 
+test('normalizes Overview workspace notes without losing audience, completion, or pin state', () => {
+  const state = {
+    settings: {},
+    dashboardNotes: [
+      { text: ' Team follow-up ', audience: 'team', done: true, pinned: true, authorId: 'u1' },
+      { text: '', audience: 'admin' },
+      { text: 'Admin reminder', audience: 'admin', done: false, authorName: 'Ty' }
+    ],
+    debtPayments: [],
+    splitPayments: [],
+    users: [{ id: 'u1', name: 'Ty', isAdmin: true }],
+    appointments: [],
+    clients: [],
+    homewatch: [],
+    jobs: []
+  };
+
+  migrateState(state, { idFactory: () => 'note-id', today: () => '2026-09-25' });
+
+  assert.deepEqual(state.dashboardNotes, [
+    { text: 'Team follow-up', audience: 'team', done: true, pinned: true, authorId: 'u1', id: 'note-id', date: '2026-09-25', authorName: '' },
+    { text: 'Admin reminder', audience: 'admin', done: false, pinned: false, authorName: 'Ty', id: 'note-id', date: '2026-09-25', authorId: '' }
+  ]);
+});
+
 test('seeds the default admin when no users exist', () => {
   const state = {
     settings: {},

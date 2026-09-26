@@ -148,6 +148,22 @@
         c.clientNotes = [];
       }
     });
+    if (!Array.isArray(s.dashboardNotes)) s.dashboardNotes = [];
+    s.dashboardNotes = s.dashboardNotes
+      .filter(note => note && typeof note === 'object' && String(note.text || '').trim())
+      .map(note => {
+        const { important: legacyImportant, ...noteWithoutLegacyFlag } = note;
+        return {
+        ...noteWithoutLegacyFlag,
+        id: note.id || idFactory(),
+        text: String(note.text || '').trim(),
+        date: note.date === undefined ? today() : String(note.date || ''),
+        authorId: note.authorId === undefined ? '' : String(note.authorId || ''),
+        authorName: note.authorName === undefined ? '' : String(note.authorName || ''),
+        audience: note.audience === 'admin' ? 'admin' : 'team',
+        done: !!note.done,
+        pinned: !!(note.pinned || legacyImportant)
+      }; });
     if (!s.settings.clientColumns) s.settings.clientColumns = [...DEFAULT_CLIENT_COLUMNS];
     if (!s.settings.clientExpandCols) s.settings.clientExpandCols = [...clientColumnKeys];
     if (!s.settings.clientQuickCols) s.settings.clientQuickCols = [...DEFAULT_CLIENT_QUICK_COLUMNS];

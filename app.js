@@ -53,7 +53,8 @@ let state = {
   jobs: [],
   users: [],
   appointments: [],
-  homewatch: []
+  homewatch: [],
+  dashboardNotes: []
 };
 let editingJobId = null;
 let addItemContext = null;
@@ -66,6 +67,9 @@ let expandedClients = new Set();
 let allJobsClientFilterId = null;
 let allJobsJobFilterId = null;
 let notesCtx = null; // { type: 'job'|'hw', id }
+let overviewNoteModalId = null;
+let overviewNoteModalEditing = false;
+let overviewNoteEditOrigin = null;
 let empSummaryTimeframe = '30'; // days, or 'all' (user-scoped local preference)
 let hoursJobId = null;
 let editNoteCtx = null;
@@ -1027,62 +1031,298 @@ function renderDebtPanel() {
 }
 
 // ─── SUMMARY ─────────────────────────────────────────────────────────────────
+let overviewAdminPayEmployeeId = '';
+let overviewAdminPayTimeframe = '30';
+
+function _recentEmployeePay(employeeId, timeframe) {
+  let cutoffStr = null;
+  if (timeframe !== 'all') {
+    const d = new Date();
+    d.setDate(d.getDate() - parseInt(timeframe));
+    cutoffStr = d.toISOString().slice(0, 10);
+  }
+  const inWindow = date => !cutoffStr || (date && date >= cutoffStr);
+  let total = 0;
+  state.jobs.filter(job => job.employeeId === employeeId).forEach(job => {
+    (job.advances || []).forEach(advance => { if (inWindow(advance.date)) total += advance.amount || 0; });
+  });
+  (state.homewatch || []).filter(hw => hw.employeeId === employeeId).forEach(hw => {
+    (hw.advances || []).forEach(advance => { if (inWindow(advance.date)) total += advance.amount || 0; });
+  });
+  return _roundMoney(total);
+}
+
+function _recentPayTimeframeOptions(value) {
+  return [
+    ['7','Last 7 days'],['14','Last 14 days'],['30','Last 30 days'],
+    ['60','Last 60 days'],['90','Last 90 days'],['365','This year'],['all','All time']
+  ].map(([v, label]) => `<option value="${v}"${value === v ? ' selected' : ''}>${label}</option>`).join('');
+}
+
+function setOverviewPayEmployee(employeeId) {
+  overviewAdminPayEmployeeId = employeeId || '';
+  try { _storageSet(_uiKey('overviewPayEmployee'), overviewAdminPayEmployeeId); } catch (e) {}
+  renderSummary();
+}
+
+function setOverviewPayTimeframe(value) {
+  overviewAdminPayTimeframe = value || '30';
+  try { _storageSet(_uiKey('overviewPayTimeframe'), overviewAdminPayTimeframe); } catch (e) {}
+  renderSummary();
+}
+
+function _loadOverviewPayPreferences() {
+  try {
+    overviewAdminPayEmployeeId = _storageGet(_uiKey('overviewPayEmployee')) || '';
+    overviewAdminPayTimeframe = _storageGet(_uiKey('overviewPayTimeframe')) || '30';
+  } catch (e) {
+    overviewAdminPayEmployeeId = '';
+    overviewAdminPayTimeframe = '30';
+  }
+}
+
+function _overviewBillingTotals() {
+  return state.jobs
+    .filter(job => job.status !== 'complete')
+    .reduce((sum, job) => {
+      const billing = getJobBillingSummary(job);
+      return {
+        pendingCount: sum.pendingCount + billing.pending.count,
+        pendingTotal: sum.pendingTotal + billing.pending.total,
+        invoicedCount: sum.invoicedCount + billing.invoiced.count,
+        invoicedTotal: sum.invoicedTotal + billing.invoiced.total
+      };
+    }, { pendingCount: 0, pendingTotal: 0, invoicedCount: 0, invoicedTotal: 0 });
+}
+
+function _overviewInvoiceCard(billingTotals) {
+  const pending = { count: billingTotals.pendingCount, total: billingTotals.pendingTotal };
+  return `<div class="summary-card" onclick="goToTab('active')" style="cursor:pointer"><div class="summary-label">Outstanding Invoices</div><div class="summary-value orange">${billingTotals.invoicedCount} <span class="summary-value-detail">(${fmt(billingTotals.invoicedTotal)})</span></div><div class="invoice-pending-block"><div class="summary-label invoice-pending-label">Pending Invoices</div><div class="summary-value orange">${pending.count} <span class="summary-value-detail">(${fmt(pending.total)})</span></div></div></div>`;
+}
+
 function renderSummary() {
   renderDebtPanel();
-  renderEmpSummary();
-  const active = state.jobs.filter(j => j.status !== 'complete');
-  let tContract=0, tCollected=0, tPending=0, tOwner=0;
-  active.forEach(j => {
-    const c = calcJob(j);
-    tContract += c.contractTotal; tCollected += c.collectedGross;
-    tPending  += c.pendingGross;  tOwner    += c.ownerTotal;
-  });
-  const activeHW  = (state.homewatch||[]).filter(hw=>hw.status!=='paused');
-  const pausedHW  = (state.homewatch||[]).filter(hw=>hw.status==='paused');
-  const employees = state.users.filter(u => !u.isAdmin);
-  const include = normalizeOwedInclude(state.settings?.owedSummaryInclude);
-  const empCardsHtml = employees.map(emp => {
-    const empJobs = state.jobs.filter(j => j.employeeId === emp.id && j.status !== 'complete');
-    const empHWAll = (state.homewatch||[]).filter(hw => hw.employeeId === emp.id);
-    // Employee pay is based on completed work, not on whether the client has
-    // paid yet. Use the projected employee balance for each item so pending
-    // client charges do not delay pay, while held-job advances remain credits.
-    const jobPay = _roundMoney(empJobs.reduce((s,j) => s + Math.max(0, calcJob(j).potentialEmpBalance), 0));
-    const jobCredit = _roundMoney(empJobs.reduce((s,j) => s + Math.max(0, -calcJob(j).potentialEmpBalance), 0));
+  const summaryEl = document.getElementById('summaryCards');
+  if (currentUser?.isAdmin) {
+    _loadOverviewPayPreferences();
+    const active = state.jobs.filter(job => job.status !== 'complete');
+    const activeHW = (state.homewatch || []).filter(hw => hw.status !== 'paused');
+    const pausedHW = (state.homewatch || []).filter(hw => hw.status === 'paused');
+    const billingTotals = _overviewBillingTotals();
+    const employees = state.users.filter(user => !user.isAdmin);
+    const include = normalizeOwedInclude(state.settings?.owedSummaryInclude);
+    const selectedEmployee = employees.find(user => user.id === overviewAdminPayEmployeeId) || employees[0];
+    if (selectedEmployee && overviewAdminPayEmployeeId !== selectedEmployee.id) overviewAdminPayEmployeeId = selectedEmployee.id;
+    const employeeOptions = employees.map(user => `<option value="${esc(user.id)}"${selectedEmployee?.id === user.id ? ' selected' : ''}>${esc(user.name)}</option>`).join('');
+    const selectedEmpJobs = selectedEmployee ? active.filter(job => job.employeeId === selectedEmployee.id) : [];
+    const selectedEmpHW = selectedEmployee ? (state.homewatch || []).filter(hw => hw.employeeId === selectedEmployee.id) : [];
+    const jobPay = _roundMoney(selectedEmpJobs.reduce((sum, job) => sum + Math.max(0, calcJob(job).potentialEmpBalance), 0));
+    const jobCredit = _roundMoney(selectedEmpJobs.reduce((sum, job) => sum + Math.max(0, -calcJob(job).potentialEmpBalance), 0));
     const jobNet = _roundMoney(jobPay - jobCredit);
-    const hwBal = _roundMoney(empHWAll.reduce((s,hw) => s + calcHW(hw).potentialEmpBalance, 0));
-    const total = _roundMoney(
-      (include.jobs ? jobNet : 0) +
-      (include.homewatch ? hwBal : 0));
-    return `<div class="summary-card">
-      <div class="summary-label">Owed to ${esc(emp.name)}</div>
-      <div class="summary-value ${total < 0 ? 'red' : 'orange'}">${fmt(total)}</div>
+    const hwBal = _roundMoney(selectedEmpHW.reduce((sum, hw) => sum + calcHW(hw).potentialEmpBalance, 0));
+    const owedTotal = _roundMoney((include.jobs ? jobNet : 0) + (include.homewatch ? hwBal : 0));
+    const owedCard = selectedEmployee ? `<div class="summary-card">
+      <div class="summary-card-header"><div class="summary-label">Employee Pay Owed</div><select class="summary-card-select" onchange="setOverviewPayEmployee(this.value)" aria-label="Employee for pay owed">${employeeOptions}</select></div>
+      <div class="summary-value ${owedTotal < 0 ? 'red' : 'orange'}">${fmt(owedTotal)}</div>
       <div class="owed-breakdown">
-        <div class="owed-breakdown-row">
-          <span class="owed-breakdown-label">Jobs</span>
-          <span class="owed-breakdown-amount">${fmt(jobPay)}</span>
-          <button type="button" class="owed-toggle${include.jobs ? ' on' : ''}" onclick="event.stopPropagation();toggleSummaryOwedInclude('jobs')" aria-pressed="${include.jobs ? 'true' : 'false'}" title="Include Jobs in total">
-            <span class="owed-toggle-thumb"></span>
-          </button>
-        </div>
+        <div class="owed-breakdown-row"><span class="owed-breakdown-label">Jobs</span><span class="owed-breakdown-amount">${fmt(jobPay)}</span><button type="button" class="owed-toggle${include.jobs ? ' on' : ''}" onclick="event.stopPropagation();toggleSummaryOwedInclude('jobs')" aria-pressed="${include.jobs ? 'true' : 'false'}" title="Include Jobs in total"><span class="owed-toggle-thumb"></span></button></div>
         ${jobCredit > 0.005 ? `<div class="owed-breakdown-row"><span class="owed-breakdown-label">Advance</span><span class="owed-breakdown-amount" style="color:var(--red)">-${fmt(jobCredit)}</span></div>` : ''}
-        <div class="owed-breakdown-row">
-          <span class="owed-breakdown-label">HomeWatch</span>
-          <span class="owed-breakdown-amount">${fmt(hwBal)}</span>
-          <button type="button" class="owed-toggle${include.homewatch ? ' on' : ''}" onclick="event.stopPropagation();toggleSummaryOwedInclude('homewatch')" aria-pressed="${include.homewatch ? 'true' : 'false'}" title="Include HomeWatch in total">
-            <span class="owed-toggle-thumb"></span>
-          </button>
-        </div>
+        <div class="owed-breakdown-row"><span class="owed-breakdown-label">Recurring</span><span class="owed-breakdown-amount">${fmt(hwBal)}</span><button type="button" class="owed-toggle${include.homewatch ? ' on' : ''}" onclick="event.stopPropagation();toggleSummaryOwedInclude('homewatch')" aria-pressed="${include.homewatch ? 'true' : 'false'}" title="Include recurring services in total"><span class="owed-toggle-thumb"></span></button></div>
+      </div>
+    </div>` : '';
+    const recentPay = selectedEmployee ? _recentEmployeePay(selectedEmployee.id, overviewAdminPayTimeframe) : 0;
+    const recentPayCard = selectedEmployee ? `<div class="summary-card">
+      <div class="summary-card-header"><div class="summary-label">Recent Pay</div><div class="summary-card-header-controls"><select class="summary-card-select" onchange="setOverviewPayEmployee(this.value)" aria-label="Employee for recent pay">${employeeOptions}</select><select class="summary-card-select" onchange="setOverviewPayTimeframe(this.value)" aria-label="Recent pay period">${_recentPayTimeframeOptions(overviewAdminPayTimeframe)}</select></div></div>
+      <div class="summary-value ${recentPay < 0 ? 'red' : 'green'}">${fmt(recentPay)}</div>
+    </div>` : '';
+    summaryEl.innerHTML = `
+      <div class="summary-card" onclick="goToTab('active')" style="cursor:pointer"><div class="summary-label">Active Jobs</div><div class="summary-value">${active.length}</div><div class="invoice-pending-block attention-secondary-block" onclick="event.stopPropagation();goToTab('homewatch')"><div class="summary-label invoice-pending-label">Recurring Services</div><div class="summary-value">${activeHW.length} <span class="summary-value-detail">(${pausedHW.length} paused)</span></div></div></div>
+      ${_overviewInvoiceCard(billingTotals)}
+      ${owedCard}${recentPayCard}`;
+    document.getElementById('empSummaryCards').innerHTML = '';
+  } else {
+    summaryEl.innerHTML = '';
+    renderEmpSummary();
+  }
+  renderOverview();
+}
+
+function renderOverview() {
+  const notesEl = document.getElementById('overviewNotes');
+  if (!notesEl) return;
+
+  const allNotes = Array.isArray(state.dashboardNotes) ? state.dashboardNotes : [];
+  const notes = allNotes
+    .filter(note => note.audience !== 'admin' || currentUser?.isAdmin)
+    .sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || String(b.date || '').localeCompare(String(a.date || '')) || String(b.id || '').localeCompare(String(a.id || '')));
+  const openNotes = notes.filter(note => !note.done).length;
+  const countEl = document.getElementById('overviewNoteCount');
+  if (countEl) countEl.textContent = notes.length ? `${openNotes} open` : '';
+  notesEl.innerHTML = notes.length ? notes.map(note => {
+    const canDelete = currentUser?.isAdmin || note.authorId === currentUser?.id;
+    const audienceLabel = note.audience === 'admin' ? 'Admin' : 'Team';
+    return `<div class="overview-note-item${note.done ? ' done' : ''}${note.pinned ? ' pinned' : ''}" onclick="openOverviewNote('${note.id}')">
+      <div class="overview-note-top"><span class="overview-note-meta">${audienceLabel} | ${esc(note.authorName || 'Tracker user')} | ${esc(fmtDate(note.date) || note.date || '')}</span><span class="overview-note-top-right">${note.done ? '<span class="overview-note-meta">Done</span>' : ''}${note.pinned ? '<i class="ph-duotone ph-push-pin overview-note-pin-icon" title="Pinned to top" aria-label="Pinned to top"></i>' : ''}</span></div>
+      <div class="overview-note-text">${esc(note.text)}</div>
+      <div class="overview-note-actions">
+        <button class="btn btn-ghost btn-sm btn-icon-only" onclick="event.stopPropagation();toggleOverviewNote('${note.id}')" title="${note.done ? 'Reopen note' : 'Mark note done'}" aria-label="${note.done ? 'Reopen note' : 'Mark note done'}"><i class="ph-duotone ph-check-fat" aria-hidden="true"></i></button>
+        ${canDelete ? `<button class="btn btn-ghost btn-sm btn-icon-only" onclick="event.stopPropagation();openOverviewNote('${note.id}', true, 'workspace')" title="Edit note" aria-label="Edit note"><i class="ph-duotone ph-pencil-simple" aria-hidden="true"></i></button><button class="btn btn-danger btn-sm btn-icon-only" onclick="event.stopPropagation();deleteOverviewNote('${note.id}')" title="Delete note" aria-label="Delete note"><i class="ph-duotone ph-trash" aria-hidden="true"></i></button>` : ''}
       </div>
     </div>`;
-  }).join('');
-  document.getElementById('summaryCards').innerHTML = `
-    <div class="summary-card" onclick="goToTab('active')" style="cursor:pointer"><div class="summary-label">Active Jobs</div><div class="summary-value">${active.length}</div></div>
-    <div class="summary-card" onclick="goToTab('homewatch')" style="cursor:pointer"><div class="summary-label">HomeWatch</div><div class="summary-value">${activeHW.length}</div><div class="summary-sub">${pausedHW.length > 0 ? `${pausedHW.length} paused` : 'none paused'}</div></div>
-    <div class="summary-card"><div class="summary-label">Total Contract Value</div><div class="summary-value orange">${fmt(tContract)}</div></div>
-    <div class="summary-card"><div class="summary-label">Collected</div><div class="summary-value green">${fmt(tCollected)}</div><div class="summary-sub">${fmt(tPending)} pending</div></div>
-    <div class="summary-card"><div class="summary-label">Your Profit (active)</div><div class="summary-value green">${fmt(tOwner)}</div><div class="summary-sub">from collected revenue</div></div>
-    ${empCardsHtml}`;
+  }).join('') : '<div class="overview-empty">No workspace notes yet.</div>';
+}
+
+function openOverviewNoteForm() {
+  const form = document.getElementById('overviewNoteForm');
+  if (!form) return;
+  form.style.display = '';
+  const adminControl = document.getElementById('overviewNoteAdminOnlyControl');
+  if (adminControl) adminControl.style.display = currentUser?.isAdmin ? 'inline-flex' : 'none';
+  setOverviewNoteToggle('overviewNoteAdminOnly', false, false);
+  setOverviewNoteToggle('overviewNotePinned', false, false);
+  document.getElementById('overviewNoteText')?.focus();
+}
+
+function closeOverviewNoteForm() {
+  const form = document.getElementById('overviewNoteForm');
+  if (form) form.style.display = 'none';
+  const input = document.getElementById('overviewNoteText');
+  if (input) input.value = '';
+  setOverviewNoteToggle('overviewNoteAdminOnly', false, false);
+  setOverviewNoteToggle('overviewNotePinned', false, false);
+}
+
+function _overviewNoteCanEdit(note) {
+  return !!note && (currentUser?.isAdmin || note.authorId === currentUser?.id);
+}
+
+function setOverviewNoteToggle(id, enabled, disabled = null) {
+  const toggle = document.getElementById(id);
+  if (!toggle) return;
+  toggle.classList.toggle('on', !!enabled);
+  toggle.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+  if (disabled !== null) toggle.disabled = !!disabled;
+}
+
+function toggleOverviewNoteToggle(id) {
+  const toggle = document.getElementById(id);
+  if (!toggle || toggle.disabled) return;
+  setOverviewNoteToggle(id, !toggle.classList.contains('on'));
+}
+
+function openOverviewNote(id, edit = false, editOrigin = 'expanded') {
+  const note = (state.dashboardNotes || []).find(item => item.id === id);
+  if (!note) return;
+  overviewNoteModalId = id;
+  overviewNoteModalEditing = !!edit && _overviewNoteCanEdit(note);
+  overviewNoteEditOrigin = overviewNoteModalEditing ? editOrigin : null;
+  const text = document.getElementById('overviewNoteModalText');
+  const meta = document.getElementById('overviewNoteModalMeta');
+  const doneBtn = document.getElementById('overviewNoteModalDoneBtn');
+  const editBtn = document.getElementById('overviewNoteModalEditBtn');
+  const saveBtn = document.getElementById('overviewNoteModalSaveBtn');
+  const deleteBtn = document.getElementById('overviewNoteModalDeleteBtn');
+  const modalEditToggles = document.getElementById('overviewNoteModalEditToggles');
+  const modalAdminControl = document.getElementById('overviewNoteModalAdminOnlyControl');
+  if (text) { text.value = note.text || ''; text.readOnly = !overviewNoteModalEditing; }
+  if (meta) meta.textContent = `${note.authorName || 'Tracker user'} | ${fmtDate(note.date) || note.date || ''}`;
+  setOverviewNoteToggle('overviewNoteModalAdminOnly', note.audience === 'admin', !overviewNoteModalEditing || !currentUser?.isAdmin);
+  setOverviewNoteToggle('overviewNoteModalPinned', !!note.pinned, !overviewNoteModalEditing);
+  if (modalEditToggles) modalEditToggles.style.display = overviewNoteModalEditing ? 'inline-flex' : 'none';
+  if (modalAdminControl) modalAdminControl.style.display = overviewNoteModalEditing && currentUser?.isAdmin ? 'inline-flex' : 'none';
+  if (doneBtn) {
+    doneBtn.style.display = overviewNoteModalEditing ? 'none' : '';
+    doneBtn.title = note.done ? 'Reopen note' : 'Mark note done';
+    doneBtn.setAttribute('aria-label', note.done ? 'Reopen note' : 'Mark note done');
+  }
+  if (editBtn) { editBtn.style.display = !overviewNoteModalEditing && _overviewNoteCanEdit(note) ? '' : 'none'; }
+  if (saveBtn) saveBtn.style.display = overviewNoteModalEditing ? '' : 'none';
+  if (deleteBtn) deleteBtn.style.display = _overviewNoteCanEdit(note) ? '' : 'none';
+  document.getElementById('overviewNoteModal').classList.toggle('pinned', !!note.pinned);
+  document.getElementById('overviewNoteModal').classList.remove('hidden');
+  if (overviewNoteModalEditing) text?.focus();
+}
+
+function startOverviewNoteEdit() {
+  if (!overviewNoteModalId) return;
+  openOverviewNote(overviewNoteModalId, true, 'expanded');
+}
+
+function toggleOverviewNoteFromModal() {
+  if (!overviewNoteModalId) return;
+  toggleOverviewNote(overviewNoteModalId);
+  const note = (state.dashboardNotes || []).find(item => item.id === overviewNoteModalId);
+  if (note) openOverviewNote(overviewNoteModalId, false);
+}
+
+function saveOverviewNoteEdit() {
+  const note = (state.dashboardNotes || []).find(item => item.id === overviewNoteModalId);
+  const text = document.getElementById('overviewNoteModalText')?.value.trim() || '';
+  if (!note || !_overviewNoteCanEdit(note)) return;
+  if (!text) { showAlert('Please enter a note first.'); return; }
+  note.text = text;
+  if (currentUser?.isAdmin) note.audience = !!document.getElementById('overviewNoteModalAdminOnly')?.classList.contains('on') ? 'admin' : 'team';
+  note.pinned = !!document.getElementById('overviewNoteModalPinned')?.classList.contains('on');
+  save();
+  const editOrigin = overviewNoteEditOrigin;
+  overviewNoteModalEditing = false;
+  overviewNoteEditOrigin = null;
+  if (editOrigin === 'workspace') {
+    closeModal('overviewNoteModal');
+    overviewNoteModalId = null;
+    renderOverview();
+    return;
+  }
+  renderOverview();
+  openOverviewNote(note.id, false);
+}
+
+function deleteOverviewNoteFromModal() {
+  if (!overviewNoteModalId) return;
+  const id = overviewNoteModalId;
+  closeModal('overviewNoteModal');
+  deleteOverviewNote(id);
+}
+
+function saveOverviewNote() {
+  if (!currentUser) return;
+  const input = document.getElementById('overviewNoteText');
+  const text = input?.value.trim() || '';
+  if (!text) { showAlert('Please enter a note first.'); return; }
+  const audience = currentUser.isAdmin && document.getElementById('overviewNoteAdminOnly')?.classList.contains('on') ? 'admin' : 'team';
+  const pinned = !!document.getElementById('overviewNotePinned')?.classList.contains('on');
+  if (!Array.isArray(state.dashboardNotes)) state.dashboardNotes = [];
+  state.dashboardNotes.push({
+    id: uid(), text, date: today(), authorId: currentUser.id, authorName: currentUser.name, audience, done: false, pinned
+  });
+  save();
+  closeOverviewNoteForm();
+  renderOverview();
+}
+
+function toggleOverviewNote(id) {
+  const note = (state.dashboardNotes || []).find(item => item.id === id);
+  if (!note) return;
+  if (note.audience === 'admin' && !currentUser?.isAdmin) return;
+  note.done = !note.done;
+  save();
+  renderOverview();
+}
+
+function deleteOverviewNote(id) {
+  const note = (state.dashboardNotes || []).find(item => item.id === id);
+  if (!note || (!currentUser?.isAdmin && note.authorId !== currentUser?.id)) return;
+  showConfirm('Delete this workspace note?', () => {
+    state.dashboardNotes = (state.dashboardNotes || []).filter(item => item.id !== id);
+    if (overviewNoteModalId === id) {
+      overviewNoteModalId = null;
+      overviewNoteModalEditing = false;
+      overviewNoteEditOrigin = null;
+      closeModal('overviewNoteModal');
+    }
+    save();
+    renderOverview();
+  });
 }
 
 function toggleSummaryOwedInclude(category) {
@@ -1109,34 +1349,15 @@ function renderEmpSummary() {
   allHW.forEach(hw => { tOwed += calcHW(hw).potentialEmpBalance; });
   tOwed = _roundMoney(tOwed);
 
-  // Recent pay (all recorded employee payments within the selected timeframe)
-  let cutoffStr = null;
-  if (empSummaryTimeframe !== 'all') {
-    const d = new Date();
-    d.setDate(d.getDate() - parseInt(empSummaryTimeframe));
-    cutoffStr = d.toISOString().slice(0, 10);
-  }
-  const inWindow = date => !cutoffStr || (date && date >= cutoffStr);
-  let tRecentPay = 0;
-  state.jobs.filter(j => j.employeeId === myId).forEach(j => {
-    (j.advances||[]).forEach(a => { if (inWindow(a.date)) tRecentPay += a.amount||0; });
-  });
-  allHW.forEach(hw => {
-    (hw.advances||[]).forEach(a => { if (inWindow(a.date)) tRecentPay += a.amount||0; });
-  });
-
-  const tfOpts = [
-    ['7','Last 7 days'],['14','Last 14 days'],['30','Last 30 days'],
-    ['60','Last 60 days'],['90','Last 90 days'],['365','This year'],['all','All time']
-  ].map(([v,l]) => `<option value="${v}"${empSummaryTimeframe===v?' selected':''}>${l}</option>`).join('');
+  const tRecentPay = _recentEmployeePay(myId, empSummaryTimeframe);
+  const tfOpts = _recentPayTimeframeOptions(empSummaryTimeframe);
+  const billingTotals = _overviewBillingTotals();
 
   el.innerHTML = `
-    <div class="summary-card" onclick="goToTab('active')" style="cursor:pointer"><div class="summary-label">Active Jobs</div><div class="summary-value">${active.length}</div></div>
-    <div class="summary-card" onclick="goToTab('homewatch')" style="cursor:pointer"><div class="summary-label">HomeWatch</div><div class="summary-value">${activeHW.length}</div><div class="summary-sub">${pausedHW.length > 0 ? `${pausedHW.length} paused` : 'none paused'}</div></div>
+    <div class="summary-card" onclick="goToTab('active')" style="cursor:pointer"><div class="summary-label">Active Jobs</div><div class="summary-value">${active.length}</div><div class="invoice-pending-block attention-secondary-block" onclick="event.stopPropagation();goToTab('homewatch')"><div class="summary-label invoice-pending-label">Recurring Services</div><div class="summary-value">${activeHW.length} <span class="summary-value-detail">(${pausedHW.length} paused)</span></div></div></div>
+    ${_overviewInvoiceCard(billingTotals)}
     <div class="summary-card">
-      <div class="summary-label" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">Recent Pay
-        <select onchange="setEmpSummaryTimeframe(this.value)" style="font-size:12px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:1px 4px">${tfOpts}</select>
-      </div>
+      <div class="summary-card-header"><div class="summary-label">Recent Pay</div><select class="summary-card-select" onchange="setEmpSummaryTimeframe(this.value)" aria-label="Recent pay period">${tfOpts}</select></div>
       <div class="summary-value green">${fmt(tRecentPay)}</div>
       <div class="summary-sub">received</div>
     </div>
@@ -5519,8 +5740,8 @@ function openSettings() {
   (state.settings.defaultMilestones || []).forEach(m => addDmField(m.label, defaultBasis === 'amount' ? m.amount : m.pct, defaultBasis));
   applyTheme();
   _setSquarePreviewAvailability();
-  // Reset to Account tab
-  settingsTab('employees', document.querySelector('#settingsModal .settings-nav-btn'));
+  // Reset to the first, non-destructive settings tab
+  settingsTab('appearance', document.querySelector('#settingsModal .settings-nav-btn[onclick*="settingsTab(\'appearance\'"]'));
   renderUserList();
   document.getElementById('nu_name').value = '';
   document.getElementById('nu_pin').value  = '';
@@ -5905,9 +6126,8 @@ function applyUserView() {
   document.getElementById('empSummaryCards').style.display = isAdmin ? 'none' : '';
   document.getElementById('debtPanel').style.display       = isAdmin ? '' : 'none';
 
-  if (!isAdmin) {
-    switchTab('active', document.querySelector('.job-tab'));
-  }
+  const overviewTab = document.querySelector('.tabs .tab[data-tab="overview"]');
+  if (overviewTab) switchTab('overview', overviewTab);
 }
 
 function renderAll() {
@@ -5920,7 +6140,7 @@ function renderAll() {
 // ─── USER MANAGEMENT ──────────────────────────────────────────────────────────
 function openUserMgmt() {
   openSettings();
-  settingsTab('employees', document.querySelectorAll('#settingsModal .settings-nav-btn')[1]);
+  settingsTab('employees', document.querySelector('#settingsModal .settings-nav-btn[onclick*="settingsTab(\'employees\'"]'));
 }
 
 function renderUserList() {
@@ -7542,14 +7762,14 @@ firebase.auth().signInAnonymously().catch(e => {
 function goToTab(name) {
   closeMobileMenu();
   closeDesktopMenu();
-  const btn = document.querySelector(`.tabs .tab[onclick*="'${name}'"]`);
+  const btn = document.querySelector(`.tabs .tab[data-tab="${name}"]`);
   if (btn) switchTab(name, btn);
 }
 function goHeaderHome() {
   expandedJobs.clear();
   expandedHW.clear();
   saveExpandedState();
-  goToTab('active');
+  goToTab('overview');
   renderJobs();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }

@@ -28,7 +28,7 @@ This is the working plan for the Tracker 2.0 rebuild and cutover. Tracker 1.0 re
 
 ## Unified job workflow
 
-- [ ] Make Quick Job the only new-job entry point.
+- [x] Make the unified job workflow the only visible new-job entry point, labeled `New Job`.
 - [ ] Keep the old job editor temporarily available only for legacy records that have not yet been made read-only.
 - [ ] Confirm that legacy jobs can be opened safely in the unified read/edit model, or explicitly make them view-only.
 - [ ] Test quoted, itemized, hourly, material, credit, milestone, notes, and employee-pay cases before removing the old modal.
@@ -36,7 +36,18 @@ This is the working plan for the Tracker 2.0 rebuild and cutover. Tracker 1.0 re
 
 ## Feature and UI review
 
-- [ ] Inventory current features and classify each as keep, optimize, shelve, or remove before deeper Tracker 2.0 restructuring.
+- [x] Inventory current features and classify each as keep, optimize, shelve, or remove before deeper Tracker 2.0 restructuring; record the direction in `TRACKER-2-FEATURE-REVIEW.md`.
+- [x] Make Overview the default landing area with summary cards, needs-attention items, and workspace notes.
+- [x] Refine Overview into attention boxes and sticky-note cards; keep existing tabs as the only navigation and remove redundant quick links.
+- [x] Reorder the Settings pane around appearance, client display, job defaults, team, financial rules, integrations, data, and temporary tools.
+- [ ] Decide whether employees should see all clients, schedules, and shared notes or only assigned records.
+- [ ] When the team expands, replace the current global employee billing-summary visibility with per-user billing visibility if needed.
+- [x] Make the shared Outstanding/Pending Invoices summary visible to all employees for the current small-team setup.
+- [x] Align the employee Recent Pay timeframe control with the admin Overview card header.
+- [ ] Replace the separate Pay Out and Split Pay presentation with one underlying employee-payment workflow.
+- [ ] Design persistent activity history as a separate layer from session undo/redo.
+- [ ] Add the minimum server-enforced security needed before Square use: Firestore rules, protected functions, and admin authorization.
+- [ ] Replace save-drop-on-busy behavior with queued saves, then evaluate record-level writes and conflict detection.
 - [x] Review the Settings baseline: keep admin backup/restore, make client display choices user-scoped with hidden defaults, keep debt isolated as a removable one-off, and clearly disable Square actions in the local preview.
 - [ ] Revisit the client field list after the Square integration review to confirm every field is still populated and useful.
 - [x] Lock job fees and HomeWatch payment fees per record, backfill existing records from the unchanged current rate, and limit future fee-setting changes to new records.
@@ -47,6 +58,8 @@ This is the working plan for the Tracker 2.0 rebuild and cutover. Tracker 1.0 re
 - [ ] Review the UI for unnecessary controls, duplicated flows, confusing labels, stale terminology, layout cleanup, and responsive/accessibility issues.
 - [ ] Prioritize feature and UI changes by user value and risk, keeping financial and historical behavior covered by tests before implementation.
 - [ ] Re-check the feature inventory after the review so removed or deferred behavior does not get reintroduced during the `app.js` split.
+
+The detailed keep/fix/defer/remove decisions are maintained in `TRACKER-2-FEATURE-REVIEW.md`.
 
 ## Square integration
 
@@ -61,6 +74,7 @@ This is the working plan for the Tracker 2.0 rebuild and cutover. Tracker 1.0 re
 ## Codebase cleanup
 
 - [ ] Add browser-level regression coverage for the main job and client workflows.
+- [x] Add browser smoke coverage for Overview cards, employee invoice visibility, Recent Pay controls, workspace notes, themes, and the preview no-write boundary.
 - [x] Add automated browser regression coverage for manual payments, partial payments, generated-note cleanup, payout-ledger updates, and preview no-write behavior.
 - [ ] Split the large frontend into behavior-focused modules after the data model stabilizes.
 - [ ] Separate read models, calculations, persistence, and rendering so Tracker 2.0 changes do not require editing one monolithic file.

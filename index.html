@@ -6,6 +6,7 @@
 <title>Job Tracker</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css">
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/duotone/style.css">
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
@@ -186,12 +187,79 @@
 
   .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 28px; }
   .summary-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; padding: 16px; }
+  .summary-card-header { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; margin-bottom:8px; }
+  .summary-card-header .summary-label { margin-bottom:0; }
+  .summary-card-header-controls { display:flex; align-items:center; justify-content:flex-end; gap:6px; flex-wrap:wrap; }
+  .summary-card-select, .summary-filter-row select { font-size:12px; background:var(--bg2); color:var(--text); border:1px solid var(--border); border-radius:4px; padding:2px 4px; min-width:0; max-width:132px; }
+  .summary-filter-row { display:flex; align-items:center; gap:6px; margin:-1px 0 7px; }
+  .summary-filter-label { font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--text3); }
+  .summary-value-detail { font-size:16px; font-weight:500; color:var(--text2); white-space:nowrap; }
+  .invoice-pending-block { margin-top:12px; padding-top:10px; border-top:1px solid var(--border); }
+  .attention-secondary-block { cursor:pointer; }
+  .invoice-pending-label { margin-bottom:8px; }
   .summary-label { font-family: var(--mono); font-size: 14px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text3); margin-bottom: 8px; }
   .summary-value { font-family: var(--mono); font-size: 26px; font-weight: 600; color: var(--text); }
   .summary-value.green { color: var(--green); }
   .summary-value.orange { color: var(--accent); }
   .summary-value.red { color: var(--red); }
   .summary-sub { font-size: 15px; color: var(--text3); margin-top: 4px; font-family: var(--mono); }
+  .overview-header { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:18px; }
+  .overview-title { font-family:var(--mono); font-size:18px; text-transform:uppercase; letter-spacing:0.12em; color:var(--text2); }
+  .overview-subtitle { color:var(--text3); font-size:14px; margin-top:0; }
+  .overview-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+  .overview-grid { display:grid; grid-template-columns:minmax(0,1.1fr) minmax(280px,0.9fr); gap:14px; margin-bottom:18px; }
+  .overview-attention-panel .summary-grid { grid-template-columns:repeat(2,minmax(0,1fr)); margin-bottom:0; }
+  .overview-panel { background:var(--bg2); border:1px solid var(--border); border-radius:4px; padding:16px; min-width:0; }
+  .overview-panel-header { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px; }
+  .overview-panel-title { font-family:var(--mono); font-size:13px; text-transform:uppercase; letter-spacing:0.1em; color:var(--text3); }
+  .overview-attention-list { display:flex; flex-direction:column; gap:8px; }
+  .overview-notes-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:10px; }
+  .overview-attention-item, .overview-note-item { border:1px solid var(--border); border-radius:4px; padding:10px 12px; background:var(--bg3); }
+  .overview-attention-item { display:flex; align-items:center; justify-content:space-between; gap:12px; cursor:pointer; }
+  .overview-attention-item:hover { border-color:var(--border2); }
+  .overview-attention-label { color:var(--text2); font-size:14px; }
+  .overview-attention-value { font-family:var(--mono); color:var(--accent); white-space:nowrap; }
+  .overview-note-item { display:flex; flex-direction:column; gap:7px; min-height:132px; cursor:pointer; }
+  .overview-note-item:hover { border-color:var(--border2); }
+  .overview-note-item.pinned, .overview-note-item.pinned:hover { border-color:var(--accent); }
+  .overview-note-top { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .overview-note-top-right { display:inline-flex; align-items:center; gap:8px; flex-shrink:0; }
+  .overview-note-pin-icon { color:var(--accent); font-size:17px; }
+  .overview-note-meta { color:var(--text3); font-family:var(--mono); font-size:11px; }
+  .overview-note-text { color:var(--text2); white-space:pre-wrap; line-height:1.45; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:5; overflow:hidden; text-overflow:ellipsis; }
+  .overview-note-item.done .overview-note-text { color:var(--text3); text-decoration:line-through; }
+  .overview-note-actions { display:flex; gap:6px; justify-content:flex-end; margin-top:auto; padding-top:4px; }
+  .overview-note-actions .btn { width:32px; height:30px; padding:0; }
+  .overview-note-actions .btn-ghost,
+  .overview-note-modal-actions .btn-ghost,
+  .overview-note-actions .btn-danger,
+  .overview-note-modal-actions .btn-danger { background:transparent; border-color:transparent; }
+  .overview-note-actions .btn-ghost:hover,
+  .overview-note-modal-actions .btn-ghost:hover { border-color:var(--accent); color:var(--accent); background:transparent; }
+  .overview-note-actions .btn-danger:hover,
+  .overview-note-modal-actions .btn-danger:hover { border-color:var(--red); color:var(--red); background:transparent; }
+  .overview-note-form { border-top:1px solid var(--border); margin-top:12px; padding-top:12px; }
+  .overview-empty { color:var(--text3); font-family:var(--mono); font-size:13px; padding:8px 0; }
+  .overview-note-modal { position:relative; background:var(--bg3); border:1px solid var(--border2); box-shadow:0 14px 40px rgba(0,0,0,0.35); }
+  #overviewNoteModal.pinned .overview-note-modal { border-color:var(--accent); }
+  .overview-note-close { position:absolute; top:10px; right:10px; width:34px; height:34px; padding:0; border:1px solid transparent; border-radius:4px; background:transparent; color:var(--text3); cursor:pointer; display:inline-flex; align-items:center; justify-content:center; }
+  .overview-note-close:hover { color:var(--accent); border-color:var(--border2); }
+  .overview-note-close .ph { font-size:20px; }
+  .overview-note-modal-meta { padding-right:42px; color:var(--text3); font-family:var(--mono); font-size:12px; }
+  .overview-note-toggle-control { display:inline-flex; align-items:center; gap:7px; color:var(--text3); font-family:var(--mono); font-size:12px; white-space:nowrap; }
+  .overview-note-modal-text { width:100%; min-height:240px; margin-top:18px; padding:0; border:0; outline:0; resize:none; background:transparent; color:var(--text2); font-family:inherit; font-size:18px; line-height:1.55; }
+  .overview-note-modal-text:read-only { cursor:default; }
+  .overview-note-modal-actions { display:flex; align-items:center; gap:8px; justify-content:flex-end; margin-top:22px; padding-top:4px; }
+  .overview-note-modal-edit-toggles { display:none; align-items:center; gap:12px; margin-right:auto; }
+  .overview-note-modal-actions .btn { width:34px; height:32px; padding:0; }
+  @media (max-width: 760px) {
+    .overview-header { flex-direction:column; align-items:flex-start; }
+    .overview-actions { justify-content:flex-start; }
+    .overview-grid { grid-template-columns:1fr; }
+  }
+  @media (max-width: 500px) {
+    .overview-attention-panel .summary-grid { grid-template-columns:1fr; }
+  }
   .owed-breakdown { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
   .owed-breakdown-row { display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: 6px; }
   .owed-breakdown-label { font-family: var(--mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text3); }
@@ -522,11 +590,10 @@
     .header-actions .btn-ghost.btn-sm,
     .header-actions .btn-primary { padding: 14px 14px; font-size: 20px; white-space: nowrap; text-align: left; }
     #newJobBtn { order: 1; }
-    #newUnifiedJobBtn { order: 2; }
-    #payOutBtn { order: 3; }
-    #splitPayBtn { order: 4; }
-    #splitLedgerBtn { order: 5; }
-    #undoRedoRow { order: 6; }
+    #payOutBtn { order: 2; }
+    #splitPayBtn { order: 3; }
+    #splitLedgerBtn { order: 4; }
+    #undoRedoRow { order: 5; }
     #settingsBtn, #settingsEmpBtn, #signOutBtn { order: 50; }
     .desktop-menu-divider { order: 49; margin: 18px 0 14px; }
     .desktop-menu-divider { display: none !important; }
@@ -856,8 +923,7 @@
   <div class="header-actions">
     <button class="btn btn-ghost btn-sm desktop-menu-trigger" id="desktopMenuBtn" onclick="toggleDesktopMenu()" aria-label="Open actions menu"><i class="ph ph-list"></i> Menu</button>
     <div class="desktop-menu-panel" id="desktopMenuPanel">
-      <button class="btn btn-primary header-admin" id="newJobBtn" onclick="openNewJobModal()">+ New Job</button>
-      <button class="btn btn-ghost btn-sm header-admin" id="newUnifiedJobBtn" onclick="openUnifiedJobModal()">+ Quick Job</button>
+      <button class="btn btn-primary header-admin" id="newJobBtn" onclick="openUnifiedJobModal()">+ New Job</button>
       <button class="btn btn-ghost btn-sm header-admin" id="payOutBtn" onclick="openPayOut()">$ Pay Out</button>
       <button class="btn btn-ghost btn-sm header-admin" id="splitPayBtn" onclick="openSplitPay()"><i class="ph ph-split-horizontal"></i> Split Pay</button>
       <button class="btn btn-ghost btn-sm header-admin" id="splitLedgerBtn" onclick="openSplitLedger()"><i class="ph ph-book-open-text"></i> Ledger</button>
@@ -875,21 +941,59 @@
 </div>
 
 <div class="main">
-  <div id="summaryCards" class="summary-grid"></div>
-  <div id="empSummaryCards" class="summary-grid" style="display:none"></div>
   <div class="tabs-wrap">
     <span class="tabs-arr tabs-arr-l">&lt;</span>
     <div class="tabs">
-      <div class="tab job-tab active" onclick="switchTab('active', this)">Active</div>
-      <div class="tab job-tab" onclick="switchTab('complete', this)">Completed</div>
-      <div class="tab job-tab" onclick="switchTab('all', this)">All Jobs</div>
-      <div class="tab" onclick="switchTab('homewatch', this)">HomeWatch</div>
-      <div class="tab" id="schedTab" onclick="switchTab('schedule', this)">Schedule</div>
-      <div class="tab" id="clientsTab" onclick="switchTab('clients', this)">Clients</div>
+      <div class="tab active" data-tab="overview" onclick="switchTab('overview', this)">Overview</div>
+      <div class="tab job-tab" data-tab="active" onclick="switchTab('active', this)">Active</div>
+      <div class="tab job-tab" data-tab="complete" onclick="switchTab('complete', this)">Completed</div>
+      <div class="tab job-tab" data-tab="all" onclick="switchTab('all', this)">All Jobs</div>
+      <div class="tab" data-tab="homewatch" onclick="switchTab('homewatch', this)">HomeWatch</div>
+      <div class="tab" id="schedTab" data-tab="schedule" onclick="switchTab('schedule', this)">Schedule</div>
+      <div class="tab" id="clientsTab" data-tab="clients" onclick="switchTab('clients', this)">Clients</div>
     </div>
     <span class="tabs-arr tabs-arr-r">&gt;</span>
   </div>
-  <div id="tab-active" class="tab-content active">
+  <div id="tab-overview" class="tab-content active">
+    <div class="overview-header">
+      <div>
+        <div class="overview-subtitle">Your starting point for jobs, money, and the things that need attention.</div>
+      </div>
+      <div class="overview-actions">
+        <button class="btn btn-primary btn-sm admin-only" onclick="openUnifiedJobModal()">+ New Job</button>
+        <button class="btn btn-ghost btn-sm admin-only" onclick="openPayOut()">$ Pay Employee</button>
+      </div>
+    </div>
+    <div class="overview-grid">
+      <section class="overview-panel overview-attention-panel">
+        <div class="overview-panel-header"><span class="overview-panel-title">Needs attention</span></div>
+        <div id="summaryCards" class="summary-grid"></div>
+        <div id="empSummaryCards" class="summary-grid" style="display:none"></div>
+      </section>
+      <section class="overview-panel">
+        <div class="overview-panel-header">
+          <span class="overview-panel-title">Workspace notes</span>
+          <span id="overviewNoteCount" class="overview-note-meta"></span>
+          <button class="btn btn-ghost btn-sm" onclick="openOverviewNoteForm()">+ New Note</button>
+        </div>
+        <div id="overviewNotes" class="overview-notes-list"></div>
+        <div id="overviewNoteForm" class="overview-note-form" style="display:none">
+          <textarea class="form-input" id="overviewNoteText" rows="3" placeholder="Add a reminder, team note, or follow-up..."></textarea>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+              <label class="overview-note-toggle-control" id="overviewNoteAdminOnlyControl"><span>ADMIN ONLY</span><button type="button" class="owed-toggle" id="overviewNoteAdminOnly" onclick="toggleOverviewNoteToggle(this.id)" aria-pressed="false" title="Make note admin only"><span class="owed-toggle-thumb"></span></button></label>
+              <label class="overview-note-toggle-control"><span>PIN TO TOP</span><button type="button" class="owed-toggle" id="overviewNotePinned" onclick="toggleOverviewNoteToggle(this.id)" aria-pressed="false" title="Pin note to top"><span class="owed-toggle-thumb"></span></button></label>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-ghost btn-sm" onclick="closeOverviewNoteForm()">Cancel</button>
+              <button class="btn btn-primary btn-sm" onclick="saveOverviewNote()">Save Note</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+  <div id="tab-active" class="tab-content">
     <div class="section-header"><span class="section-title" id="activeCount"></span></div>
     <div id="activeJobsList"></div>
   </div>
@@ -1157,14 +1261,14 @@
       <div class="settings-nav-wrap">
         <span class="settings-nav-arr settings-nav-arr-l">&lt;</span>
         <nav class="settings-nav">
-          <button class="settings-nav-btn active" onclick="settingsTab('employees',this)">Employees</button>
-          <button class="settings-nav-btn" onclick="settingsTab('fees',this)">Square Fees</button>
-          <button class="settings-nav-btn" onclick="settingsTab('square',this)">Square Integration</button>
-          <button class="settings-nav-btn" onclick="settingsTab('debt',this)">Debt (one-time)</button>
-          <button class="settings-nav-btn" onclick="settingsTab('jobs',this)">Jobs</button>
-          <button class="settings-nav-btn" onclick="settingsTab('clients',this)">Clients</button>
-          <button class="settings-nav-btn" onclick="settingsTab('appearance',this)">Appearance</button>
-          <button class="settings-nav-btn" onclick="settingsTab('data',this)">Data</button>
+          <button class="settings-nav-btn active" onclick="settingsTab('appearance',this)">Appearance</button>
+          <button class="settings-nav-btn" onclick="settingsTab('clients',this)">Client display</button>
+          <button class="settings-nav-btn" onclick="settingsTab('jobs',this)">Job defaults</button>
+          <button class="settings-nav-btn" onclick="settingsTab('employees',this)">Team &amp; permissions</button>
+          <button class="settings-nav-btn" onclick="settingsTab('fees',this)">Financial rules</button>
+          <button class="settings-nav-btn" onclick="settingsTab('square',this)">Square integration</button>
+          <button class="settings-nav-btn" onclick="settingsTab('data',this)">Data &amp; backup</button>
+          <button class="settings-nav-btn" onclick="settingsTab('debt',this)">Temporary tools</button>
         </nav>
         <span class="settings-nav-arr settings-nav-arr-r">&gt;</span>
       </div>
@@ -1276,7 +1380,7 @@
             <div id="s_clientColsList"></div>
           </div>
         </div>
-        <div id="stab-appearance" class="settings-panel">
+        <div id="stab-appearance" class="settings-panel active">
           <div class="settings-theme-row">
             <div>
               <div class="settings-theme-label">Theme</div>
@@ -1305,6 +1409,25 @@
       <button class="btn btn-ghost btn-sm" onclick="closeModal('settingsModal');signOut()" style="margin-right:auto"><i class="ph ph-sign-out"></i> Sign Out</button>
       <button class="btn btn-ghost" onclick="closeModal('settingsModal')">Close</button>
       <button class="btn btn-primary" id="s_saveBtn" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- OVERVIEW NOTE MODAL -->
+<div id="overviewNoteModal" class="modal-overlay hidden">
+  <div class="modal overview-note-modal" style="max-width:620px">
+    <button class="overview-note-close" onclick="closeModal('overviewNoteModal')" title="Close note" aria-label="Close note"><i class="ph-duotone ph-x" aria-hidden="true"></i></button>
+    <div id="overviewNoteModalMeta" class="overview-note-modal-meta"></div>
+    <textarea id="overviewNoteModalText" class="overview-note-modal-text" rows="10" readonly></textarea>
+    <div class="overview-note-modal-actions">
+      <div class="overview-note-modal-edit-toggles" id="overviewNoteModalEditToggles">
+        <label class="overview-note-toggle-control" id="overviewNoteModalAdminOnlyControl"><span>ADMIN ONLY</span><button type="button" class="owed-toggle" id="overviewNoteModalAdminOnly" onclick="toggleOverviewNoteToggle(this.id)" aria-pressed="false" title="Make note admin only"><span class="owed-toggle-thumb"></span></button></label>
+        <label class="overview-note-toggle-control"><span>PIN TO TOP</span><button type="button" class="owed-toggle" id="overviewNoteModalPinned" onclick="toggleOverviewNoteToggle(this.id)" aria-pressed="false" title="Pin note to top" aria-label="Pin note to top" style="display:inline-flex"><span class="owed-toggle-thumb"></span></button></label>
+      </div>
+      <button class="btn btn-ghost btn-icon-only" id="overviewNoteModalDoneBtn" onclick="toggleOverviewNoteFromModal()" title="Mark note done" aria-label="Mark note done"><i class="ph-duotone ph-check-fat" aria-hidden="true"></i></button>
+      <button class="btn btn-ghost btn-icon-only" id="overviewNoteModalEditBtn" onclick="startOverviewNoteEdit()" title="Edit note" aria-label="Edit note" style="display:none"><i class="ph-duotone ph-pencil-simple" aria-hidden="true"></i></button>
+      <button class="btn btn-ghost btn-icon-only" id="overviewNoteModalSaveBtn" onclick="saveOverviewNoteEdit()" title="Save note" aria-label="Save note" style="display:none"><i class="ph-duotone ph-check-fat" aria-hidden="true"></i></button>
+      <button class="btn btn-danger btn-icon-only" id="overviewNoteModalDeleteBtn" onclick="deleteOverviewNoteFromModal()" title="Delete note" aria-label="Delete note" style="display:none"><i class="ph-duotone ph-trash" aria-hidden="true"></i></button>
     </div>
   </div>
 </div>
