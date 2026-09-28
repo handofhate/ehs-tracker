@@ -1,6 +1,6 @@
-# Tracker 2.0 local preview
+# Tracker 2.0 local preview companion
 
-This branch is a local-only preview of Tracker 2.0. It reads the live Firestore state so the jobs and other tracker data stay current, but edits are kept in browser memory only.
+This document describes the safe local preview companion for Tracker 2.0. The live build now uses the normal save path; the preview reads the same Firestore state but keeps edits in browser memory only.
 
 ## Start the local preview
 
@@ -38,7 +38,7 @@ The normal `index.html` URL is now the write-enabled Tracker 2.0 build. The prev
 - Overview currently combines Active Jobs and Recurring Services, shared Outstanding/Pending Invoices, employee pay, Recent Pay, and workspace notes. Employees see the shared invoice summary for now; per-user visibility can be added later if the team expands.
 - The employee Recent Pay timeframe control is positioned in the card header, matching the admin Overview layout.
 - Admins can open Activity History from the upper-right Menu. It records meaningful saved changes with the actor, time, affected record, and changed fields. Because the preview never writes to Firestore, these events are temporary in the preview session and disappear when the preview is refreshed; the production persistence path stores them with the tracker state.
-- The production build remains on the `main` branch.
+- The production build is deployed from `main`; the explicit preview URL remains the rollback and validation tool.
 
 The preview is still connected to the live database for reading, so it must be treated as a sensitive local tool. Do not use payment or other external-action workflows from it; those controls are intentionally blocked.
 

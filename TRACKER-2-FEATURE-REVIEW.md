@@ -1,15 +1,15 @@
 # Tracker 2.0 feature direction
 
-This is the current feature direction for the local Tracker 2.0 preview. Tracker 1.0 remains available while this work is validated.
+This is the current feature direction for the live Tracker 2.0 build and its safe local preview companion. The previous Tracker 1.0 build is preserved by the `tracker-1.0-final` rollback tag.
 
-The remaining work follows the canonical sequence in `TRACKER-2-TODO.md`: browser regression coverage/save reliability, code-boundary cleanup, product/UI review, Square readiness/integration, and finally cutover. Employee-payment unification, the local preview's historical read-only boundary, and the initial persistent activity-history layer are complete.
+The remaining work follows the canonical sequence in `TRACKER-2-TODO.md`: concrete maintenance, code-boundary cleanup, and optional future Square readiness/integration. Employee-payment unification, the historical read-only boundary, production rollout, and the initial persistent activity-history layer are complete.
 
 The current UI and feature set is accepted as a useful working baseline. Broad visibility, feature, and UI audits are maintenance work now and should be triggered by a concrete issue, workflow need, or team expansion rather than by redesign for its own sake.
 
 ## Agreed product direction
 
 - The normal creation entry point is one button: `New Job`.
-- `New Job` opens the unified job workflow. The old editor remains in the codebase only as a temporary removal target; historical records are view-only in the preview.
+- `New Job` opens the unified job workflow. The old editor remains in the codebase only as a temporary removal target; historical records are view-only in both builds.
 - The default landing area is `Overview`, not the active-job list.
 - Overview is intended to be a useful work starting point, not an extra dashboard screen. It combines summary information and items needing attention with workspace notes. Existing tabs remain the navigation; redundant quick links are intentionally omitted.
 - Overview attention boxes now focus on active jobs, recurring services, outstanding invoice count/value, employee pay, and recent pay. Admin recent pay includes an employee selector; employees retain their own recent-pay view and can see the shared outstanding/pending invoice summary for now.
@@ -69,7 +69,7 @@ The temporary area contains the one-time debt feature and future migration/recov
 
 ## Shelve or remove when exit conditions are met
 
-- Old new-job entry point and legacy editor: removed from the Tracker 2.0 preview. Historical records remain viewable/read-only, while Tracker 1.0 on `main` remains the rollback and historical fallback until cutover.
+- Old new-job entry point and legacy editor: removed from the Tracker 2.0 build. Historical records remain viewable/read-only, while the `tracker-1.0-final` tag preserves the rollback build.
 - One-time debt: remove after the balance is settled and the final historical audit is recorded.
 - Legacy partial-payment compatibility: remove after the two historical exception jobs are safely archived and the cutover boundary is established.
 - Migration cleanup tools: keep the completed audit record, but keep the one-time tools outside the active app and test path.

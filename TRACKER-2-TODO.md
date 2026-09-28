@@ -1,6 +1,6 @@
 # Tracker 2.0 TODO
 
-This is the working plan for the Tracker 2.0 rebuild and cutover. Tracker 1.0 remains available until the cutover is deliberately completed.
+This is the working plan for Tracker 2.0 maintenance and future milestones. Tracker 2.0 is live; historical Tracker 1.0 records remain viewable/read-only, and the previous build is preserved by the `tracker-1.0-final` rollback tag.
 
 The running implementation history is maintained in `TRACKER-2-CHANGELOG.md`; feature decisions are maintained in `TRACKER-2-FEATURE-REVIEW.md`.
 
@@ -11,14 +11,14 @@ This is the canonical order for the remaining Tracker 2.0 work. The category sec
 ### 1. Finish the no-Square core workflow
 
 1. **[Done] Unify employee payments** — replaced the separate Pay Out and Split Pay presentation with one workflow that supports one or many jobs, advances, adjustments, and split allocations. Job and recurring-service buttons remain prefilled entry points into the same workflow.
-2. **[Done] Establish the historical boundary** — legacy Tracker 1.0 records are viewable but read-only in the local preview; new edits and payments use explicit Tracker 2.0 records, while client history continues to combine both eras.
+2. **[Done] Establish the historical boundary** — legacy Tracker 1.0 records are viewable but read-only in Tracker 2.0; new edits and payments use explicit Tracker 2.0 records, while client history continues to combine both eras.
 3. **[Done] Add persistent activity history** — meaningful saved changes now create an admin-visible audit event with the actor, time, affected record, and changed fields. The local preview keeps those events in-session because its Firestore writes remain blocked; the production path persists them. Session undo/redo preserves the activity trail instead of erasing it.
 4. **[Done] Maintain high-value browser regression coverage** for the main job, client, payment, employee-pay, historical-client, activity-history, and preview-safety workflows. Add targeted cases only when a risky change exposes a real gap.
 5. **[Done] Improve save reliability with a lightweight queue** — rapid edits now coalesce into a follow-up save instead of being silently dropped. Record-level writes and conflict detection remain future work if the team grows.
 
 ### 2. Stabilize the code boundaries
 
-6. **[Done] Remove the legacy editor from the Tracker 2.0 preview** — historical records stay viewable and blocked by the centralized boundary; Tracker 1.0 on `main` remains available until cutover.
+6. **[Done] Remove the legacy editor from the Tracker 2.0 build** — historical records stay viewable and blocked by the centralized boundary; the previous Tracker 1.0 build is preserved by rollback tag.
 7. **[In progress] Separate read models, calculations, persistence, and rendering** — the pure job-billing summary/entry calculations are now isolated; continue extracting focused boundaries without changing behavior.
 8. **[Done] Re-test backup import, realtime snapshots, undo/redo, historical client views, and the no-write preview after the structural split.**
 
@@ -34,7 +34,7 @@ This is the canonical order for the remaining Tracker 2.0 work. The category sec
 13. Decide the Square scope, then implement and validate customer sync, invoices, payments, reconciliation, webhooks, audit logs, and true per-transaction fees in sandbox.
 14. Revisit client fields, recurring billing, reports, and invoice snapshots in the context of the real Square workflow.
 
-### 5. Perform the production cutover
+### 5. [Done] Perform the initial production cutover
 
 15. Choose a cutover date and create/verify the rollback archive.
 16. Migrate or expose historical data through the unified read model and validate representative client histories and financial totals.
@@ -70,7 +70,7 @@ This is the canonical order for the remaining Tracker 2.0 work. The category sec
 - [x] Keep historical jobs viewable without opening the old editor or exposing Tracker 2.0 edit controls.
 - [x] Confirm that the historical boundary blocks edits, payments, billing changes, hours, notes, and partial collections while preserving read-only viewing and client history.
 - [ ] Test quoted, itemized, hourly, material, credit, milestone, notes, and employee-pay cases before removing the old modal.
-- [x] Retire the legacy add/edit code from the Tracker 2.0 preview; keep Tracker 1.0 itself available on `main` until cutover validation passes.
+- [x] Retire the legacy add/edit code from the Tracker 2.0 build; preserve the previous Tracker 1.0 build by rollback tag.
 
 ## Feature and UI review
 
@@ -137,4 +137,4 @@ The detailed keep/fix/defer/remove decisions are maintained in `TRACKER-2-FEATUR
 - [ ] Re-test backup import, realtime snapshots, undo/redo, and historical client views after separating migration compatibility.
 - [x] Cover backup serialization and malformed-file rejection with automated tests; add admin-only import/export guards and an automatic pre-import backup.
 - [ ] Remove migration-only compatibility code once the archive/cutover boundary is established.
-- [ ] Keep the local no-write preview build as a rollback and validation tool until Tracker 2.0 is proven.
+- [x] Keep the local no-write preview build as a rollback and validation tool after the initial Tracker 2.0 rollout.
