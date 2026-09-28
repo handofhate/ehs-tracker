@@ -42,15 +42,15 @@ This is the canonical order for the remaining Tracker 2.0 work. The category sec
 
 ## Cutover and historical data
 
-- [ ] Choose a cutover date, preferably when there are no pending jobs or unsettled work.
-- [ ] Export and freeze an exact Tracker 1.0 archive snapshot before the first Tracker 2.0 write.
-- [ ] Keep Tracker 1.0 available as a read-only historical viewer.
+- [x] Choose the initial Tracker 2.0 cutover date: 2026-09-28.
+- [x] Export and verify an exact pre-cutover Tracker 1.0 backup before the first Tracker 2.0 write.
+- [x] Keep historical Tracker 1.0 jobs available as read-only records in the live Tracker 2.0 viewer; preserve the prior build as the `tracker-1.0-final` rollback tag.
 - [ ] Copy clients, jobs, notes, payments, milestones, employee-pay history, and relationships into the Tracker 2.0 read model using stable existing IDs.
 - [x] In the local Tracker 2.0 preview, treat pre-cutover/unknown-origin jobs as legacy/read-only rather than rewriting their history; unknown origins fail closed for safety.
 - [ ] Keep client history in one Tracker 2.0 view so a client timeline spans both legacy and new jobs without querying two sources every time.
 - [ ] Define how legacy records participate in current totals, employee pay, debt, outstanding balances, and reports.
 - [ ] Validate the migration against representative clients and complete job histories.
-- [ ] Preserve a recoverable rollback copy and document the cutover point.
+- [x] Preserve a recoverable rollback copy and document the cutover point.
 
 ## Legacy cleanup and compatibility retirement
 

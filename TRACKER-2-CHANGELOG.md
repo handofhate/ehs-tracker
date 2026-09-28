@@ -1,10 +1,19 @@
 # Tracker 2.0 changelog
 
-This is the running changelog for the Tracker 2.0 rebuild and local preview. It summarizes the meaningful product, data, safety, and testing changes on the `codex/tracker-2-preview` branch compared with Tracker 1.0. The detailed implementation history remains available in Git commits.
+This is the running changelog for the Tracker 2.0 rebuild, local preview, and initial rollout. It summarizes the meaningful product, data, safety, and testing changes compared with Tracker 1.0. The detailed implementation history remains available in Git commits.
 
-Tracker 2.0 is not released or cut over. Tracker 1.0 remains the production build, and the local preview does not permanently write to Firestore.
+Tracker 2.0 is now the live GitHub Pages build. It uses the existing Firestore database and normal save path. The explicit `trackerMode=preview` URL mode remains available for safe no-write testing. Full Square integration is deferred.
 
-## Unreleased — local preview through 2026-09-28
+## Tracker 2.0 initial rollout — 2026-09-28
+
+### Release notes
+
+- Deployed Tracker 2.0 to the live GitHub Pages site at `https://handofhate.github.io/ehs-tracker/`.
+- Verified a fresh production backup before rollout containing 118 jobs, 74 clients, 4 recurring-service records, 2 users, 110 appointments, 43 employee-payment events, and 5 debt-payment records.
+- Preserved the previous Tracker 1.0 commit as the `tracker-1.0-final` rollback tag.
+- Historical Tracker 1.0 jobs remain visible and read-only in the live Tracker 2.0 build.
+
+## Implementation history through 2026-09-28
 
 ### Added
 
@@ -23,7 +32,7 @@ Tracker 2.0 is not released or cut over. Tracker 1.0 remains the production buil
 - Isolated the coalescing save-queue mechanics in `v2/save-queue.js`, including newest-state coalescing, snapshot cloning, and recovery after a failed save.
 - Isolated undo/redo stack management and action descriptions in `v2/undo-redo-domain.js`, while keeping UI updates, activity history, and persistence decisions in `app.js`.
 - Isolated preview dirty-state, latest-server-snapshot, realtime-update, and discard coordination in `v2/preview-session-domain.js`, while keeping the user-facing confirmation and rendering in `app.js`.
-- Removed the obsolete legacy job editor from the Tracker 2.0 preview. Historical records remain viewable and fail closed through the centralized read-only boundary; Tracker 1.0 remains available on `main`.
+- Removed the obsolete legacy job editor from the Tracker 2.0 build. Historical records remain viewable and fail closed through the centralized read-only boundary; the previous Tracker 1.0 build is preserved by tag for rollback.
 - Extracted pure job billing summaries and billing-entry construction into `v2/billing-domain.js`, leaving UI rendering and mutations in `app.js` while preserving the existing behavior.
 - Extracted Overview billing totals, employee-pay summaries, recent-pay calculations, and workspace-note ordering into `v2/overview-domain.js`, leaving rendering and user actions in `app.js` while preserving the existing behavior.
 - Extracted employee-payment row building, payout-plan totals, and owed/advance allocation splitting into `v2/employee-payment-domain.js`, leaving the modal and save path in `app.js` while preserving the existing behavior.
@@ -88,7 +97,7 @@ Tracker 2.0 is not released or cut over. Tracker 1.0 remains the production buil
 
 ### Next planned work
 
-- Prepare the first Tracker 2.0 production cutover: commit the release candidate, verify a rollback backup and live-data smoke pass, then keep Tracker 1.0 available as the fallback historical viewer. Square integration remains deferred.
+- Continue release maintenance only: watch real-world use, fix concrete issues, and keep the Square integration deferred until its value clearly outweighs its complexity.
 
 ## Changelog maintenance rules
 
