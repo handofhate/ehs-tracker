@@ -243,7 +243,12 @@ async function main() {
           clients: [{ id: 'browser-smoke-client', firstName: 'Browser', surname: 'Test Client', email: '', phone: '' }],
           homewatch: [],
           splitPayments: [],
-          jobs: [fixtureJob]
+          jobs: [fixtureJob],
+          dashboardNotes: [
+            { id: 'browser-smoke-dashboard-note-1', text: 'Smoke note one', date: '2026-01-01', authorId: 'browser-smoke-admin', authorName: 'Smoke Admin' },
+            { id: 'browser-smoke-dashboard-note-2', text: 'Smoke note two', date: '2026-01-02', authorId: 'browser-smoke-admin', authorName: 'Smoke Admin' },
+            { id: 'browser-smoke-dashboard-note-3', text: 'Smoke note three', date: '2026-01-03', authorId: 'browser-smoke-employee', authorName: 'Smoke Employee' }
+          ]
         };
         currentUser = { id: 'browser-smoke-admin', name: 'Smoke Admin', isAdmin: true };
         document.getElementById('loginOverlay').style.display = 'none';
