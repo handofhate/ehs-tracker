@@ -54,6 +54,10 @@ Tracker 2.0 is not released or cut over. Tracker 1.0 remains the production buil
 - Client-management expansion, recurring billing beyond the current service model, deeper reports, and attachments are deferred until their surrounding workflows are defined.
 - The old editor and remaining migration compatibility code cannot be removed until the historical cutover boundary, archive, and rollback checks are complete.
 
+### Next planned work
+
+- Audit and then unify the Pay Out and Split Pay flows into one underlying employee-payment workflow. This is intentionally ahead of Square integration because it can be improved and tested using the current manual-payment model.
+
 ## Changelog maintenance rules
 
 - Add a concise entry here for every meaningful Tracker 2.0 behavior, data-model, safety, migration, or testing change.

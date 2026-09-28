@@ -4,6 +4,41 @@ This is the working plan for the Tracker 2.0 rebuild and cutover. Tracker 1.0 re
 
 The running implementation history is maintained in `TRACKER-2-CHANGELOG.md`; feature decisions are maintained in `TRACKER-2-FEATURE-REVIEW.md`.
 
+## Recommended execution order
+
+This is the canonical order for the remaining Tracker 2.0 work. The category sections below remain the detailed checklist; this section prevents priorities from being reshuffled casually.
+
+### 1. Finish the no-Square core workflow
+
+1. **Unify employee payments** — replace the separate Pay Out and Split Pay presentation with one workflow that supports one or many jobs, advances, adjustments, and split allocations. This is the next implementation task.
+2. **Add persistent activity history** — design it alongside payment changes so edits, reversals, and employee-pay corrections remain explainable. Keep session undo/redo as the immediate safety feature while the durable history layer is introduced.
+3. **Complete browser regression coverage** for the main job, client, payment, employee-pay, and historical-client workflows.
+4. **Improve save reliability** with queued saves, then evaluate record-level writes and conflict detection.
+
+### 2. Stabilize the code boundaries
+
+5. Confirm the legacy editor’s safe read-only/edit behavior for remaining legacy records.
+6. Separate read models, calculations, persistence, and rendering, then split the large frontend into behavior-focused modules.
+7. Re-test backup import, realtime snapshots, undo/redo, historical client views, and the no-write preview after the structural split.
+
+### 3. Complete the product and UI review
+
+8. Decide employee visibility for clients, schedules, and shared notes.
+9. Review remaining settings, filters, notes, HomeWatch/Recurring Services, exports, reports, labels, responsive layout, and accessibility.
+10. Re-check the feature inventory and changelog so obsolete behavior is not reintroduced during cleanup.
+
+### 4. Prepare and implement Square integration
+
+11. Establish minimum server-enforced security and confirm the deployment/configuration boundary.
+12. Decide the Square scope, then implement and validate customer sync, invoices, payments, reconciliation, webhooks, audit logs, and true per-transaction fees in sandbox.
+13. Revisit client fields, recurring billing, reports, and invoice snapshots in the context of the real Square workflow.
+
+### 5. Perform the production cutover
+
+14. Choose a cutover date and create/verify the rollback archive.
+15. Migrate or expose historical data through the unified read model and validate representative client histories and financial totals.
+16. Make Tracker 1.0 a read-only historical viewer, retire migration compatibility when its exit conditions pass, and document the final 2.0 release in the changelog.
+
 ## Cutover and historical data
 
 - [ ] Choose a cutover date, preferably when there are no pending jobs or unsettled work.

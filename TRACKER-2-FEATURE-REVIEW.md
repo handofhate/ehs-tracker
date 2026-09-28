@@ -2,6 +2,8 @@
 
 This is the current feature direction for the local Tracker 2.0 preview. Tracker 1.0 remains available while this work is validated.
 
+The remaining work follows the canonical sequence in `TRACKER-2-TODO.md`: employee-payment unification, persistent activity history, regression coverage/save reliability, code-boundary cleanup, product/UI review, Square readiness/integration, and finally cutover.
+
 ## Agreed product direction
 
 - The normal creation entry point is one button: `New Job`.
