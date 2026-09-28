@@ -10,6 +10,7 @@ const { spawn, spawnSync } = require('node:child_process');
 const repoRoot = path.resolve(__dirname, '..');
 const port = Number(process.env.TRACKER2_PREVIEW_PORT || 8765);
 const baseUrl = `http://127.0.0.1:${port}`;
+const previewUrl = `${baseUrl}/index.html?trackerMode=preview`;
 
 function resolvePuppeteer() {
   const searchPaths = [
@@ -82,16 +83,19 @@ async function main() {
         }
       });
 
-      await page.goto(`${baseUrl}/index.html`, { waitUntil: 'networkidle2', timeout: 30000 });
+      await page.goto(previewUrl, { waitUntil: 'networkidle2', timeout: 30000 });
       await page.waitForFunction(() => window.TRACKER_BUILD?.mode === 'local-preview');
       await page.waitForFunction(() => !!window.Tracker2JobDomain);
       await page.waitForFunction(() => !!window.Tracker2Fees);
       await page.waitForFunction(() => !!window.Tracker2State);
       await page.waitForFunction(() => !!window.Tracker2Persistence);
       await page.waitForFunction(() => !!window.Tracker2History);
+      await page.waitForFunction(() => !!window.Tracker2ActivityHistory);
       await page.waitForFunction(() => !!window.Tracker2DebtFeature);
       await page.waitForFunction(() => !!window.Tracker2Financial);
+      await page.waitForFunction(() => !!window.Tracker2Billing);
       await page.waitForFunction(() => !!window.Tracker2Backup);
+      await page.waitForFunction(() => !!window.Tracker2HistoricalBoundary);
       await page.waitForFunction(() => document.body.innerText.includes('TRACKER 2.0 LOCAL PREVIEW'));
       await page.waitForFunction(() => {
         const overlay = document.getElementById('loginOverlay');
@@ -122,12 +126,31 @@ async function main() {
             typeof window.Tracker2Fees.createFeeConfig === 'function',
           stateModule: typeof window.Tracker2State.migrateState === 'function',
           persistenceModule: typeof window.Tracker2Persistence.createPersistenceBoundary === 'function',
+          saveQueueModule: typeof window.Tracker2SaveQueue.createSaveQueue === 'function',
+          undoRedoModule: typeof window.Tracker2UndoRedo.createHistory === 'function' &&
+            typeof window.Tracker2UndoRedo.describeAction === 'function',
+          previewSessionModule: typeof window.Tracker2PreviewSession.createPreviewSession === 'function',
           previewPersistence: window.Tracker2Persistence.createPersistenceBoundary({ mode: 'local-preview', writeState: () => {} }).isPreview,
           historyModule: typeof window.Tracker2History.buildClientHistory === 'function',
+          activityHistoryModule: typeof window.Tracker2ActivityHistory.buildActivityEvents === 'function' &&
+            typeof window.Tracker2ActivityHistory.appendActivityEvents === 'function',
+          activityHistoryButton: !!document.getElementById('activityHistoryBtn'),
+          activityHistoryModal: !!document.getElementById('activityHistoryModal'),
           debtModule: typeof window.Tracker2DebtFeature.isActive === 'function',
           financialModule: typeof window.Tracker2Financial.calcJob === 'function',
+          billingModule: typeof window.Tracker2Billing.getJobBillingSummary === 'function' &&
+            typeof window.Tracker2Billing.jobBillingEntries === 'function',
+          overviewModule: typeof window.Tracker2Overview.recentEmployeePay === 'function' &&
+            typeof window.Tracker2Overview.employeePaySummary === 'function' &&
+            typeof window.Tracker2Overview.visibleDashboardNotes === 'function',
+          employeePaymentModule: typeof window.Tracker2EmployeePayment.buildPaymentRows === 'function' &&
+            typeof window.Tracker2EmployeePayment.splitAllocation === 'function',
+          employeeLedgerModule: typeof window.Tracker2EmployeeLedger.getLedgerEntries === 'function' &&
+            typeof window.Tracker2EmployeeLedger.buildLedgerFromStoredEvents === 'function',
           backupModule: typeof window.Tracker2Backup.serializeState === 'function' &&
             typeof window.Tracker2Backup.parseBackup === 'function',
+          historicalBoundaryModule: typeof window.Tracker2HistoricalBoundary.isHistoricalJob === 'function' &&
+            typeof window.Tracker2HistoricalBoundary.boundaryForJob === 'function',
           validationOk: validation.ok,
           milestoneOk: milestones.ok
         };
@@ -142,11 +165,22 @@ async function main() {
       assert.equal(result.feeModule, true);
       assert.equal(result.stateModule, true);
       assert.equal(result.persistenceModule, true);
+      assert.equal(result.saveQueueModule, true);
+      assert.equal(result.undoRedoModule, true);
+      assert.equal(result.previewSessionModule, true);
       assert.equal(result.previewPersistence, true);
       assert.equal(result.historyModule, true);
+      assert.equal(result.activityHistoryModule, true);
+      assert.equal(result.activityHistoryButton, true);
+      assert.equal(result.activityHistoryModal, true);
       assert.equal(result.debtModule, true);
       assert.equal(result.financialModule, true);
+      assert.equal(result.billingModule, true);
+      assert.equal(result.overviewModule, true);
+      assert.equal(result.employeePaymentModule, true);
+      assert.equal(result.employeeLedgerModule, true);
       assert.equal(result.backupModule, true);
+      assert.equal(result.historicalBoundaryModule, true);
       assert.equal(result.validationOk, true);
       assert.equal(result.milestoneOk, true);
 
@@ -213,10 +247,8 @@ async function main() {
         };
         currentUser = { id: 'browser-smoke-admin', name: 'Smoke Admin', isAdmin: true };
         document.getElementById('loginOverlay').style.display = 'none';
-        V2_PERSISTENCE.setServerSnapshot(state);
-        previewLatestServerState = _cloneState(state);
+        previewSession.setServerSnapshot(state);
         _lastSavedState = _cloneState(state);
-        previewDirty = false;
         _clearPreviewHistory();
         openUnifiedJobModal(fixtureJob.id);
         return {
@@ -233,6 +265,117 @@ async function main() {
         initialDescription: 'Initial work',
         initialNote: 'Original note'
       });
+
+      const activitySaveResult = await page.evaluate(async () => {
+        closeModal('unifiedJobModal');
+        const baseline = _cloneState(state);
+        state.jobs[0].name = 'Activity History Test Client';
+        await save();
+        const savedEvent = state.activityHistory?.at(-1);
+        const savedEventRecorded = savedEvent?.objectType === 'job' && savedEvent?.eventType === 'updated';
+        await undoAction();
+        const undoEventRecorded = state.activityHistory?.some(event => String(event.actionLabel || '').startsWith('Undo:'));
+        await redoAction();
+        const redoEventRecorded = state.activityHistory?.some(event => String(event.actionLabel || '').startsWith('Redo:'));
+        const redone = state.jobs[0].name === 'Activity History Test Client';
+        await undoAction();
+        const restored = state.jobs[0].name === baseline.jobs[0].name;
+        state = baseline;
+        previewSession.setServerSnapshot(state);
+        _clearPreviewHistory();
+        renderAll();
+        return { savedEventRecorded, undoEventRecorded, redoEventRecorded, redone, restored };
+      });
+      assert.deepEqual(activitySaveResult, { savedEventRecorded: true, undoEventRecorded: true, redoEventRecorded: true, redone: true, restored: true });
+
+      const queuedSaveResult = await page.evaluate(async () => {
+        const baseline = _cloneState(state);
+        state.jobs[0].name = 'Queued First Change';
+        const firstSave = save();
+        state.jobs[0].name = 'Queued Final Change';
+        const secondSave = save();
+        await Promise.all([firstSave, secondSave]);
+        const finalSnapshotName = _lastSavedState.jobs[0].name;
+        state = baseline;
+        previewSession.setServerSnapshot(state);
+        _clearPreviewHistory();
+        renderAll();
+        return { finalSnapshotName, queuedFinalStateSaved: finalSnapshotName === 'Queued Final Change' };
+      });
+      assert.deepEqual(queuedSaveResult, { finalSnapshotName: 'Queued Final Change', queuedFinalStateSaved: true });
+
+      const realtimeBoundaryResult = await page.evaluate(async () => {
+        const baseline = _cloneState(state);
+        previewSession.setServerSnapshot(baseline);
+        state.jobs[0].name = 'Temporary local edit';
+        await save();
+        const remote = _cloneState(baseline);
+        remote.jobs[0].name = 'Remote live update';
+        const update = previewSession.receiveServerSnapshot(remote);
+        const localEditHeld = state.jobs[0].name === 'Temporary local edit';
+        window.__smokeRealtimeBaseline = baseline;
+        discardPreviewChanges();
+        return { changedWhileDirty: update.changedWhileDirty, appliedWhileDirty: update.apply, localEditHeld };
+      });
+      await page.waitForFunction(() => !document.getElementById('confirmModal').classList.contains('hidden'));
+      assert.deepEqual(realtimeBoundaryResult, { changedWhileDirty: true, appliedWhileDirty: false, localEditHeld: true });
+      await page.click('#confirmModalOk');
+      await page.waitForFunction(() => {
+        const job = state.jobs.find(item => item.id === 'browser-smoke-job');
+        return !previewSession.isDirty() && job?.name === 'Remote live update';
+      });
+      await page.evaluate(() => {
+        state = window.__smokeRealtimeBaseline;
+        delete window.__smokeRealtimeBaseline;
+        previewSession.setServerSnapshot(state);
+        _clearPreviewHistory();
+        renderAll();
+      });
+
+      const backupRoundTripResult = await page.evaluate(() => {
+        const before = _cloneState(state);
+        const text = V2_BACKUP.serializeState(state);
+        const restored = V2_BACKUP.parseBackup(text);
+        return {
+          exact: JSON.stringify(restored) === JSON.stringify(before),
+          jobCount: restored.jobs.length,
+          userCount: restored.users.length,
+          noteCount: restored.dashboardNotes.length
+        };
+      });
+      assert.deepEqual(backupRoundTripResult, { exact: true, jobCount: 1, userCount: 2, noteCount: 3 });
+
+      const historicalBoundaryResult = await page.evaluate(() => {
+        closeModal('unifiedJobModal');
+        const currentJob = _cloneState(state.jobs[0]);
+        const legacyJob = _cloneState(currentJob);
+        legacyJob.id = 'browser-smoke-legacy-job';
+        legacyJob.name = 'Browser Historical Client';
+        legacyJob.createdVia = 'legacy';
+        legacyJob.jobNotes = [{
+          id: 'browser-smoke-legacy-note',
+          text: 'Historical note remains visible',
+          date: '2025-01-01'
+        }];
+        state.jobs = [currentJob, legacyJob];
+        renderAll();
+        editJob(legacyJob.id);
+        const editBlocked = document.getElementById('unifiedJobModal').classList.contains('hidden') &&
+          document.getElementById('alertModalMsg').textContent.includes('historical Tracker 1.0 record');
+        closeModal('alertModal');
+        openNotes('job', legacyJob.id);
+        const notesReadOnly = document.body.innerText.includes('Historical read-only') &&
+          document.querySelectorAll('#notesList .note-actions').length === 0;
+        closeModal('notesModal');
+        const clientHistory = clientJobHistorySection(state.clients[0]);
+        const combinedClientHistory = clientHistory.includes('Job history (2)') &&
+          clientHistory.includes('Browser Historical Client') &&
+          clientHistory.includes('Historical');
+        state.jobs = [currentJob];
+        renderAll();
+        return { editBlocked, notesReadOnly, combinedClientHistory };
+      });
+      assert.deepEqual(historicalBoundaryResult, { editBlocked: true, notesReadOnly: true, combinedClientHistory: true });
 
       const workspaceResult = await page.evaluate(() => {
         renderAll();
@@ -265,6 +408,14 @@ async function main() {
               card.querySelector('.summary-card-header')?.nextElementSibling?.classList.contains('summary-value');
           })(),
           newJobUsesUnified: document.getElementById('newJobBtn')?.getAttribute('onclick') === 'openUnifiedJobModal()',
+          activityHistoryEntry: (() => {
+            openActivityHistory();
+            const modal = document.getElementById('activityHistoryModal');
+            const visible = modal && !modal.classList.contains('hidden');
+            const intro = modal?.innerText.includes('audit trail');
+            closeModal('activityHistoryModal');
+            return visible && intro;
+          })(),
           settingsLabels
         };
       });
@@ -276,6 +427,7 @@ async function main() {
       assert.equal(workspaceResult.employeeHeaderControls, true);
       assert.equal(workspaceResult.recentPayFilterPosition, true);
       assert.equal(workspaceResult.newJobUsesUnified, true);
+      assert.equal(workspaceResult.activityHistoryEntry, true);
       assert.deepEqual(workspaceResult.settingsLabels, [
         'Appearance', 'Client display', 'Job defaults', 'Team & permissions',
         'Financial rules', 'Square integration', 'Data & backup', 'Temporary tools'
@@ -600,7 +752,7 @@ async function main() {
           paidAmount: paid?.amount,
           history: history.map(item => ({ source: item.source, amount: item.amount })),
           linkedNote: !!note,
-          dirty: previewDirty
+          dirty: previewSession.isDirty()
         };
       });
       assert.deepEqual(dollarPartialResult, {
@@ -718,7 +870,7 @@ async function main() {
       await page.click('#uj_saveBtn');
       await page.waitForFunction(() => {
         const job = state.jobs.find(item => item.id === 'browser-smoke-job');
-        return previewDirty &&
+        return previewSession.isDirty() &&
           document.getElementById('unifiedJobModal').classList.contains('hidden') &&
           job?.unifiedLines?.[0]?.description === 'Temporary work';
       });
@@ -728,7 +880,7 @@ async function main() {
         return {
           description: job.unifiedLines[0].description,
           note: job.jobNotes[0].text,
-          dirty: previewDirty
+          dirty: previewSession.isDirty()
         };
       });
       assert.deepEqual(changedResult, { description: 'Temporary work', note: 'Temporary note', dirty: true });
@@ -738,7 +890,7 @@ async function main() {
       await page.click('#confirmModalOk');
       await page.waitForFunction(() => {
         const job = state.jobs.find(item => item.id === 'browser-smoke-job');
-        return !previewDirty &&
+        return !previewSession.isDirty() &&
           document.getElementById('confirmModal').classList.contains('hidden') &&
           job?.unifiedLines?.[0]?.description === 'Initial work';
       });
@@ -748,7 +900,7 @@ async function main() {
         return {
           description: job.unifiedLines[0].description,
           note: job.jobNotes[0].text,
-          dirty: previewDirty
+          dirty: previewSession.isDirty()
         };
       });
       assert.deepEqual(discardedResult, { description: 'Initial work', note: 'Original note', dirty: false });

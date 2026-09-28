@@ -11,7 +11,8 @@ test('reports legacy and current-shape counts without mutating state', () => {
       {
         id: 'legacy-job',
         milestones: [{ id: 'milestone-1', partialState: 'paid' }],
-        addOns: [{ id: 'add-on-1', collected: true }]
+        addOns: [{ id: 'add-on-1', collected: true }],
+        advances: [{ id: 'advance-1', splitEventId: '' }]
       },
       { id: 'current-job', createdVia: 'unified-v2', clientId: 'client-1' }
     ],
@@ -42,6 +43,7 @@ test('reports legacy and current-shape counts without mutating state', () => {
   assert.equal(report.results.find(item => item.id === 'jobItems.collectedBoolean').count, 1);
   assert.equal(report.results.find(item => item.id === 'jobItems.legacyPartialState').count, 1);
   assert.equal(report.results.find(item => item.id === 'splitPayments.missingIds').count, 1);
+  assert.equal(report.results.find(item => item.id === 'jobAdvances.missingSplitEventId').count, 1);
   assert.equal(report.nonZero.length > 0, true);
   assert.equal(report.zero.length > 0, true);
 });

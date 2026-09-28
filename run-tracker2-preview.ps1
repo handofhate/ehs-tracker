@@ -17,5 +17,6 @@ if (-not $alreadyListening) {
     -WindowStyle Hidden | Out-Null
 }
 
-Start-Process "http://127.0.0.1:$port/index.html"
-Write-Host "Tracker 2.0 local preview: http://127.0.0.1:$port/index.html"
+$previewUrl = "http://127.0.0.1:$port/index.html?trackerMode=preview"
+Start-Process $previewUrl
+Write-Host "Tracker 2.0 local preview: $previewUrl"

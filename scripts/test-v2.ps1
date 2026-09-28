@@ -20,14 +20,32 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'scripts/migration-audit.js syntax check failed.' }
   node --check v2/persistence-domain.js
   if ($LASTEXITCODE -ne 0) { throw 'v2/persistence-domain.js syntax check failed.' }
+  node --check v2/save-queue.js
+  if ($LASTEXITCODE -ne 0) { throw 'v2/save-queue.js syntax check failed.' }
+  node --check v2/undo-redo-domain.js
+  if ($LASTEXITCODE -ne 0) { throw 'v2/undo-redo-domain.js syntax check failed.' }
+  node --check v2/preview-session-domain.js
+  if ($LASTEXITCODE -ne 0) { throw 'v2/preview-session-domain.js syntax check failed.' }
   node --check v2/history-domain.js
   if ($LASTEXITCODE -ne 0) { throw 'v2/history-domain.js syntax check failed.' }
+  node --check v2/activity-history-domain.js
+  if ($LASTEXITCODE -ne 0) { throw 'v2/activity-history-domain.js syntax check failed.' }
   node --check v2/debt-feature.js
   if ($LASTEXITCODE -ne 0) { throw 'v2/debt-feature.js syntax check failed.' }
   node --check v2/financial-domain.js
   if ($LASTEXITCODE -ne 0) { throw 'v2/financial-domain.js syntax check failed.' }
+  node --check v2/billing-domain.js
+  if ($LASTEXITCODE -ne 0) { throw 'v2/billing-domain.js syntax check failed.' }
+  node --check v2/overview-domain.js
+  if ($LASTEXITCODE -ne 0) { throw 'v2/overview-domain.js syntax check failed.' }
+  node --check v2/employee-payment-domain.js
+  if ($LASTEXITCODE -ne 0) { throw 'v2/employee-payment-domain.js syntax check failed.' }
+  node --check v2/employee-ledger-domain.js
+  if ($LASTEXITCODE -ne 0) { throw 'v2/employee-ledger-domain.js syntax check failed.' }
   node --check v2/legacy-partial-domain.js
   if ($LASTEXITCODE -ne 0) { throw 'v2/legacy-partial-domain.js syntax check failed.' }
+  node --check v2/historical-boundary.js
+  if ($LASTEXITCODE -ne 0) { throw 'v2/historical-boundary.js syntax check failed.' }
   node --check v2/backup-domain.js
   if ($LASTEXITCODE -ne 0) { throw 'v2/backup-domain.js syntax check failed.' }
 
@@ -65,14 +83,32 @@ try {
     'scripts/preview-smoke.js',
     'v2/persistence-domain.js',
     'v2/persistence-domain.test.js',
+    'v2/save-queue.js',
+    'v2/save-queue.test.js',
+    'v2/undo-redo-domain.js',
+    'v2/undo-redo-domain.test.js',
+    'v2/preview-session-domain.js',
+    'v2/preview-session-domain.test.js',
     'v2/history-domain.js',
     'v2/history-domain.test.js',
+    'v2/activity-history-domain.js',
+    'v2/activity-history-domain.test.js',
     'v2/debt-feature.js',
     'v2/debt-feature.test.js',
     'v2/financial-domain.js',
     'v2/financial-domain.test.js',
+    'v2/billing-domain.js',
+    'v2/billing-domain.test.js',
+    'v2/overview-domain.js',
+    'v2/overview-domain.test.js',
+    'v2/employee-payment-domain.js',
+    'v2/employee-payment-domain.test.js',
+    'v2/employee-ledger-domain.js',
+    'v2/employee-ledger-domain.test.js',
     'v2/legacy-partial-domain.js',
     'v2/legacy-partial-domain.test.js',
+    'v2/historical-boundary.js',
+    'v2/historical-boundary.test.js',
     'v2/backup-domain.js',
     'v2/backup-domain.test.js',
     'v2/package.json'

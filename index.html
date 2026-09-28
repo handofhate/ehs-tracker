@@ -252,6 +252,18 @@
   .overview-note-modal-actions { display:flex; align-items:center; gap:8px; justify-content:flex-end; margin-top:22px; padding-top:4px; }
   .overview-note-modal-edit-toggles { display:none; align-items:center; gap:12px; margin-right:auto; }
   .overview-note-modal-actions .btn { width:34px; height:32px; padding:0; }
+  .activity-history-modal { width: 860px; max-width: 100%; max-height: 86vh; display:flex; flex-direction:column; overflow:hidden; }
+  .activity-history-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:20px 22px 14px; border-bottom:1px solid var(--border); flex-shrink:0; }
+  .activity-history-header .modal-title { margin:0; }
+  .activity-history-intro { padding:12px 22px; color:var(--text3); font-size:13px; line-height:1.45; border-bottom:1px solid var(--border); }
+  .activity-history-list { overflow-y:auto; padding:12px 22px 20px; display:flex; flex-direction:column; gap:8px; }
+  .activity-history-item { border:1px solid var(--border); border-radius:4px; background:var(--bg3); padding:11px 12px; }
+  .activity-history-item-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
+  .activity-history-summary { color:var(--text); font-size:14px; }
+  .activity-history-meta { color:var(--text3); font-family:var(--mono); font-size:11px; white-space:nowrap; }
+  .activity-history-action { color:var(--text3); font-size:12px; margin-top:5px; }
+  .activity-history-changes { margin:7px 0 0 18px; padding:0; color:var(--text2); font-family:var(--mono); font-size:11px; line-height:1.55; }
+  .activity-history-empty { color:var(--text3); font-family:var(--mono); font-size:13px; padding:12px 0; }
   @media (max-width: 760px) {
     .overview-header { flex-direction:column; align-items:flex-start; }
     .overview-actions { justify-content:flex-start; }
@@ -279,6 +291,7 @@
   .job-card.billing-pending { border-left-color: var(--blue); }
   .job-card.billing-invoiced { border-left-color: var(--yellow); }
   .job-card.billing-paid { border-left-color: var(--green); }
+  .historical-read-only .admin-only { display: none !important; }
 
   .job-header { --job-header-gap: clamp(8px, 1.2vw, 18px); --job-total-width: 114px; --job-outstanding-width: 99px; --job-employee-pay-width: 108px; display: grid; grid-template-columns: 16px clamp(220px, 18vw, 280px) minmax(0, 2fr) var(--job-total-width) minmax(0, 1fr) var(--job-outstanding-width) minmax(0, 1fr) var(--job-employee-pay-width) minmax(0, 2fr) 74px; align-items: center; column-gap: 0; padding: 16px 20px; cursor: pointer; }
   .job-header-main { min-width: 0; }
@@ -936,6 +949,7 @@
       <button class="btn btn-primary header-admin" id="newJobBtn" onclick="openUnifiedJobModal()">+ New Job</button>
       <button class="btn btn-ghost btn-sm header-admin" id="employeePaymentBtn" onclick="openEmployeePayment()">$ Pay Employee</button>
       <button class="btn btn-ghost btn-sm header-admin" id="splitLedgerBtn" onclick="openSplitLedger()"><i class="ph ph-book-open-text"></i> Ledger</button>
+      <button class="btn btn-ghost btn-sm header-admin" id="activityHistoryBtn" onclick="openActivityHistory()"><i class="ph-duotone ph-clock-counter-clockwise"></i> Activity</button>
       <div class="desktop-menu-inline-two header-admin" id="undoRedoRow">
         <button class="btn btn-ghost btn-sm" id="undoBtn" onclick="undoAction()" style="opacity:0.35" title="Nothing to undo"><i class="ph ph-arrow-counter-clockwise"></i> Undo</button>
         <button class="btn btn-ghost btn-sm" id="redoBtn" onclick="redoAction()" style="opacity:0.35" title="Nothing to redo"><i class="ph ph-arrow-clockwise"></i> Redo</button>
@@ -1042,106 +1056,6 @@
     <div id="clientsList"></div>
   </div>
   <div id="debtPanel"></div>
-</div>
-
-<!-- NEW/EDIT JOB MODAL -->
-<div id="jobModal" class="modal-overlay hidden">
-  <div class="modal">
-    <div class="modal-title" id="jobModalTitle">New Job</div>
-    <div class="form-group">
-      <label class="form-label">Client Name</label>
-      <div class="ac-wrap">
-        <input class="form-input" id="f_name" placeholder="e.g. Griffin, Mendoza..." autocomplete="off" oninput="showAC('f_name')" onkeydown="navigateAC(event,'f_name')" onblur="setTimeout(()=>hideAC('f_name'),150)" />
-      </div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Contact Name <span style="font-weight:400;color:var(--text3)">(optional - if different from client)</span></label>
-      <div class="ac-wrap">
-        <input class="form-input" id="f_contact" placeholder="e.g. John the contractor" autocomplete="off" oninput="showAC('f_contact')" onkeydown="navigateAC(event,'f_contact')" onblur="setTimeout(()=>hideAC('f_contact'),150)" />
-      </div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Start Date</label>
-      <input class="form-input" id="f_date" type="date" />
-    </div>
-    <div id="jobFinancialLockNote" style="display:none;margin:6px 0 12px;padding:10px 12px;border:1px solid var(--border2);border-radius:3px;background:var(--bg3);font-family:var(--mono);font-size:12px;color:var(--text2)">
-      Quote and payment structure are locked for this job because revenue collections have already been applied. Use Revenue > Collections (Edit/Delete) first.
-    </div>
-    <div class="form-group" id="f_emp_wrap">
-      <label class="form-label">Assign to Employee</label>
-      <select class="form-input" id="f_emp"></select>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Employee Pay</label>
-      <div id="f_workStatusToggle" style="display:flex;gap:6px">
-        <button type="button" id="f_work_complete" class="btn btn-primary btn-sm" onclick="setJobWorkStatus(true)">Adding to employee pay</button>
-        <button type="button" id="f_work_progress" class="btn btn-ghost btn-sm" onclick="setJobWorkStatus(false)">Employee pay on hold</button>
-      </div>
-      <div id="f_workStatusHint" class="form-hint">This job contributes to employee pay totals.</div>
-    </div>
-    <div id="jobFinancialLockRegion">
-      <div class="form-group">
-        <label class="form-label">Job Setup</label>
-        <div id="jobSetupPicker" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
-          <button type="button" class="btn btn-ghost btn-sm user-pick-btn" id="js_mode_unified" onclick="setJobSetupMode('unified')">Unified Quote</button>
-          <button type="button" class="btn btn-ghost btn-sm user-pick-btn" id="js_mode_itemized" onclick="setJobSetupMode('itemized')">Itemized Quote</button>
-          <button type="button" class="btn btn-ghost btn-sm user-pick-btn" id="js_mode_hourly" onclick="setJobSetupMode('hourly')">Hourly</button>
-        </div>
-        <select class="form-input" id="f_jobType" onchange="onJobTypeChange()" style="display:none">
-          <option value="quoted">Quoted Job</option>
-          <option value="hourly">Hourly + Materials</option>
-        </select>
-        <input type="checkbox" id="f_itemized" onchange="toggleItemizedQuote()" style="display:none" />
-      </div>
-      <div class="form-group" id="f_hourly_rate_wrap" style="display:none">
-        <label class="form-label">Hourly Rate ($)</label>
-        <input class="form-input" id="f_hourlyRate" type="number" step="0.01" min="0" placeholder="0.00" />
-      </div>
-      <div id="jobQuotedFields">
-      <div id="f_quote_wrap" class="form-group">
-        <label class="form-label">Quote Amount ($)</label>
-        <input class="form-input" id="f_quote" type="number" step="0.01" placeholder="0.00" oninput="updateMilestonePreview()" />
-      </div>
-      <div id="f_items_wrap" style="display:none;margin-bottom:14px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <label class="form-label" style="margin-bottom:0">Line Items</label>
-          <button id="quoteAddItemBtn" class="btn btn-ghost btn-sm" onclick="addQuoteItemField()">+ Add Item</button>
-        </div>
-        <div id="quoteItemList"></div>
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--border);font-family:var(--mono)">
-          <span style="color:var(--text2);font-size:15px">Quote Total</span>
-          <span style="color:var(--accent);font-size:17px" id="quoteItemTotal">$0.00</span>
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Payment Structure</label>
-        <div style="display:flex;gap:6px;margin-bottom:12px">
-          <button id="ms_btn_single"  class="btn btn-primary btn-sm" onclick="setMilestoneMode('single')">Single Invoice</button>
-          <button id="ms_btn_default" class="btn btn-ghost btn-sm"   onclick="setMilestoneMode('default')">Use Defaults</button>
-          <button id="ms_btn_custom"  class="btn btn-ghost btn-sm"   onclick="setMilestoneMode('custom')">Custom</button>
-        </div>
-        <div id="milestoneValueToggle" style="display:none;gap:6px;margin-bottom:10px;align-items:center">
-          <span style="font-size:12px;color:var(--text3);font-family:var(--mono)">Values:</span>
-          <button type="button" id="ms_basis_percent" class="btn btn-primary btn-sm" onclick="setMilestoneValueMode('percent')">Percent</button>
-          <button type="button" id="ms_basis_amount" class="btn btn-ghost btn-sm" onclick="setMilestoneValueMode('amount')">Dollars</button>
-        </div>
-        <div id="milestoneHint" style="font-family:var(--mono);font-size:14px;color:var(--text3)">Full invoice - one payment to track.</div>
-        <div id="milestoneEditor" style="display:none">
-          <div id="milestoneList" class="milestone-list"></div>
-          <button id="milestoneAddBtn" class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="addMilestoneField()">+ Add Milestone</button>
-          <div id="milestoneError" style="color:var(--red);font-size:15px;margin-top:4px"></div>
-        </div>
-      </div>
-      </div>
-      <div id="jobHourlyHint" style="display:none;margin-top:2px;padding:10px 12px;border:1px solid var(--border2);border-radius:3px;background:var(--bg3);font-family:var(--mono);font-size:12px;color:var(--text2)">
-        Hourly jobs do not require a starting quote. Use Hours + Materials as the invoice total with one billing status toggle.
-      </div>
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal('jobModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveJob()">Save Job</button>
-    </div>
-  </div>
 </div>
 
 <!-- UNIFIED QUICK JOB MODAL -->
@@ -1264,7 +1178,7 @@
   <div class="modal settings-modal">
     <div class="settings-modal-header">
       <div class="modal-title">Settings</div>
-      <span style="font-family:var(--mono);font-size:12px;color:var(--text3);cursor:pointer;text-decoration:underline dotted" onclick="openChangelog()">Tracker 2.0 preview</span>
+      <span style="font-family:var(--mono);font-size:12px;color:var(--text3);cursor:pointer;text-decoration:underline dotted" onclick="openChangelog()">Tracker 2.0</span>
     </div>
     <div class="settings-body">
       <div class="settings-nav-wrap">
@@ -1631,15 +1545,27 @@
   </div>
 </div>
 
+<!-- ACTIVITY HISTORY MODAL -->
+<div id="activityHistoryModal" class="modal-overlay hidden">
+  <div class="modal activity-history-modal">
+    <div class="activity-history-header">
+      <div class="modal-title">Activity History</div>
+      <button class="btn btn-ghost btn-icon-only" onclick="closeModal('activityHistoryModal')" title="Close activity history" aria-label="Close activity history"><i class="ph-duotone ph-x"></i></button>
+    </div>
+    <div class="activity-history-intro">Important saved changes are listed here with the user, date, and affected record. This is an audit trail, not a list of every keystroke.</div>
+    <div id="activityHistoryList" class="activity-history-list"></div>
+  </div>
+</div>
+
 <!-- CHANGELOG MODAL -->
 <div id="changelogModal" class="modal-overlay hidden">
   <div class="modal" style="max-width:480px">
     <div class="modal-title">Version History</div>
     <div style="font-family:var(--mono);font-size:13px;line-height:1.7;color:var(--text2)">
       <div style="margin-bottom:14px">
-        <div style="color:var(--accent);font-size:14px;margin-bottom:4px">Tracker 2.0 preview - local-only build</div>
-        <div>- Preview build reads the live database but keeps edits temporary and never writes them back</div>
-        <div>- Settings cleanup, protected global fee changes, isolated startup debt, and automated regression coverage are in progress</div>
+        <div style="color:var(--accent);font-size:14px;margin-bottom:4px">Tracker 2.0</div>
+        <div>- Unified job and employee-payment workflows with historical records protected as read-only</div>
+        <div>- Local preview mode is available for safe testing; production mode uses the normal save path</div>
       </div>
       <div style="margin-bottom:14px">
         <div style="color:var(--accent);font-size:14px;margin-bottom:4px">v1.22 - Apr 2026</div>
@@ -2078,12 +2004,21 @@
 <script src="v2/state-domain.js?v=20260925-1"></script>
 <script src="v2/preview-fixtures.js?v=20260928-1"></script>
 <script src="v2/persistence-domain.js?v=20260925-1"></script>
+<script src="v2/save-queue.js?v=20260928-1"></script>
+<script src="v2/undo-redo-domain.js?v=20260928-1"></script>
+<script src="v2/preview-session-domain.js?v=20260928-1"></script>
 <script src="v2/history-domain.js?v=20260925-1"></script>
+<script src="v2/activity-history-domain.js?v=20260928-1"></script>
 <script src="v2/debt-feature.js?v=20260925-1"></script>
 <script src="v2/financial-domain.js?v=20260925-1"></script>
+<script src="v2/billing-domain.js?v=20260928-1"></script>
+<script src="v2/overview-domain.js?v=20260928-1"></script>
+<script src="v2/employee-payment-domain.js?v=20260928-1"></script>
+<script src="v2/employee-ledger-domain.js?v=20260928-1"></script>
 <script src="v2/legacy-partial-domain.js?v=20260925-1"></script>
+<script src="v2/historical-boundary.js?v=20260928-1"></script>
 <script src="v2/backup-domain.js?v=20260925-1"></script>
-<script src="app.js?v=20260925-preview-1"></script>
+<script src="app.js?v=20260928-1"></script>
 
 <div id="undoToast">Undo applied</div>
 </body>

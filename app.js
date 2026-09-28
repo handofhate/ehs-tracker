@@ -5,6 +5,17 @@ const STORAGE_PREFIX = String(BUILD_CONFIG.storagePrefix || '');
 const V2_JOB_DOMAIN = window.Tracker2JobDomain;
 const V2_FEES = window.Tracker2Fees;
 const V2_STATE = window.Tracker2State;
+const V2_HISTORICAL = window.Tracker2HistoricalBoundary;
+
+function _isHistoricalJob(job) {
+  return !!V2_HISTORICAL?.isHistoricalJob(job);
+}
+
+function _historicalMutationBlocked(job) {
+  if (!_isHistoricalJob(job)) return false;
+  showAlert('This is a historical Tracker 1.0 record and is read-only in Tracker 2.0.');
+  return true;
+}
 
 function _storageKey(key) { return `${STORAGE_PREFIX}${key}`; }
 function _storageGet(key) { return localStorage.getItem(_storageKey(key)); }
@@ -29,9 +40,18 @@ const V2_PERSISTENCE = window.Tracker2Persistence.createPersistenceBoundary({
   mode: BUILD_CONFIG.mode,
   writeState: next => DOC.set(next)
 });
+const V2_SAVE_QUEUE = window.Tracker2SaveQueue;
+const V2_UNDO_REDO = window.Tracker2UndoRedo;
+const V2_PREVIEW_SESSION = window.Tracker2PreviewSession;
+const previewSession = V2_PREVIEW_SESSION.createPreviewSession({ persistence: V2_PERSISTENCE, cloneState: _cloneState });
 const V2_HISTORY = window.Tracker2History;
+const V2_ACTIVITY = window.Tracker2ActivityHistory;
 const V2_DEBT = window.Tracker2DebtFeature;
 const V2_FINANCIAL = window.Tracker2Financial;
+const V2_BILLING = window.Tracker2Billing;
+const V2_OVERVIEW = window.Tracker2Overview;
+const V2_EMPLOYEE_PAYMENT = window.Tracker2EmployeePayment;
+const V2_EMPLOYEE_LEDGER = window.Tracker2EmployeeLedger;
 const V2_LEGACY_PARTIAL = window.Tracker2LegacyPartial;
 const V2_BACKUP = window.Tracker2Backup;
 
@@ -54,9 +74,9 @@ let state = {
   users: [],
   appointments: [],
   homewatch: [],
-  dashboardNotes: []
+  dashboardNotes: [],
+  activityHistory: []
 };
-let editingJobId = null;
 let addItemContext = null;
 let employeePaymentCtx = { employeeId: '' };
 let splitPayIncludeAll = false;
@@ -85,8 +105,6 @@ let calMonth = new Date().getMonth(); // 0-indexed
 let schedView = 'list'; // 'list' | 'month'
 let selectedCalDay = null;
 let selectedDayFilter = null; // mobile day-drill-down
-let previewDirty = false;
-let previewLatestServerState = null;
 let feeMigrationPending = false;
 const OWED_INCLUDE_DEFAULTS = { jobs: true, homewatch: true, potential: true };
 
@@ -100,16 +118,22 @@ function _setPreviewStatus(message) {
   if (el) el.textContent = message;
 }
 
+function _applyBuildChrome() {
+  const banner = document.getElementById('previewBanner');
+  if (banner) banner.style.display = PREVIEW_MODE ? '' : 'none';
+}
+
+_applyBuildChrome();
+
 function _updatePreviewStatus() {
   if (!PREVIEW_MODE) return;
-  _setPreviewStatus(previewDirty
+  _setPreviewStatus(previewSession.isDirty()
     ? 'Temporary edits active; nothing has been saved.'
     : 'Live data connected; no temporary edits.');
 }
 
 function _clearPreviewHistory() {
-  undoStack.length = 0;
-  redoStack.length = 0;
+  undoRedoHistory.clear();
   _lastSavedState = _cloneState(state);
   _updateUndoBtn();
   _updateRedoBtn();
@@ -117,15 +141,13 @@ function _clearPreviewHistory() {
 
 function discardPreviewChanges() {
   if (!PREVIEW_MODE) return;
-  const applyLatest = (latest) => {
-    const restored = V2_PERSISTENCE.discard();
+  const applyLatest = () => {
+    const restored = previewSession.discard();
     if (!restored) {
       showAlert('Live data is not available yet.');
       return;
     }
     state = migrateState(restored);
-    previewLatestServerState = _cloneState(state);
-    previewDirty = false;
     if (currentUser) {
       const fresh = state.users.find(u => u.id === currentUser.id);
       if (fresh) currentUser = { id: fresh.id, name: fresh.name, isAdmin: fresh.isAdmin };
@@ -136,12 +158,12 @@ function discardPreviewChanges() {
     _updatePreviewStatus();
   };
 
-  if (previewDirty) {
-    showConfirm('Discard all temporary preview edits and refresh from the live database?', () => applyLatest(previewLatestServerState), {
+  if (previewSession.isDirty()) {
+    showConfirm('Discard all temporary preview edits and refresh from the live database?', applyLatest, {
       title: 'Refresh live data', okLabel: 'Refresh', danger: false
     });
   } else {
-    applyLatest(previewLatestServerState);
+    applyLatest();
   }
 }
 
@@ -262,71 +284,86 @@ function _prepareLoadedState(raw) {
   // temporary edits but never removes the stable local preview dataset.
   return migrateState(window.Tracker2PreviewFixtures.mergeIntoState(migrated));
 }
-const undoStack = [];
-const redoStack = [];
-const UNDO_MAX = 50;
+const undoRedoHistory = V2_UNDO_REDO.createHistory({ max: 50 });
 // Tracks the last successfully written state so save() always snapshots
 // the pre-mutation baseline, not the already-mutated current state.
 let _lastSavedState = null;
-
-async function save() {
-  if (isSaving) return;
-  // Push the last confirmed Firestore state (pre-mutation baseline) onto undo stack
-  if (_lastSavedState !== null) {
-    undoStack.push(JSON.parse(JSON.stringify(_lastSavedState)));
-    if (undoStack.length > UNDO_MAX) undoStack.shift();
+const saveQueue = V2_SAVE_QUEUE.createSaveQueue({
+  persist: next => V2_PERSISTENCE.save(next),
+  onStart: () => {
+    if (!PREVIEW_MODE) isSaving = true;
+  },
+  onSaved: result => {
+    _lastSavedState = result.snapshot;
+    if (PREVIEW_MODE) {
+      previewSession.markDirty();
+      _updatePreviewStatus();
+    }
+  },
+  onError: error => {
+    console.error('Save failed:', error);
+    showAlert('Save failed - check your connection.');
+  },
+  onFinish: () => {
+    if (!PREVIEW_MODE) isSaving = false;
   }
-  redoStack.length = 0;
+});
+
+function _recordActivityForSave(previous, next, actionLabel = '') {
+  if (!V2_ACTIVITY || !previous || !next) return;
+  const events = V2_ACTIVITY.buildActivityEvents({
+    before: previous,
+    after: next,
+    actor: currentUser || { id: '', name: 'Tracker' },
+    occurredAt: new Date().toISOString(),
+    idFactory: uid,
+    actionLabel
+  });
+  if (!events.length) return;
+  next.activityHistory = V2_ACTIVITY.appendActivityEvents(next.activityHistory, events);
+}
+
+async function save({ recordActivity = true, actionLabel = '' } = {}) {
+  if (saveQueue.isInFlight()) {
+    saveQueue.request(state, { recordActivity, actionLabel });
+    return false;
+  }
+  // Push the last confirmed Firestore state (pre-mutation baseline) onto undo stack
+  undoRedoHistory.recordSavedState(_lastSavedState);
   _updateUndoBtn();
   _updateRedoBtn();
-  if (PREVIEW_MODE) {
-    // Keep the normal UI flow and local undo history, but never persist the
-    // mutated state outside this browser session.
-    const result = await V2_PERSISTENCE.save(state);
-    _lastSavedState = result.snapshot;
-    previewDirty = true;
-    _updatePreviewStatus();
-    return true;
-  }
-  isSaving = true;
-  try {
-    const result = await V2_PERSISTENCE.save(state);
-    // Record the just-written state as the new baseline
-    _lastSavedState = result.snapshot;
-  } catch(e) {
-    console.error('Save failed:', e);
-    showAlert('Save failed - check your connection.');
-  } finally {
-    isSaving = false;
-  }
+  if (recordActivity) _recordActivityForSave(_lastSavedState, state, actionLabel || V2_UNDO_REDO.describeAction(_lastSavedState || {}, state));
+  // In preview this remains an in-memory snapshot. In a write-enabled build
+  // the persistence boundary clones this state before sending it to Firestore.
+  const request = saveQueue.request(state, { recordActivity, actionLabel });
+  return request.started ? request.promise : false;
 }
 
 async function undoAction() {
-  if (!undoStack.length) { showAlert('Nothing to undo.'); return; }
-  const prev = undoStack.pop();
-  const description = _describeUndoAction(prev, state);
-  redoStack.push(JSON.parse(JSON.stringify(state)));
-  _lastSavedState = JSON.parse(JSON.stringify(prev));
+  const change = undoRedoHistory.undo(state);
+  if (!change) { showAlert('Nothing to undo.'); return; }
+  const { previous: prev, restored, description } = change;
+  restored.activityHistory = _cloneState(state.activityHistory || []);
+  _recordActivityForSave(state, restored, `Undo: ${description}`);
+  _lastSavedState = JSON.parse(JSON.stringify(restored));
   _updateUndoBtn();
   _updateRedoBtn();
   _showUndoToast('Undo: ' + description);
   if (PREVIEW_MODE) {
-    _applyRestoredState(prev);
-    V2_PERSISTENCE.markDirty();
-    previewDirty = true;
+    _applyRestoredState(restored);
+    previewSession.markDirty();
     _updatePreviewStatus();
     return;
   }
   isSaving = true;
   try {
-    await _writeStateToFirestore(prev);
+    await _writeStateToFirestore(restored);
     // Apply directly - do not rely on onSnapshot (it fires before set() resolves and gets suppressed by isSaving)
-    _applyRestoredState(prev);
+    _applyRestoredState(restored);
   } catch(e) {
     console.error('Undo failed:', e);
     showAlert('Undo failed - check your connection.');
-    undoStack.push(prev);
-    redoStack.pop();
+    undoRedoHistory.rollbackUndo(prev);
     _lastSavedState = JSON.parse(JSON.stringify(state));
     _updateUndoBtn();
     _updateRedoBtn();
@@ -336,30 +373,29 @@ async function undoAction() {
 }
 
 async function redoAction() {
-  if (!redoStack.length) { showAlert('Nothing to redo.'); return; }
-  const next = redoStack.pop();
-  const description = _describeUndoAction(state, next);
-  undoStack.push(JSON.parse(JSON.stringify(state)));
-  _lastSavedState = JSON.parse(JSON.stringify(next));
+  const change = undoRedoHistory.redo(state);
+  if (!change) { showAlert('Nothing to redo.'); return; }
+  const { next, restored, description } = change;
+  restored.activityHistory = _cloneState(state.activityHistory || []);
+  _recordActivityForSave(state, restored, `Redo: ${description}`);
+  _lastSavedState = JSON.parse(JSON.stringify(restored));
   _updateUndoBtn();
   _updateRedoBtn();
   _showUndoToast('Redo: ' + description);
   if (PREVIEW_MODE) {
-    _applyRestoredState(next);
-    V2_PERSISTENCE.markDirty();
-    previewDirty = true;
+    _applyRestoredState(restored);
+    previewSession.markDirty();
     _updatePreviewStatus();
     return;
   }
   isSaving = true;
   try {
-    await _writeStateToFirestore(next);
-    _applyRestoredState(next);
+    await _writeStateToFirestore(restored);
+    _applyRestoredState(restored);
   } catch(e) {
     console.error('Redo failed:', e);
     showAlert('Redo failed - check your connection.');
-    redoStack.push(next);
-    undoStack.pop();
+    undoRedoHistory.rollbackRedo(next);
     _lastSavedState = JSON.parse(JSON.stringify(state));
     _updateUndoBtn();
     _updateRedoBtn();
@@ -380,15 +416,17 @@ function _applyRestoredState(restored) {
 function _updateUndoBtn() {
   const btn = document.getElementById('undoBtn');
   if (!btn) return;
-  btn.style.opacity = undoStack.length ? '1' : '0.35';
-  btn.title = undoStack.length ? `Undo (${undoStack.length} action${undoStack.length!==1?'s':''})` : 'Nothing to undo';
+  const count = undoRedoHistory.counts().undo;
+  btn.style.opacity = count ? '1' : '0.35';
+  btn.title = count ? `Undo (${count} action${count!==1?'s':''})` : 'Nothing to undo';
 }
 
 function _updateRedoBtn() {
   const btn = document.getElementById('redoBtn');
   if (!btn) return;
-  btn.style.opacity = redoStack.length ? '1' : '0.35';
-  btn.title = redoStack.length ? `Redo (${redoStack.length} action${redoStack.length!==1?'s':''})` : 'Nothing to redo';
+  const count = undoRedoHistory.counts().redo;
+  btn.style.opacity = count ? '1' : '0.35';
+  btn.title = count ? `Redo (${count} action${count!==1?'s':''})` : 'Nothing to redo';
 }
 function _showUndoToast(msg) {
   const t = document.getElementById('undoToast');
@@ -399,88 +437,6 @@ function _showUndoToast(msg) {
   void t.offsetWidth;
   t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 2800);
-}
-
-function _describeUndoAction(prev, curr) {
-  // Compare prev (before action) vs curr (current/after) to describe what was done
-  const pj = prev.jobs || [], cj = curr.jobs || [];
-  if (cj.length > pj.length) {
-    const a = cj.find(j => !pj.find(p => p.id === j.id));
-    return `Added job "${a?.name || ''}"`;
-  }
-  if (cj.length < pj.length) {
-    const r = pj.find(j => !cj.find(c => c.id === j.id));
-    return `Deleted job "${r?.name || ''}"`;
-  }
-  for (const cjob of cj) {
-    const pjob = pj.find(p => p.id === cjob.id);
-    if (pjob && JSON.stringify(cjob) !== JSON.stringify(pjob)) {
-      if (cjob.name !== pjob.name) return `Renamed job to "${cjob.name}"`;
-      if (JSON.stringify(cjob.milestones) !== JSON.stringify(pjob.milestones)) return `Updated milestones on "${cjob.name}"`;
-      if (JSON.stringify(cjob.advances) !== JSON.stringify(pjob.advances)) return `Updated advance on "${cjob.name}"`;
-      if (cjob.status !== pjob.status) return `Marked "${cjob.name}" ${cjob.status}`;
-      return `Updated job "${cjob.name}"`;
-    }
-  }
-  const ph = prev.homewatch || [], ch = curr.homewatch || [];
-  if (ch.length > ph.length) {
-    const a = ch.find(h => !ph.find(p => p.id === h.id));
-    return `Added HW client "${a?.name || ''}"`;
-  }
-  if (ch.length < ph.length) {
-    const r = ph.find(h => !ch.find(c => c.id === h.id));
-    return `Deleted HW client "${r?.name || ''}"`;
-  }
-  for (const chw of ch) {
-    const phw = ph.find(p => p.id === chw.id);
-    if (phw && JSON.stringify(chw) !== JSON.stringify(phw)) {
-      if (JSON.stringify(chw.payments) !== JSON.stringify(phw.payments)) return `Updated payment on "${chw.name}"`;
-      if (chw.status !== phw.status) return `${chw.status === 'paused' ? 'Paused' : 'Resumed'} HW "${chw.name}"`;
-      return `Updated HW client "${chw.name}"`;
-    }
-  }
-  const pc = prev.clients || [], cc = curr.clients || [];
-  if (cc.length > pc.length) {
-    const a = cc.find(c => !pc.find(p => p.id === c.id));
-    const n = [a?.firstName, a?.surname].filter(Boolean).join(' ') || a?.company || '';
-    return `Added client "${n}"`;
-  }
-  if (cc.length < pc.length) {
-    const r = pc.find(c => !cc.find(cur => cur.id === c.id));
-    const n = [r?.firstName, r?.surname].filter(Boolean).join(' ') || r?.company || '';
-    return `Deleted client "${n}"`;
-  }
-  for (const ccl of cc) {
-    const pcl = pc.find(p => p.id === ccl.id);
-    if (pcl && JSON.stringify(ccl) !== JSON.stringify(pcl)) {
-      const n = [ccl.firstName, ccl.surname].filter(Boolean).join(' ') || ccl.company || '';
-      if (JSON.stringify(ccl.clientNotes) !== JSON.stringify(pcl.clientNotes)) return `Updated notes for "${n}"`;
-      return `Updated client "${n}"`;
-    }
-  }
-  const pa = prev.appointments || [], ca = curr.appointments || [];
-  if (ca.length > pa.length) return 'Added appointment';
-  if (ca.length < pa.length) {
-    const r = pa.find(a => !ca.find(c => c.id === a.id));
-    return `Deleted appointment${r?.clientName ? ` for "${r.clientName}"` : ''}`;
-  }
-  for (const ca_ of ca) {
-    const pa_ = pa.find(p => p.id === ca_.id);
-    if (pa_ && JSON.stringify(ca_) !== JSON.stringify(pa_)) return `Updated appointment${ca_.clientName ? ` for "${ca_.clientName}"` : ''}`;
-  }
-  const pd = prev.debtPayments || [], cd = curr.debtPayments || [];
-  if (cd.length > pd.length) return 'Logged debt payment';
-  if (cd.length < pd.length) return 'Deleted debt payment';
-  if (JSON.stringify(pd) !== JSON.stringify(cd)) return 'Updated debt payment';
-  const pu = prev.users || [], cu = curr.users || [];
-  if (cu.length > pu.length) return 'Added user';
-  if (cu.length < pu.length) return 'Removed user';
-  for (const cu_ of cu) {
-    const pu_ = pu.find(p => p.id === cu_.id);
-    if (pu_ && JSON.stringify(cu_) !== JSON.stringify(pu_)) return `Updated user "${cu_.name}"`;
-  }
-  if (JSON.stringify(prev.settings) !== JSON.stringify(curr.settings)) return 'Updated settings';
-  return 'Last action';
 }
 
 function load() {
@@ -494,10 +450,9 @@ function load() {
       const persistFeeMigration = feeMigrationPending;
       feeMigrationPending = false;
       if ((syncHomewatchAutoInvoices() || persistFeeMigration) && !PREVIEW_MODE) {
-        save();
+        save({ recordActivity: false });
       }
-      previewLatestServerState = V2_PERSISTENCE.setServerSnapshot(state);
-      previewDirty = false;
+      previewSession.setServerSnapshot(state);
       if (PREVIEW_MODE) _lastSavedState = _cloneState(state);
       _updatePreviewStatus();
     } else if (legacy) {
@@ -505,12 +460,11 @@ function load() {
       try {
       state = _prepareLoadedState(JSON.parse(legacy));
         syncHomewatchAutoInvoices();
-        save(); // push to Firestore
+        save({ recordActivity: false }); // push to Firestore
         _storageRemove('jobtracker_v2');
       } catch(e) {}
     } else {
-      previewLatestServerState = V2_PERSISTENCE.setServerSnapshot(state);
-      previewDirty = false;
+      previewSession.setServerSnapshot(state);
       _lastSavedState = _cloneState(state);
       _updatePreviewStatus();
     }
@@ -527,8 +481,7 @@ function load() {
   DOC.onSnapshot(doc => {
     if (doc.exists && !isSaving) {
       const incoming = _prepareLoadedState(doc.data());
-      const serverUpdate = V2_PERSISTENCE.receiveServerSnapshot(incoming);
-      previewLatestServerState = serverUpdate.snapshot;
+      const serverUpdate = previewSession.receiveServerSnapshot(incoming);
       if (PREVIEW_MODE && !serverUpdate.apply) {
         _setPreviewStatus('Live data changed; temporary edits are still active.');
         return;
@@ -538,9 +491,9 @@ function load() {
       const persistFeeMigration = feeMigrationPending;
       feeMigrationPending = false;
       if ((syncHomewatchAutoInvoices() || persistFeeMigration) && !PREVIEW_MODE) {
-        save();
+        save({ recordActivity: false });
       }
-      previewLatestServerState = V2_PERSISTENCE.setServerSnapshot(state);
+      previewSession.setServerSnapshot(state);
       if (PREVIEW_MODE) _lastSavedState = _cloneState(state);
       _updatePreviewStatus();
       if (currentUser) {
@@ -1031,21 +984,7 @@ let overviewAdminPayEmployeeId = '';
 let overviewAdminPayTimeframe = '30';
 
 function _recentEmployeePay(employeeId, timeframe) {
-  let cutoffStr = null;
-  if (timeframe !== 'all') {
-    const d = new Date();
-    d.setDate(d.getDate() - parseInt(timeframe));
-    cutoffStr = d.toISOString().slice(0, 10);
-  }
-  const inWindow = date => !cutoffStr || (date && date >= cutoffStr);
-  let total = 0;
-  state.jobs.filter(job => job.employeeId === employeeId).forEach(job => {
-    (job.advances || []).forEach(advance => { if (inWindow(advance.date)) total += advance.amount || 0; });
-  });
-  (state.homewatch || []).filter(hw => hw.employeeId === employeeId).forEach(hw => {
-    (hw.advances || []).forEach(advance => { if (inWindow(advance.date)) total += advance.amount || 0; });
-  });
-  return _roundMoney(total);
+  return V2_OVERVIEW.recentEmployeePay(state, employeeId, timeframe, new Date(), _roundMoney);
 }
 
 function _recentPayTimeframeOptions(value) {
@@ -1078,17 +1017,7 @@ function _loadOverviewPayPreferences() {
 }
 
 function _overviewBillingTotals() {
-  return state.jobs
-    .filter(job => job.status !== 'complete')
-    .reduce((sum, job) => {
-      const billing = getJobBillingSummary(job);
-      return {
-        pendingCount: sum.pendingCount + billing.pending.count,
-        pendingTotal: sum.pendingTotal + billing.pending.total,
-        invoicedCount: sum.invoicedCount + billing.invoiced.count,
-        invoicedTotal: sum.invoicedTotal + billing.invoiced.total
-      };
-    }, { pendingCount: 0, pendingTotal: 0, invoicedCount: 0, invoicedTotal: 0 });
+  return V2_OVERVIEW.billingTotals(state.jobs, getJobBillingSummary);
 }
 
 function _overviewInvoiceCard(billingTotals) {
@@ -1112,11 +1041,16 @@ function renderSummary() {
     const employeeOptions = employees.map(user => `<option value="${esc(user.id)}"${selectedEmployee?.id === user.id ? ' selected' : ''}>${esc(user.name)}</option>`).join('');
     const selectedEmpJobs = selectedEmployee ? active.filter(job => job.employeeId === selectedEmployee.id) : [];
     const selectedEmpHW = selectedEmployee ? (state.homewatch || []).filter(hw => hw.employeeId === selectedEmployee.id) : [];
-    const jobPay = _roundMoney(selectedEmpJobs.reduce((sum, job) => sum + Math.max(0, calcJob(job).potentialEmpBalance), 0));
-    const jobCredit = _roundMoney(selectedEmpJobs.reduce((sum, job) => sum + Math.max(0, -calcJob(job).potentialEmpBalance), 0));
-    const jobNet = _roundMoney(jobPay - jobCredit);
-    const hwBal = _roundMoney(selectedEmpHW.reduce((sum, hw) => sum + calcHW(hw).potentialEmpBalance, 0));
-    const owedTotal = _roundMoney((include.jobs ? jobNet : 0) + (include.homewatch ? hwBal : 0));
+    const paySummary = V2_OVERVIEW.employeePaySummary({
+      jobs: selectedEmpJobs,
+      homewatch: selectedEmpHW,
+      employeeId: selectedEmployee?.id,
+      include,
+      calcJob,
+      calcHW,
+      roundMoney: _roundMoney
+    });
+    const { jobPay, jobCredit, jobNet, recurringBalance: hwBal, owedTotal } = paySummary;
     const owedCard = selectedEmployee ? `<div class="summary-card">
       <div class="summary-card-header"><div class="summary-label">Employee Pay Owed</div><select class="summary-card-select" onchange="setOverviewPayEmployee(this.value)" aria-label="Employee for pay owed">${employeeOptions}</select></div>
       <div class="summary-value ${owedTotal < 0 ? 'red' : 'orange'}">${fmt(owedTotal)}</div>
@@ -1148,9 +1082,7 @@ function renderOverview() {
   if (!notesEl) return;
 
   const allNotes = Array.isArray(state.dashboardNotes) ? state.dashboardNotes : [];
-  const notes = allNotes
-    .filter(note => note.audience !== 'admin' || currentUser?.isAdmin)
-    .sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || String(b.date || '').localeCompare(String(a.date || '')) || String(b.id || '').localeCompare(String(a.id || '')));
+  const notes = V2_OVERVIEW.visibleDashboardNotes(allNotes, { userId: currentUser?.id, isAdmin: currentUser?.isAdmin });
   const openNotes = notes.filter(note => !note.done).length;
   const countEl = document.getElementById('overviewNoteCount');
   if (countEl) countEl.textContent = notes.length ? `${openNotes} open` : '';
@@ -1333,17 +1265,16 @@ function toggleSummaryOwedInclude(category) {
 function renderEmpSummary() {
   const el = document.getElementById('empSummaryCards');
   if (!el || !currentUser || currentUser.isAdmin) return;
-  const myId     = currentUser.id;
-  const active   = state.jobs.filter(j => j.status !== 'complete' && j.employeeId === myId);
-  const activeHW = (state.homewatch||[]).filter(hw => hw.status !== 'paused' && hw.employeeId === myId);
-  const pausedHW = (state.homewatch||[]).filter(hw => hw.status === 'paused' && hw.employeeId === myId);
-  const allHW    = (state.homewatch||[]).filter(hw => hw.employeeId === myId);
-
-  // Employee pay is based on completed work, regardless of whether the client has paid yet.
-  let tOwed = 0;
-  active.forEach(j => { tOwed += calcJob(j).potentialEmpBalance; });
-  allHW.forEach(hw => { tOwed += calcHW(hw).potentialEmpBalance; });
-  tOwed = _roundMoney(tOwed);
+  const myId = currentUser.id;
+  const overview = V2_OVERVIEW.employeeOverviewSummary({
+    jobs: state.jobs,
+    homewatch: state.homewatch || [],
+    employeeId: myId,
+    calcJob,
+    calcHW,
+    roundMoney: _roundMoney
+  });
+  const { activeJobs: active, activeHomewatch: activeHW, pausedHomewatch: pausedHW, potentialOwed: tOwed } = overview;
 
   const tRecentPay = _recentEmployeePay(myId, empSummaryTimeframe);
   const tfOpts = _recentPayTimeframeOptions(empSummaryTimeframe);
@@ -1419,6 +1350,7 @@ function jobIconSvg(kind) {
     time: '<i class="ph ph-clock" aria-hidden="true"></i>',
     chart: '<i class="ph ph-chart-bar" aria-hidden="true"></i>',
     trash: '<i class="ph ph-trash" aria-hidden="true"></i>',
+    lock: '<i class="ph ph-lock-key" aria-hidden="true"></i>',
     menu: '<i class="ph ph-list" aria-hidden="true"></i>',
     close: '<i class="ph ph-x" aria-hidden="true"></i>'
   };
@@ -1440,6 +1372,7 @@ function jobContactLineHtml(job, contactClient) {
 
 function jobCard(job) {
   const c = calcJob(job);
+  const historicalReadOnly = _isHistoricalJob(job);
   const isHourly = _jobType(job) === 'hourly';
   const jobClient = job.clientId ? clientById(job.clientId) : clientByName(job.name);
   const contactClient = job.contactClientId ? clientById(job.contactClientId) : clientByName(job.contactName);
@@ -1466,11 +1399,11 @@ function jobCard(job) {
   const employeePayIncluded = _jobWorkCompleted(job);
   const payStatusLabel = employeePayIncluded ? 'Adding to employee pay' : 'Employee pay on hold';
   const payStatusClass = employeePayIncluded ? '' : ' on-hold';
-  const workHoldHtml = currentUser?.isAdmin && job.status !== 'complete'
+  const workHoldHtml = currentUser?.isAdmin && !historicalReadOnly && job.status !== 'complete'
     ? `<button type="button" class="job-pay-status${payStatusClass}" onclick="event.stopPropagation();toggleJobWorkCompleted('${job.id}')" title="Toggle whether this job contributes to employee pay" aria-pressed="${employeePayIncluded ? 'true' : 'false'}">${payStatusLabel}</button>`
     : `<span class="job-pay-status${payStatusClass}" style="cursor:default">${payStatusLabel}</span>`;
   return `
-  <div class="job-card ${sc} ${isExp?'expanded':''} ${billingClass}" id="job_${job.id}" onclick="toggleCardMobile(event, 'job', '${job.id}')">
+  <div class="job-card ${sc} ${isExp?'expanded':''} ${billingClass}${historicalReadOnly ? ' historical-read-only' : ''}" id="job_${job.id}" onclick="toggleCardMobile(event, 'job', '${job.id}')">
     <div class="job-header" onclick="toggleHeaderRow(event, 'job', '${job.id}')">
       ${jobEmpName ? `<div class="job-emp-rail">${esc(jobEmpName)}</div>` : '<div class="job-emp-rail"></div>'}
       <div class="job-header-main job-header-main-grid">
@@ -1510,7 +1443,9 @@ function jobCard(job) {
           ${jobIconButton({ title: job.isItemized ? 'View estimate snapshot' : 'Estimate snapshot unavailable', icon:'estimate', onclick:`openQuoteSnapshot('${job.id}')`, accent: !!job.isItemized, disabled: !job.isItemized })}
           ${jobIconButton({ title:'Notes', icon:'notes', onclick:`openNotes(&quot;job&quot;,&quot;${job.id}&quot;)`, accent: nc > 0 })}
           ${currentUser?.isAdmin
-            ? jobIconButton({ title:'Edit job', icon:'edit', onclick:`editJob(&quot;${job.id}&quot;)`, accent: true })
+            ? historicalReadOnly
+              ? jobIconButton({ title:'Historical record (read-only)', icon:'lock', disabled: true })
+              : jobIconButton({ title:'Edit job', icon:'edit', onclick:`editJob(&quot;${job.id}&quot;)`, accent: true })
             : jobIconButton({ title:'Hi', icon:'smile', disabled: true })}
           ${jobIconButton({ title:'Hours', icon:'hours', onclick:`openHours(&quot;${job.id}&quot;)`, accent: th > 0 })}
         </div>
@@ -1520,68 +1455,18 @@ function jobCard(job) {
   </div>`;
 }
 
-function _billingBucket(status, item) {
-  const s = status || item?.status || 'pending';
-  if (s === 'collected' || item?.billingState === 'paid') return 'paid';
-  if (s === 'invoiced' || item?.squareInvoiceId || item?.hourlySquareInvoiceId) return 'invoiced';
-  return 'pending';
-}
-
-function _addBillingRow(summary, status, amount, item = null) {
-  const amt = _roundMoney(amount);
-  if (Math.abs(amt) < 0.005) return;
-  const bucket = _billingBucket(status, item);
-  summary[bucket].count += 1;
-  summary[bucket].total = _roundMoney(summary[bucket].total + amt);
-}
-
 function getJobBillingSummary(job, calc = null) {
-  const summary = {
-    pending: { count: 0, total: 0 },
-    invoiced: { count: 0, total: 0 },
-    paid: { count: 0, total: 0 }
-  };
-  const c = calc || calcJob(job);
-  if (_jobType(job) === 'hourly') {
-    _addBillingRow(summary, job.hourlyStatus || 'pending', c.contractTotal || 0, {
-      status: job.hourlyStatus || 'pending',
-      squareInvoiceId: job.hourlySquareInvoiceId || ''
-    });
-    return summary;
-  }
-  (job.milestones || []).forEach(m => {
-    _addBillingRow(summary, m.status || 'pending', _milestoneAmount(job, m), m);
-  });
-  (job.revenueItems || []).forEach(r => {
-    _addBillingRow(summary, r.status || 'pending', Number(r.amount || 0), r);
-  });
-  (job.addOns || []).forEach(a => {
-    _addBillingRow(summary, a.status || 'pending', a.amount || 0, a);
-  });
-  (job.subtractions || []).forEach(s => {
-    _addBillingRow(summary, s.status || 'pending', -(s.amount || 0), s);
-  });
-  return summary;
+  return V2_BILLING.getJobBillingSummary(job, calc || calcJob(job));
 }
 
 function _jobBillingEntries(job) {
-  if (!job) return [];
-  if (_jobType(job) === 'hourly') {
-    const amount = calcJob(job).contractTotal || 0;
-    return Math.abs(Number(amount)) >= 0.005 ? [{ item: job, hourly: true, amount }] : [];
-  }
-  return [
-    ...(job.milestones || []).map(item => ({ item, amount: _milestoneAmount(job, item) })),
-    ...(job.revenueItems || []).map(item => ({ item, amount: Number(item.amount || 0) })),
-    ...(job.addOns || []).map(item => ({ item, amount: Number(item.amount || 0) })),
-    ...(job.subtractions || []).map(item => ({ item, amount: -Number(item.amount || 0) }))
-  ].filter(entry => Math.abs(Number(entry.amount || 0)) >= 0.005);
+  return V2_BILLING.jobBillingEntries(job, calcJob(job));
 }
 
 function setAllBillingStatus(jobId, status) {
   if (!currentUser?.isAdmin || !['pending', 'invoiced', 'collected'].includes(status)) return;
   const job = state.jobs.find(j => j.id === jobId);
-  if (!job) return;
+  if (!job || _historicalMutationBlocked(job)) return;
   _jobBillingEntries(job).forEach(({ item, hourly }) => {
     if (hourly) {
       job.hourlyStatus = status;
@@ -1611,9 +1496,10 @@ function jobBillingSummaryHtml(job, calc = null) {
       const lineLabel = s.count === 1 ? 'line' : 'lines';
       return `<span class="job-billing-pill ${cfg[k].cls}" title="${label}: ${s.count} ${lineLabel}"><strong>${s.count}</strong><span>${label}</span></span>`;
     });
-  const canComplete = currentUser?.isAdmin && job.status !== 'complete'
+  const editable = currentUser?.isAdmin && !_isHistoricalJob(job);
+  const canComplete = editable && job.status !== 'complete'
     && _jobWorkCompleted(job) && c.outstanding <= 0.005 && c.potentialEmpBalance <= 0.005;
-  const bulkAction = currentUser?.isAdmin
+  const bulkAction = editable
     ? `<details class="job-billing-menu" onclick="event.stopPropagation();closeOtherJobPopovers('billing')">
         <summary class="job-billing-action" title="Set every invoiceable line to one status">Set all</summary>
         <div class="job-billing-menu-popover" role="menu" aria-label="Set all billing statuses">
@@ -1685,8 +1571,8 @@ function badgeHtml(status, jobId, itemType, idx) {
   const { cls } = cfg[status] || cfg.pending;
   let label = (cfg[status] || cfg.pending).label;
   if (itemType === 'subtractions' && status === 'collected') label = 'Applied';
-  const admin = currentUser?.isAdmin;
   const job = state.jobs.find(j => j.id === jobId);
+  const admin = currentUser?.isAdmin && !_isHistoricalJob(job);
   const item = job?.[itemType]?.[idx];
   const locked = itemType === 'subtractions' && !!item?.appliedByPartial;
   const title = locked ? 'Locked: applied via partial payment' : 'Click to cycle';
@@ -1705,7 +1591,8 @@ function payTypeBadgeHtml(payType, jobId, idx) {
     'tip':       { cls:'badge-collected', label:'Tip' }
   };
   const { cls, label } = cfg[payType] || cfg[''];
-  const admin = currentUser?.isAdmin;
+  const job = state.jobs.find(j => j.id === jobId);
+  const admin = currentUser?.isAdmin && !_isHistoricalJob(job);
   return `<span class="status-badge ${cls}"${admin ? ` onclick="cyclePayType('${jobId}',${idx})" title="Click to cycle type"` : ''}>${label}</span>`;
 }
 function toggleHeaderMobile(event, type, id) {
@@ -2447,123 +2334,16 @@ function deleteDebtPayment(id) {
 }
 
 function _collectAdvanceRows() {
-  const out = [];
-  (state.jobs || []).forEach(j => {
-    (j.advances || []).forEach(a => {
-      out.push({
-        sourceKind: 'job',
-        sourceId: j.id,
-        sourceName: j.name || 'Job',
-        employeeId: j.employeeId || '',
-        advance: a || {}
-      });
-    });
-  });
-  (state.homewatch || []).forEach(hw => {
-    (hw.advances || []).forEach(a => {
-      out.push({
-        sourceKind: 'hw',
-        sourceId: hw.id,
-        sourceName: hw.name || 'HomeWatch',
-        employeeId: hw.employeeId || '',
-        advance: a || {}
-      });
-    });
-  });
-  return out;
+  return V2_EMPLOYEE_LEDGER.collectAdvanceRows(state);
 }
 function _buildLedgerFromStoredEvents() {
-  const rows = [];
-  const byEventId = {};
-  (state.splitPayments || []).forEach(e => { if (e?.id) byEventId[e.id] = e; });
-  (state.splitPayments || []).forEach(e => {
-    const linkedAdvances = _collectAdvanceRows().filter(({ advance }) => String(advance.splitEventId || '') === String(e.id));
-    const storedAllocations = e.allocations || [];
-    // New events carry advance IDs, so an event whose linked advances were
-    // deleted should disappear from the displayed ledger instead of becoming
-    // a ghost. Older events are kept as-is for backward compatibility.
-    const hasStoredAdvanceIds = storedAllocations.some(a => a?.advanceId);
-    if (!linkedAdvances.length && hasStoredAdvanceIds) return;
-    const allocations = linkedAdvances.length
-      ? linkedAdvances.map(({ sourceKind, sourceId, sourceName, advance }) => ({
-        sourceKind,
-        sourceId,
-        sourceName,
-        amount: Number(advance.amount || 0),
-        payType: advance.payType || '',
-        advanceId: advance.id || ''
-      }))
-      : storedAllocations.map(a => ({
-        sourceKind: a.sourceKind || '',
-        sourceId: a.sourceId || '',
-        sourceName: a.sourceName || '',
-        amount: Number(a.amount || 0),
-        payType: a.payType || '',
-        advanceId: a.advanceId || ''
-      }));
-    const total = linkedAdvances.length
-      ? allocations.reduce((sum, allocation) => sum + Number(allocation.amount || 0), 0)
-      : Number(e.total || 0);
-    rows.push({
-      id: `stored:${e.id}`,
-      source: 'stored',
-      date: e.date || '',
-      label: e.label || 'Split payment',
-      mode: e.mode || 'split',
-      employeeId: e.employeeId || '',
-      total,
-      allocations
-    });
-  });
-  return { rows, byEventId };
+  return V2_EMPLOYEE_LEDGER.buildLedgerFromStoredEvents(state);
 }
 function _buildLedgerFromLegacy(byEventId = {}) {
-  const groups = {};
-  _collectAdvanceRows().forEach(({ sourceKind, sourceId, sourceName, employeeId, advance }) => {
-    const splitEventId = (advance.splitEventId || '').trim();
-    if (splitEventId && byEventId[splitEventId]) return;
-    const amount = Number(advance.amount || 0);
-    if (Math.abs(amount) <= 0.005) return;
-    const label = (advance.label || '').trim();
-    const date = (advance.date || '').trim();
-    if (!label) return;
-    const key = `${date}||${label}`;
-    if (!groups[key]) groups[key] = { date, label, allocations: [], employeeIds: new Set() };
-    groups[key].allocations.push({ sourceKind, sourceId, sourceName, amount, payType: advance.payType || '' });
-    if (employeeId) groups[key].employeeIds.add(employeeId);
-  });
-  const out = [];
-  Object.keys(groups).forEach(key => {
-    const g = groups[key];
-    const isLikelySplit = g.allocations.length > 1 || /^(split payment|pay out)/i.test(g.label);
-    if (!isLikelySplit) return;
-    const total = g.allocations.reduce((s, a) => s + Number(a.amount || 0), 0);
-    const mode = /\(potential\)/i.test(g.label) ? 'potential' : 'split';
-    const employeeId = g.employeeIds.size === 1 ? [...g.employeeIds][0] : '';
-    out.push({
-      id: `legacy:${key}`,
-      source: 'legacy',
-      date: g.date,
-      label: g.label,
-      mode,
-      employeeId,
-      total,
-      allocations: g.allocations
-    });
-  });
-  return out;
+  return V2_EMPLOYEE_LEDGER.buildLedgerFromLegacy(state, byEventId);
 }
 function _getSplitLedgerEntries() {
-  const { rows: storedRows, byEventId } = _buildLedgerFromStoredEvents();
-  const legacyRows = _buildLedgerFromLegacy(byEventId);
-  const all = [...storedRows, ...legacyRows];
-  all.sort((a, b) => {
-    const da = a.date || '';
-    const db = b.date || '';
-    if (da === db) return (a.label || '').localeCompare(b.label || '');
-    return db.localeCompare(da);
-  });
-  return all;
+  return V2_EMPLOYEE_LEDGER.getLedgerEntries(state);
 }
 function openSplitLedger() {
   renderSplitLedger();
@@ -2639,24 +2419,17 @@ function renderSplitLedger() {
 // splitPayments field remains as the storage name for compatibility with
 // historical ledger entries and migration reconstruction.
 function _buildEmployeePaymentRows(employeeId) {
-  if (!employeeId) return [];
-  const rows = [];
-  state.jobs.filter(j => j.employeeId === employeeId).forEach(j => {
-    const c = calcJob(j);
-    rows.push({ id: 'sp_job_' + j.id, label: j.name || 'Job', kind: 'job', currentBalance: Number(c.empBalance || 0), potentialBalance: Number(c.potentialEmpBalance || 0) });
+  return V2_EMPLOYEE_PAYMENT.buildPaymentRows({
+    jobs: state.jobs,
+    homewatch: state.homewatch || [],
+    employeeId,
+    isHistoricalJob: _isHistoricalJob,
+    calcJob,
+    calcHW
   });
-  (state.homewatch || []).filter(hw => hw.employeeId === employeeId).forEach(hw => {
-    const c = calcHW(hw);
-    rows.push({ id: 'sp_hw_' + hw.id, label: hw.name || 'Recurring Service', kind: 'hw', currentBalance: Number(c.empBalance || 0), potentialBalance: Number(c.potentialEmpBalance || 0) });
-  });
-  return rows;
 }
 function _calcEmployeePaymentPlan(employeeId) {
-  const rows = _buildEmployeePaymentRows(employeeId).map(row => ({
-    ...row,
-    payoutTarget: _roundMoney(row.potentialBalance)
-  }));
-  return { rows, payoutTotal: _roundMoney(rows.reduce((sum, row) => sum + row.payoutTarget, 0)) };
+  return V2_EMPLOYEE_PAYMENT.paymentPlan(_buildEmployeePaymentRows(employeeId), _roundMoney);
 }
 function _employeePaymentOptions(selectedId) {
   return state.users
@@ -2691,6 +2464,7 @@ function openEmployeePaymentForSource(sourceKind, sourceId) {
     ? (state.homewatch || []).find(item => item.id === sourceId)
     : state.jobs.find(item => item.id === sourceId);
   if (!source) return;
+  if (sourceKind === 'job' && _historicalMutationBlocked(source)) return;
   const employeeId = source.employeeId || state.users.find(user => !user.isAdmin)?.id || '';
   openEmployeePayment({
     mode: 'source',
@@ -2797,7 +2571,7 @@ function clearSplitPayTotal() {
   updateSplitTotals();
 }
 function renderSplitPayAlloc() {
-  const activeJobs = state.jobs.filter(j => (!splitPayEmployeeId || j.employeeId === splitPayEmployeeId) && j.status !== 'complete' && (!splitPaySource || (splitPaySource.kind === 'job' && j.id === splitPaySource.id)));
+  const activeJobs = state.jobs.filter(j => !_isHistoricalJob(j) && (!splitPayEmployeeId || j.employeeId === splitPayEmployeeId) && j.status !== 'complete' && (!splitPaySource || (splitPaySource.kind === 'job' && j.id === splitPaySource.id)));
   const activeHW   = (state.homewatch || []).filter(hw => (!splitPayEmployeeId || hw.employeeId === splitPayEmployeeId) && hw.status !== 'paused' && (!splitPaySource || (splitPaySource.kind === 'hw' && hw.id === splitPaySource.id)));
   const allocEl    = document.getElementById('sp_allocList');
   const selectedSource = splitPaySource || null;
@@ -2926,15 +2700,7 @@ function updateSplitTotals() {
     <span>Remaining <strong style="color:${remColor}">${fmt(remaining)}</strong></span>`;
 }
 function _splitEmployeePaymentAllocation(amount, owed, payType) {
-  const payment = Number(amount || 0);
-  const balance = Math.max(0, Number(owed || 0));
-  if (payment > balance + 0.005 && balance > 0.005 && payType !== 'adjustment') {
-    return [
-      { amount: _roundMoney(balance), payType: payType === 'final' ? 'final' : '' },
-      { amount: _roundMoney(payment - balance), payType: 'advance' }
-    ];
-  }
-  return [{ amount: payment, payType }];
+  return V2_EMPLOYEE_PAYMENT.splitAllocation(amount, owed, payType, _roundMoney);
 }
 async function saveSplitPay() {
   const total   = parseFloat(document.getElementById('sp_total').value) || 0;
@@ -3143,6 +2909,7 @@ function _applyPartialPreset(ctx, preset) {
 function openPartialCollect(jobId, preset = null) {
   if (!currentUser?.isAdmin) return;
   const job = state.jobs.find(item => item.id === jobId);
+  if (_historicalMutationBlocked(job)) return;
   if (!V2_LEGACY_PARTIAL.allowsCurrentPartialCollection(job)) {
     showAlert('This historical job uses an older partial-payment format and is preserved as read-only.');
     return;
@@ -3493,6 +3260,11 @@ function savePartialCollect() {
   }
   const job = state.jobs.find(j => j.id === partialCollectCtx.jobId);
   if (!job) return;
+  if (_historicalMutationBlocked(job)) {
+    partialCollectCtx = null;
+    closeModal('partialCollectModal');
+    return;
+  }
   if (!V2_LEGACY_PARTIAL.allowsCurrentPartialCollection(job)) {
     showAlert('This historical job uses an older partial-payment format and is preserved as read-only.');
     partialCollectCtx = null;
@@ -3600,7 +3372,7 @@ function savePartialCollect() {
 
 function deletePartialCollection(jobId, partialId) {
   const job = state.jobs.find(j => j.id === jobId);
-  if (!job) return;
+  if (!job || _historicalMutationBlocked(job)) return;
   const arr = job.partialCollections || [];
   const idx = arr.findIndex(p => p.id === partialId);
   if (idx < 0) return;
@@ -3624,7 +3396,7 @@ function deletePartialCollection(jobId, partialId) {
 
 function editPartialCollection(jobId, partialId) {
   const job = state.jobs.find(j => j.id === jobId);
-  if (!job) return;
+  if (!job || _historicalMutationBlocked(job)) return;
   const arr = job.partialCollections || [];
   const idx = arr.findIndex(p => p.id === partialId);
   if (idx < 0) return;
@@ -3656,7 +3428,7 @@ function editPartialCollection(jobId, partialId) {
 
 function toggleRepayment(id) {
   const j = state.jobs.find(j=>j.id===id);
-  if (!j || !V2_DEBT.canToggleRepayment(j, state.settings)) return;
+  if (!j || _historicalMutationBlocked(j) || !V2_DEBT.canToggleRepayment(j, state.settings)) return;
   j.repaymentMode = !j.repaymentMode;
   save(); renderJobs();
 }
@@ -3671,7 +3443,7 @@ function toggleJob(id) {
 }
 function cycleStatus(jobId, itemType, idx) {
   const job = state.jobs.find(j=>j.id===jobId);
-  if (!job||!job[itemType]||!job[itemType][idx]) return;
+  if (!job || _historicalMutationBlocked(job) || !job[itemType] || !job[itemType][idx]) return;
   const item = job[itemType][idx];
   if (itemType === 'subtractions' && item.appliedByPartial) {
     showAlert('This subtraction was applied by a partial payment and is locked from manual status changes.');
@@ -3696,7 +3468,7 @@ function cycleStatus(jobId, itemType, idx) {
 }
 function cycleHourlyStatus(jobId) {
   const job = state.jobs.find(j=>j.id===jobId);
-  if (!job || _jobType(job) !== 'hourly') return;
+  if (!job || _historicalMutationBlocked(job) || _jobType(job) !== 'hourly') return;
   const curr = job.hourlyStatus || 'pending';
   const cycle = { pending:'invoiced', invoiced:'collected', collected:'pending' };
   const doIt = () => {
@@ -3712,7 +3484,7 @@ function cycleHourlyStatus(jobId) {
 }
 function toggleComplete(id) {
   const j = state.jobs.find(j=>j.id===id);
-  if (!j) return;
+  if (!j || _historicalMutationBlocked(j)) return;
   if (j.status === 'complete') {
     j.status = 'active';
   } else {
@@ -3729,14 +3501,14 @@ function toggleComplete(id) {
 function toggleJobWorkCompleted(id) {
   if (!currentUser?.isAdmin) return;
   const job = state.jobs.find(j => j.id === id);
-  if (!job || job.status === 'complete') return;
+  if (!job || _historicalMutationBlocked(job) || job.status === 'complete') return;
   job.workCompleted = !_jobWorkCompleted(job);
   save();
   renderJobs();
 }
 function completeJob(id) {
   const job = state.jobs.find(j => j.id === id);
-  if (!currentUser?.isAdmin || !job || job.status === 'complete') return;
+  if (!currentUser?.isAdmin || !job || _historicalMutationBlocked(job) || job.status === 'complete') return;
   const c = calcJob(job);
   if (!_jobWorkCompleted(job) || c.outstanding > 0.005 || c.potentialEmpBalance > 0.005) {
     showAlert('This job can only be completed when the work, client balance, and employee pay due are all complete.');
@@ -3747,13 +3519,15 @@ function completeJob(id) {
   renderJobs();
 }
 function deleteJob(id) {
+  const job = state.jobs.find(j => j.id === id);
+  if (!job || _historicalMutationBlocked(job)) return;
   showConfirm('Delete this job? This cannot be undone.', () => {
     state.jobs = state.jobs.filter(j=>j.id!==id); save(); renderJobs();
   });
 }
 function removeItem(jobId, key, idx) {
   const j = state.jobs.find(j=>j.id===jobId);
-  if (!j || !j[key]) return;
+  if (!j || _historicalMutationBlocked(j) || !j[key]) return;
   const item = j[key][idx];
   if (key === 'subtractions' && item?.appliedByPartial) {
     showAlert('This subtraction was applied by a partial payment and cannot be deleted.');
@@ -3796,16 +3570,17 @@ function renderNotesList() {
   const entity = _notesEntity();
   if (!entity) return;
   const key = _notesKey();
+  const readOnly = notesCtx?.type === 'job' && _isHistoricalJob(entity);
   const notes = (entity[key]||[]).slice().reverse();
   document.getElementById('notesList').innerHTML = notes.length
     ? notes.map(n=>`
       <div class="note-item">
         <div class="note-meta">
           <span class="note-date-label">${fmtDate(n.date)||n.date||'-'}</span>
-          <div class="note-actions">
+          ${readOnly ? '<span style="font-family:var(--mono);font-size:11px;color:var(--text3)">Historical read-only</span>' : `<div class="note-actions">
             <button class="btn btn-ghost btn-sm job-icon-btn" onclick="openEditNote('${n.id}')" title="Edit note" aria-label="Edit note">${jobIconSvg('edit')}</button>
             <button class="btn btn-danger btn-sm btn-icon-only" onclick="deleteNote('${n.id}')" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>
-          </div>
+          </div>`}
         </div>
         <div class="note-text">${esc(n.text)}</div>
       </div>`).join('')
@@ -3817,6 +3592,7 @@ function saveNote() {
   if (!text) { showAlert('Please enter a note.'); return; }
   const entity = _notesEntity();
   if (!entity) return;
+  if (notesCtx?.type === 'job' && _historicalMutationBlocked(entity)) return;
   const key = _notesKey();
   if (!entity[key]) entity[key]=[];
   entity[key].push({ id:uid(), text, date });
@@ -3827,6 +3603,7 @@ function deleteNote(noteId) {
   showConfirm('Delete this note?', () => {
     const entity = _notesEntity();
     if (!entity) return;
+    if (notesCtx?.type === 'job' && _historicalMutationBlocked(entity)) return;
     const key = _notesKey();
     entity[key] = (entity[key]||[]).filter(n=>n.id!==noteId);
     save(); renderNotesList(); _notesRender();
@@ -3835,6 +3612,7 @@ function deleteNote(noteId) {
 function openEditNote(noteId) {
   const entity = _notesEntity();
   if (!entity) return;
+  if (notesCtx?.type === 'job' && _historicalMutationBlocked(entity)) return;
   const key = _notesKey();
   const note = (entity[key]||[]).find(n=>n.id===noteId);
   if (!note) return;
@@ -3848,6 +3626,7 @@ function saveEditNote() {
   const { noteId } = editNoteCtx;
   const entity = _notesEntity();
   if (!entity) return;
+  if (notesCtx?.type === 'job' && _historicalMutationBlocked(entity)) return;
   const key = _notesKey();
   const note = (entity[key]||[]).find(n=>n.id===noteId);
   if (!note) return;
@@ -3861,6 +3640,7 @@ function openHours(jobId) {
   hoursJobId = jobId;
   const job = state.jobs.find(j=>j.id===jobId);
   if (!job) return;
+  if (_historicalMutationBlocked(job)) return;
   document.getElementById('hoursModalTitle').textContent = `Hours - ${job.name}`;
   document.getElementById('h_date').value  = today();
   document.getElementById('h_hours').value = '';
@@ -3870,7 +3650,7 @@ function openHours(jobId) {
 }
 function renderHoursList() {
   const job = state.jobs.find(j=>j.id===hoursJobId);
-  if (!job) return;
+  if (!job || _historicalMutationBlocked(job)) return;
   const hours = job.hours||[];
   const total = hours.reduce((s,h)=>s+(h.hours||0),0);
   document.getElementById('hoursTotalBar').innerHTML = `
@@ -3899,7 +3679,7 @@ function saveHours() {
   const note  = document.getElementById('h_note').value.trim();
   if (!hours||hours<=0) { showAlert('Please enter a valid number of hours.'); return; }
   const job = state.jobs.find(j=>j.id===hoursJobId);
-  if (!job) return;
+  if (!job || _historicalMutationBlocked(job)) return;
   if (!job.hours) job.hours=[];
   job.hours.push({ id:uid(), date, hours, note });
   save(); document.getElementById('h_hours').value=''; document.getElementById('h_note').value=''; document.getElementById('h_date').value=today();
@@ -3907,14 +3687,12 @@ function saveHours() {
 }
 function deleteHoursEntry(hId) {
   const job = state.jobs.find(j=>j.id===hoursJobId);
-  if (!job) return;
+  if (!job || _historicalMutationBlocked(job)) return;
   job.hours = (job.hours||[]).filter(h=>h.id!==hId);
   save(); renderHoursList(); renderJobs();
 }
 
-// ─── JOB MODAL ────────────────────────────────────────────────────────────────
-let milestoneCount = 0;
-let quoteItemCount = 0;
+// ─── JOB WORKFLOW SUPPORT ────────────────────────────────────────────────────
 function populateEmpDropdown(selectId, wrapId, currentEmpId) {
   const emps = state.users.filter(u => !u.isAdmin);
   const wrap = document.getElementById(wrapId);
@@ -3925,227 +3703,16 @@ function populateEmpDropdown(selectId, wrapId, currentEmpId) {
     `<option value="${u.id}"${u.id === currentEmpId ? ' selected' : ''}>${esc(u.name)}</option>`
   ).join('');
 }
-let milestoneMode = 'single';
-let milestoneValueMode = 'percent';
 let defaultMilestoneValueMode = 'percent';
-let jobWorkCompleted = true;
-let jobTypeMode = 'quoted';
-let jobSetupMode = 'unified';
-function refreshJobSetupButtons() {
-  ['unified', 'itemized', 'hourly'].forEach(mode => {
-    const btn = document.getElementById(`js_mode_${mode}`);
-    if (!btn) return;
-    btn.className = `btn ${jobSetupMode === mode ? 'btn-primary selected' : 'btn-ghost'} btn-sm user-pick-btn`;
-  });
-}
-function setJobType(type) {
-  jobTypeMode = type === 'hourly' ? 'hourly' : 'quoted';
-  const typeEl = document.getElementById('f_jobType');
-  if (typeEl && typeEl.value !== jobTypeMode) typeEl.value = jobTypeMode;
-  const quotedWrap = document.getElementById('jobQuotedFields');
-  const hourlyHint = document.getElementById('jobHourlyHint');
-  const hourlyRateWrap = document.getElementById('f_hourly_rate_wrap');
-  const hourlyLike = jobTypeMode === 'hourly' || jobTypeMode === 'hourly';
-  if (quotedWrap) quotedWrap.style.display = hourlyLike ? 'none' : '';
-  if (hourlyHint) hourlyHint.style.display = hourlyLike ? '' : 'none';
-  if (hourlyRateWrap) hourlyRateWrap.style.display = hourlyLike ? '' : 'none';
-}
-function setJobSetupMode(mode) {
-  jobSetupMode = mode === 'itemized' ? 'itemized' : mode === 'hourly' ? 'hourly' : 'unified';
-  const isHourly = jobSetupMode === 'hourly';
-  const itemized = jobSetupMode === 'itemized';
-  setJobType(isHourly ? 'hourly' : 'quoted');
-  const itemizedEl = document.getElementById('f_itemized');
-  if (itemizedEl) itemizedEl.checked = itemized;
-  toggleItemizedQuote();
-  refreshJobSetupButtons();
-}
-function setJobWorkStatus(completed) {
-  jobWorkCompleted = !!completed;
-  const completeBtn = document.getElementById('f_work_complete');
-  const progressBtn = document.getElementById('f_work_progress');
-  if (completeBtn) completeBtn.className = `btn ${jobWorkCompleted ? 'btn-primary' : 'btn-ghost'} btn-sm`;
-  if (progressBtn) progressBtn.className = `btn ${jobWorkCompleted ? 'btn-ghost' : 'btn-primary'} btn-sm`;
-  const hint = document.getElementById('f_workStatusHint');
-  if (hint) hint.textContent = jobWorkCompleted
-    ? 'This job contributes to employee pay totals.'
-    : 'Employee pay is on hold until you turn it back on.';
-}
-function onJobTypeChange() {
-  const type = document.getElementById('f_jobType')?.value || 'quoted';
-  if (type === 'hourly') setJobSetupMode('hourly');
-  else setJobSetupMode(document.getElementById('f_itemized')?.checked ? 'itemized' : 'unified');
-}
-function setMilestoneMode(mode) {
-  const dms = state.settings.defaultMilestones || [];
-  if (mode === 'default' && !dms.length) {
-    document.getElementById('milestoneHint').textContent = 'No defaults set - configure them in Settings > Jobs.';
-    document.getElementById('milestoneHint').style.display = '';
-    document.getElementById('milestoneEditor').style.display = 'none';
-    // keep single selected
-    mode = 'single';
-  }
-  milestoneMode = mode;
-  ['single','default','custom'].forEach(m => {
-    const btn = document.getElementById(`ms_btn_${m}`);
-    if (btn) btn.className = `btn ${m === mode ? 'btn-primary' : 'btn-ghost'} btn-sm`;
-  });
-  const editor = document.getElementById('milestoneEditor');
-  const hint   = document.getElementById('milestoneHint');
-  const valueToggle = document.getElementById('milestoneValueToggle');
-  if (mode === 'single') {
-    editor.style.display = 'none';
-    if (valueToggle) valueToggle.style.display = 'none';
-    hint.textContent = 'Full invoice - one payment to track.';
-    hint.style.display = '';
-    document.getElementById('milestoneList').innerHTML = '';
-    milestoneCount = 0;
-  } else {
-    editor.style.display = '';
-    if (valueToggle) valueToggle.style.display = 'flex';
-    hint.style.display = 'none';
-    document.getElementById('milestoneList').innerHTML = '';
-    milestoneCount = 0;
-    if (mode === 'default') {
-      const basis = state.settings.defaultMilestoneBasis === 'amount' ? 'amount' : 'percent';
-      setMilestoneValueMode(basis);
-      dms.forEach(m => addMilestoneField(m.label, basis === 'amount' ? m.amount : m.pct, basis));
-    } else {
-      addMilestoneField();
-    }
-  }
-}
-function setMilestoneValueMode(mode) {
-  milestoneValueMode = mode === 'amount' ? 'amount' : 'percent';
-  ['percent', 'amount'].forEach(value => {
-    const btn = document.getElementById(`ms_basis_${value}`);
-    if (btn) btn.className = `btn ${milestoneValueMode === value ? 'btn-primary' : 'btn-ghost'} btn-sm`;
-  });
-  document.querySelectorAll('#milestoneList [id^="mpct_"]').forEach(el => {
-    el.placeholder = milestoneValueMode === 'amount' ? '$0.00' : '0';
-  });
-  updateMilestonePreview();
-}
-function setMilestoneMax(id) {
-  const targetEl = document.getElementById(`mpct_${id}`);
-  if (!targetEl) return;
-  const quote = document.getElementById('f_itemized')?.checked
-    ? [...document.querySelectorAll('[id^="qiamt_"]')].reduce((sum, el) => sum + (parseFloat(el.value) || 0), 0)
-    : (parseFloat(document.getElementById('f_quote')?.value) || 0);
-  const target = milestoneValueMode === 'amount'
-    ? quote
-    : 100;
-  let used = 0;
-  document.querySelectorAll('#milestoneList [id^="mpct_"]').forEach(el => {
-    if (el !== targetEl) used += parseFloat(el.value) || 0;
-  });
-  targetEl.value = String(Math.max(0, target - used).toFixed(2));
-  updateMilestonePreview();
-}
-function setJobFinancialEditLock(locked) {
-  const note = document.getElementById('jobFinancialLockNote');
-  if (note) note.style.display = locked ? '' : 'none';
-
-  const ids = ['f_jobType', 'f_hourlyRate', 'f_itemized', 'f_quote', 'quoteAddItemBtn', 'ms_btn_single', 'ms_btn_default', 'ms_btn_custom', 'milestoneAddBtn', 'js_mode_unified', 'js_mode_itemized', 'js_mode_hourly'];
-  ids.forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.disabled = !!locked;
-  });
-
-  const lockRegion = document.getElementById('jobFinancialLockRegion');
-  if (lockRegion) {
-    lockRegion.style.opacity = locked ? '0.5' : '1';
-    lockRegion.style.filter = locked ? 'grayscale(0.2)' : 'none';
-  }
-
-  document.querySelectorAll('#quoteItemList input, #quoteItemList button').forEach(el => {
-    el.disabled = !!locked;
-  });
-  document.querySelectorAll('#milestoneList input, #milestoneList button').forEach(el => {
-    el.disabled = !!locked;
-  });
-  document.querySelectorAll('#milestoneValueToggle button').forEach(el => { el.disabled = !!locked; });
-}
-
-function openNewJobModal() {
-  editingJobId = null;
-  document.getElementById('jobModalTitle').textContent = 'New Job';
-  document.getElementById('f_name').value    = '';
-  document.getElementById('f_contact').value = '';
-  document.getElementById('f_quote').value   = '';
-  document.getElementById('f_hourlyRate').value = '';
-  document.getElementById('f_date').value    = today();
-  document.getElementById('f_itemized').checked = false;
-  document.getElementById('f_jobType').value = 'quoted';
-  setJobWorkStatus(true);
-  document.getElementById('quoteItemList').innerHTML = '';
-  quoteItemCount = 0;
-  setMilestoneValueMode('percent');
-  setJobSetupMode('unified');
-  setMilestoneMode('single');
-  populateEmpDropdown('f_emp', 'f_emp_wrap', null);
-  setJobFinancialEditLock(false);
-  document.getElementById('jobModal').classList.remove('hidden');
-}
 function editJob(id) {
   const job = state.jobs.find(j=>j.id===id);
   if (!job) return;
+  if (_historicalMutationBlocked(job)) return;
   if (job.createdVia === 'unified-v2') {
     openUnifiedJobModal(id);
     return;
   }
-  const jobType = _jobType(job);
-  editingJobId = id;
-  document.getElementById('jobModalTitle').textContent = 'Edit Job';
-  document.getElementById('f_name').value    = job.name;
-  document.getElementById('f_contact').value = job.contactName || '';
-  document.getElementById('f_quote').value   = job.quote;
-  document.getElementById('f_hourlyRate').value = (job.hourlyRate || 0) > 0 ? Number(job.hourlyRate).toFixed(2) : '';
-  document.getElementById('f_date').value    = job.date||'';
-  document.getElementById('f_itemized').checked = job.isItemized||false;
-  document.getElementById('f_jobType').value = jobType;
-  setJobWorkStatus(_jobWorkCompleted(job));
-  document.getElementById('quoteItemList').innerHTML = '';
-  quoteItemCount = 0;
-  if (job.isItemized && job.quoteItems?.length) {
-    job.quoteItems.forEach(qi => addQuoteItemField(qi.label, qi.amount));
-  }
-  setJobSetupMode(jobType === 'hourly' ? 'hourly' : (job.isItemized ? 'itemized' : 'unified'));
-  milestoneValueMode = _milestoneBasis(job);
-  setMilestoneValueMode(milestoneValueMode);
-  if (jobType === 'hourly') {
-    milestoneMode = 'single';
-    document.getElementById('milestoneList').innerHTML = '';
-    milestoneCount = 0;
-  } else {
-    const isSingle = job.milestones?.length === 1 && (
-      milestoneValueMode === 'amount'
-        ? Math.abs(Number(job.milestones[0].amount || 0) - Number(job.quote || 0)) < 0.005
-        : Math.abs(Number(job.milestones[0].pct || 0) - 100) < 0.01
-    );
-    if (isSingle) {
-      setMilestoneMode('single');
-    } else {
-      milestoneMode = 'custom';
-      ['single','default','custom'].forEach(m => {
-        const btn = document.getElementById(`ms_btn_${m}`);
-        if (btn) btn.className = `btn ${m === 'custom' ? 'btn-primary' : 'btn-ghost'} btn-sm`;
-      });
-      document.getElementById('milestoneEditor').style.display = '';
-      document.getElementById('milestoneValueToggle').style.display = 'flex';
-      document.getElementById('milestoneHint').style.display = 'none';
-      document.getElementById('milestoneList').innerHTML = '';
-      milestoneCount = 0;
-      (job.milestones||[]).forEach(m => addMilestoneField(
-        m.label,
-        milestoneValueMode === 'amount' ? m.amount : m.pct,
-        milestoneValueMode
-      ));
-    }
-  }
-  populateEmpDropdown('f_emp', 'f_emp_wrap', job.employeeId);
-  setJobFinancialEditLock(hasPartialFinancialState(job));
-  document.getElementById('jobModal').classList.remove('hidden');
+  showAlert('This historical Tracker 1.0 record is read-only in Tracker 2.0.');
 }
 let dmCount = 0;
 function setDefaultMilestoneBasis(mode) {
@@ -4196,56 +3763,6 @@ function updateDmPreview() {
     ? `Total: ${total}%`
     : basis === 'amount' && total > 0 ? `Total: ${fmt(total)}` : '';
 }
-function addMilestoneField(label='', value='', basis = null) {
-  const valueMode = basis === 'amount' || basis === 'percent' ? basis : milestoneValueMode;
-  milestoneCount++;
-  const id = milestoneCount;
-  const div = document.createElement('div');
-  div.className = 'milestone-row'; div.id = `mrow_${id}`;
-  div.innerHTML = `
-    <input class="form-input" placeholder="Label" value="${label}" id="mlabel_${id}" style="flex:2" />
-    <input class="form-input" placeholder="${valueMode === 'amount' ? '$0.00' : '0'}" type="number" step="0.01" min="0" value="${value}" id="mpct_${id}" style="flex:1;max-width:110px" oninput="updateMilestonePreview()" />
-    <button type="button" class="btn btn-ghost btn-sm" onclick="setMilestoneMax(${id})">Max</button>
-    <button class="btn btn-danger btn-sm btn-icon-only" onclick="document.getElementById('mrow_${id}').remove();updateMilestonePreview()" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>`;
-  document.getElementById('milestoneList').appendChild(div);
-  updateMilestonePreview();
-}
-function updateMilestonePreview() {
-  let total=0;
-  document.querySelectorAll('[id^="mpct_"]').forEach(el=>{total+=parseFloat(el.value)||0;});
-  const err = document.getElementById('milestoneError');
-  const quote = parseFloat(document.getElementById('f_quote')?.value) || 0;
-  err.textContent = milestoneValueMode === 'percent'
-    ? ((Math.abs(total - 100) > 0.01 && total > 0) ? `Milestones total ${total}% - must equal 100%` : '')
-    : ((Math.abs(total - quote) > 0.01 && total > 0) ? `Milestones total ${fmt(total)} - must equal ${fmt(quote)}` : '');
-}
-function toggleItemizedQuote() {
-  const on = document.getElementById('f_itemized').checked;
-  document.getElementById('f_quote_wrap').style.display = on ? 'none' : '';
-  document.getElementById('f_items_wrap').style.display = on ? '' : 'none';
-  if (on && document.getElementById('quoteItemList').children.length === 0) {
-    addQuoteItemField();
-  }
-}
-function addQuoteItemField(label='', amount='') {
-  quoteItemCount++;
-  const id = quoteItemCount;
-  const div = document.createElement('div');
-  div.id = `qitem_${id}`;
-  div.style.cssText = 'display:flex;gap:8px;margin-bottom:8px;align-items:center';
-  div.innerHTML = `
-    <input class="form-input" placeholder="Description" value="${label}" id="qilabel_${id}" style="flex:2" />
-    <input class="form-input" placeholder="$0.00" type="number" step="0.01" value="${amount}" id="qiamt_${id}" style="flex:1;max-width:100px" oninput="updateQuoteItemTotal()" />
-    <button class="btn btn-danger btn-sm btn-icon-only" onclick="document.getElementById('qitem_${id}').remove();updateQuoteItemTotal()" title="Delete" aria-label="Delete">${jobIconSvg('trash')}</button>`;
-  document.getElementById('quoteItemList').appendChild(div);
-  updateQuoteItemTotal();
-}
-function updateQuoteItemTotal() {
-  let total = 0;
-  document.querySelectorAll('[id^="qiamt_"]').forEach(el => { total += parseFloat(el.value)||0; });
-  const el = document.getElementById('quoteItemTotal');
-  if (el) el.textContent = '$' + total.toFixed(2);
-}
 function hasPartialFinancialState(job) {
   if (!job) return false;
   if ((job.partialCollections || []).length) return true;
@@ -4255,130 +3772,6 @@ function hasPartialFinancialState(job) {
   if ((job.subtractions || []).some(s => s?.partialState || s?.appliedByPartial)) return true;
   return false;
 }
-function financialSignatureFromMilestones(list) {
-  return JSON.stringify((list || []).map(m => ({
-    label: String(m?.label || ''),
-    pct: Number(m?.pct || 0),
-    amount: _roundMoney(Number(m?.amount || 0))
-  })));
-}
-function financialSignatureFromQuoteItems(list) {
-  return JSON.stringify((list || []).map(q => ({ label: String(q?.label || ''), amount: _roundMoney(Number(q?.amount || 0)) })));
-}
-
-function saveJob() {
-  const name        = document.getElementById('f_name').value.trim();
-  const contactName = document.getElementById('f_contact').value.trim();
-  const date        = document.getElementById('f_date').value;
-  const selectedType = document.getElementById('f_jobType')?.value || 'quoted';
-  const jobType     = selectedType === 'hourly' ? 'hourly' : 'quoted';
-  const isHourly    = jobType === 'hourly';
-  const hourlyRate  = _roundMoney(parseFloat(document.getElementById('f_hourlyRate')?.value) || 0);
-  const isItemized  = !isHourly && document.getElementById('f_itemized').checked;
-  const milestoneBasis = !isHourly && milestoneValueMode === 'amount' ? 'amount' : 'percent';
-  if (!name) { showAlert('Please enter a client name.'); return; }
-  let quote = 0, quoteItems = [];
-  if (isHourly) {
-    quote = 0;
-    quoteItems = [];
-  } else if (isItemized) {
-    document.querySelectorAll('[id^="qiamt_"]').forEach((el, i) => {
-      const amt = parseFloat(el.value)||0;
-      const qId = el.id.slice('qiamt_'.length);
-      const lbl = document.getElementById(`qilabel_${qId}`)?.value.trim()||`Item ${i+1}`;
-      quoteItems.push({ id: uid(), label: lbl, amount: amt });
-    });
-    if (quoteItems.length === 0) { showAlert('Please add at least one line item.'); return; }
-    quote = quoteItems.reduce((s, qi) => s + (qi.amount||0), 0);
-  } else {
-    quote = parseFloat(document.getElementById('f_quote').value)||0;
-  }
-  const milestones=[]; let total=0;
-  if (isHourly) {
-    // Hourly jobs use revenue entries instead of quote milestones.
-  } else if (milestoneMode === 'single') {
-    const prevStatus = editingJobId
-      ? (state.jobs.find(j=>j.id===editingJobId)?.milestones?.[0]?.status || 'pending')
-      : 'pending';
-    milestones.push(milestoneBasis === 'amount'
-      ? { label:'Invoice', amount:_roundMoney(quote), status:prevStatus }
-      : { label:'Invoice', pct:100, status:prevStatus });
-  } else {
-    document.querySelectorAll('[id^="mpct_"]').forEach((el,i)=>{
-      const value = parseFloat(el.value)||0;
-      const mId = el.id.slice('mpct_'.length);
-      const lbl = document.getElementById(`mlabel_${mId}`)?.value||`Milestone ${i+1}`;
-      if (milestoneBasis === 'amount') {
-        milestones.push({ label:lbl, amount:_roundMoney(value), status:'pending' });
-      } else {
-        milestones.push({ label:lbl, pct:_roundPct(value), status:'pending' });
-      }
-      total += value;
-    });
-    const expected = milestoneBasis === 'amount' ? quote : 100;
-    if (milestones.length && Math.abs(total - expected) > 0.01) {
-      showAlert(milestoneBasis === 'amount'
-        ? `Milestone dollar amounts add up to ${fmt(total)}, not ${fmt(quote)}.`
-        : `Milestone percentages add up to ${total}%, not 100%.`);
-      return;
-    }
-  }
-  const isNew = !editingJobId;
-  const originalName = editingJobId ? (state.jobs.find(j=>j.id===editingJobId)?.name || '') : '';
-  const emps = state.users.filter(u => !u.isAdmin);
-  const employeeId = emps.length > 1
-    ? (document.getElementById('f_emp')?.value || emps[0]?.id)
-    : emps[0]?.id;
-  if (editingJobId) {
-    const job = state.jobs.find(j=>j.id===editingJobId);
-    if (job) {
-      const partialLocked = hasPartialFinancialState(job);
-      if (partialLocked) {
-        const typeChanged = _jobType(job) !== jobType;
-        const milestoneChanged = !isHourly && (financialSignatureFromMilestones(milestones) !== financialSignatureFromMilestones(job.milestones || []));
-        const milestoneBasisChanged = !isHourly && milestoneBasis !== _milestoneBasis(job);
-        const quoteChanged = !isHourly && (_roundMoney(Number(quote || 0)) !== _roundMoney(Number(job.quote || 0)));
-        const itemizedChanged = !isHourly && (!!isItemized !== !!job.isItemized);
-        const quoteItemsChanged = !isHourly && (financialSignatureFromQuoteItems(quoteItems) !== financialSignatureFromQuoteItems(job.quoteItems || []));
-        if (typeChanged || milestoneChanged || milestoneBasisChanged || quoteChanged || itemizedChanged || quoteItemsChanged) {
-          showAlert('This job has revenue-collection history. Job type, quote, and payment structure edits are locked here to protect split calculations. Use Revenue > Collections (Edit/Delete) first.');
-          return;
-        }
-      }
-      job.name = name;
-      job.contactName = contactName;
-      job.date = date;
-      if (employeeId) job.employeeId = employeeId;
-      job.jobType = jobType;
-      job.hourlyRate = hourlyRate;
-      job.workCompleted = jobWorkCompleted;
-      if (!partialLocked) {
-        job.quote = quote;
-        job.isItemized = isItemized;
-        job.quoteItems = quoteItems;
-        if (!isHourly) milestones.forEach((m,i)=>{ if(job.milestones[i]) m.status=job.milestones[i].status||'pending'; });
-        job.milestones = milestones;
-        job.milestoneBasis = milestoneBasis;
-      }
-    }
-  } else {
-    const newId = uid();
-    expandedJobs.clear();
-    expandedJobs.add(newId);
-    saveExpandedState();
-    state.jobs.push({ id:newId, name, contactName, quote, date, isItemized, quoteItems, status:'active',
-      milestones, addOns:[], subtractions:[], materials:[], advances:[], tips:[], fees:[], jobNotes:[], hours:[], partialCollections:[], repaymentMode:false,
-      revenueItems:[], jobType, hourlyRate,
-      milestoneBasis,
-      workCompleted: jobWorkCompleted,
-      hourlyStatus:'pending', hourlySquareInvoiceId:'',
-      employeeId: employeeId || '',
-      feeConfig: V2_FEES.createFeeConfig(state.settings, today()) });
-  }
-  save(); renderJobs(); closeModal('jobModal');
-  if (isNew || name.toLowerCase() !== originalName.toLowerCase()) checkNewClientPrompt(name);
-}
-
 // ─── UNIFIED QUICK JOB MODAL ────────────────────────────────────────────────
 let unifiedLineCount = 0;
 let unifiedMilestoneCount = 0;
@@ -5143,6 +4536,7 @@ async function saveUnifiedJob() {
   if (!currentUser?.isAdmin || isSaving) return;
   const editingJob = unifiedEditJobId ? state.jobs.find(item => item.id === unifiedEditJobId) : null;
   if (unifiedEditJobId && !editingJob) return;
+  if (_historicalMutationBlocked(editingJob)) return;
   const name = document.getElementById('uj_clientName').value.trim();
   const contactName = document.getElementById('uj_contactName').value.trim();
   const date = document.getElementById('uj_date').value || today();
@@ -5264,6 +4658,7 @@ async function saveUnifiedJob() {
 function openAddItem(jobId, type, itemId = null) {
   addItemContext = { jobId, type, itemId };
   const job = state.jobs.find(j => j.id === jobId);
+  if (!job || _historicalMutationBlocked(job)) return;
   const isHourly = _jobType(job) === 'hourly';
   const en = esc(getEmp(job?.employeeId)?.name || 'Employee');
   const isEdit = !!itemId;
@@ -5476,7 +4871,7 @@ function saveItem() {
   if (!addItemContext) return;
   const { jobId, type, itemId } = addItemContext;
   const job = state.jobs.find(j=>j.id===jobId);
-  if (!job) return;
+  if (!job || _historicalMutationBlocked(job)) return;
   const isHourly = _jobType(job) === 'hourly';
   const label  = document.getElementById('ai_label')?.value.trim() || '';
   let amount = parseFloat(document.getElementById('ai_amount')?.value) || 0;
@@ -6055,6 +5450,39 @@ function showAlert(msg, { title='', onClose=null } = {}) {
   document.getElementById('alertModal').classList.remove('hidden');
 }
 
+function renderActivityHistory() {
+  const list = document.getElementById('activityHistoryList');
+  if (!list) return;
+  if (!currentUser?.isAdmin) {
+    list.innerHTML = '<div class="activity-history-empty">Activity history is available to admins only.</div>';
+    return;
+  }
+  const history = Array.isArray(state.activityHistory) ? [...state.activityHistory].reverse() : [];
+  if (!history.length) {
+    list.innerHTML = '<div class="activity-history-empty">No saved activity has been recorded yet.</div>';
+    return;
+  }
+  list.innerHTML = history.map(event => {
+    const when = event.occurredAt ? new Date(event.occurredAt).toLocaleString() : 'Unknown date';
+    const changes = Array.isArray(event.changes) && event.changes.length
+      ? `<ul class="activity-history-changes">${event.changes.map(change => `<li>${esc(change.label || change.field)}: ${esc(change.before)} → ${esc(change.after)}</li>`).join('')}</ul>`
+      : '';
+    const action = event.actionLabel && event.actionLabel !== event.summary
+      ? `<div class="activity-history-action">Action: ${esc(event.actionLabel)}</div>`
+      : '';
+    return `<article class="activity-history-item">
+      <div class="activity-history-item-head"><div class="activity-history-summary">${esc(event.summary || 'Saved change')}</div><div class="activity-history-meta">${esc(event.actorName || 'Tracker')} · ${esc(when)}</div></div>
+      ${action}${changes}
+    </article>`;
+  }).join('');
+}
+
+function openActivityHistory() {
+  if (!currentUser?.isAdmin) return;
+  renderActivityHistory();
+  document.getElementById('activityHistoryModal')?.classList.remove('hidden');
+}
+
 function openChangelog() { document.getElementById('changelogModal').classList.remove('hidden'); }
 document.querySelectorAll('.modal-overlay').forEach(el=>{
   let _mdOnOverlay = false;
@@ -6210,6 +5638,7 @@ function renderAll() {
   if (document.getElementById('tab-schedule').classList.contains('active')) renderSchedule();
   if (document.getElementById('tab-homewatch').classList.contains('active')) renderHomewatch();
   if (document.getElementById('tab-clients').classList.contains('active')) renderClients();
+  if (!document.getElementById('activityHistoryModal')?.classList.contains('hidden')) renderActivityHistory();
 }
 
 // ─── USER MANAGEMENT ──────────────────────────────────────────────────────────

@@ -4,7 +4,7 @@ This is the running changelog for the Tracker 2.0 rebuild and local preview. It 
 
 Tracker 2.0 is not released or cut over. Tracker 1.0 remains the production build, and the local preview does not permanently write to Firestore.
 
-## Unreleased — local preview through 2026-09-27
+## Unreleased — local preview through 2026-09-28
 
 ### Added
 
@@ -18,11 +18,23 @@ Tracker 2.0 is not released or cut over. Tracker 1.0 remains the production buil
 - Added the Tracker 2.0 Overview workspace with attention cards, shared invoice visibility, employee pay summaries, Recent Pay, and workspace notes.
 - Added sticky-note behavior including team/admin visibility, pinning, completion, editing, deletion, truncation, and expanded-note editing.
 - Added a stable local-only preview fixture dataset with three payout test jobs and three Overview notes. Fixtures are merged into live read snapshots and never written to Firestore.
+- Added an admin-only Activity History view from the upper-right Menu. Meaningful saved changes record the actor, time, affected record, action, and changed fields; undo/redo preserves the audit trail.
+- Added a lightweight coalescing save queue so rapid edits made during an in-flight save are saved afterward instead of being silently dropped.
+- Isolated the coalescing save-queue mechanics in `v2/save-queue.js`, including newest-state coalescing, snapshot cloning, and recovery after a failed save.
+- Isolated undo/redo stack management and action descriptions in `v2/undo-redo-domain.js`, while keeping UI updates, activity history, and persistence decisions in `app.js`.
+- Isolated preview dirty-state, latest-server-snapshot, realtime-update, and discard coordination in `v2/preview-session-domain.js`, while keeping the user-facing confirmation and rendering in `app.js`.
+- Removed the obsolete legacy job editor from the Tracker 2.0 preview. Historical records remain viewable and fail closed through the centralized read-only boundary; Tracker 1.0 remains available on `main`.
+- Extracted pure job billing summaries and billing-entry construction into `v2/billing-domain.js`, leaving UI rendering and mutations in `app.js` while preserving the existing behavior.
+- Extracted Overview billing totals, employee-pay summaries, recent-pay calculations, and workspace-note ordering into `v2/overview-domain.js`, leaving rendering and user actions in `app.js` while preserving the existing behavior.
+- Extracted employee-payment row building, payout-plan totals, and owed/advance allocation splitting into `v2/employee-payment-domain.js`, leaving the modal and save path in `app.js` while preserving the existing behavior.
+- Extracted stored and legacy employee-payment ledger reconstruction into `v2/employee-ledger-domain.js`, leaving ledger rendering and navigation in `app.js` while preserving the existing behavior.
 - Added automated domain tests, browser smoke tests, payment regression coverage, preview no-write checks, backup validation, and local Square helper tests.
 
 ### Changed
 
-- Made `New Job` the only visible new-job entry point in the preview; the older editor remains only as a temporary legacy compatibility path.
+- Made production mode the default build and moved local preview selection behind the explicit `trackerMode=preview` URL flag, so the same checked-in app can be deployed for normal use while retaining a safe no-write preview.
+- Accepted the current feature and UI set as the working baseline; broad visibility and cleanup reviews are now deferred maintenance to be triggered by concrete issues, workflow needs, or team expansion.
+- Made `New Job` the only visible new-job entry point in the preview; the older editor is now unreachable for historical records and remains only as a temporary removal target.
 - Made Overview the default landing area and removed redundant Overview quick links in favor of the main tabs.
 - Combined Active Jobs and Recurring Services into one attention card and standardized the invoice card layout.
 - Made the shared Outstanding/Pending Invoices summary visible to all employees for the current small-team setup. It uses business-wide active-job invoice totals; per-user visibility is deferred until the team expands.
@@ -51,26 +63,32 @@ Tracker 2.0 is not released or cut over. Tracker 1.0 remains the production buil
 ### Fixed and hardened
 
 - Prevented preview edits from overwriting newer realtime server snapshots or reaching Firestore.
+- Cache-busted the preview app entry after the historical-boundary change so already-open browser tabs cannot continue running the previous edit behavior.
 - Hardened manual payments and partial collections against duplicate history entries, orphaned generated notes, and payout-ledger drift.
 - Clarified employee-pay activity and preserved the distinction between advances, pay, collected billing, and pending billing.
 - Protected completed and fee-locked financial records from recalculation when global settings change.
 - Preserved historical partial-payment behavior without allowing new records to depend on the old compatibility path.
 - Added malformed-backup rejection and full-state backup serialization tests.
+- Added a persistent activity-history layer with a bounded 500-event trail, preview-safe temporary behavior, and domain tests for create/update/delete/settings events.
 - Added browser-level regression checks for unified jobs, notes, themes, payments, partial collections, fee-rate protection, and preview safety.
+- Added a structural checkpoint to the browser smoke test for backup round-tripping, realtime updates during temporary edits, redo as well as undo, and combined current/historical client history.
+- Added a centralized historical-boundary module that fails closed for unknown job origins and keeps legacy Tracker 1.0 jobs viewable but read-only in the Tracker 2.0 preview.
+- Corrected the migration audit to report blank as well as missing `splitEventId` values, without changing those historical records.
+- Verified the updated preview suite with 86 domain tests, 97 browser smoke assertions, and 5 local Square/backend helper tests.
 
 ### Deferred or known limitations
 
 - Square integration is not active yet. Square customer sync, invoicing, reconciliation, webhooks, and true transaction-fee handling remain future work.
 - The Overview invoice card currently summarizes job billing; recurring-service billing remains a separate future integration concern.
 - Employees currently share the invoice-summary visibility rule. Per-user billing visibility is intentionally deferred.
-- Persistent activity history, durable undo/redo, queued saves, record-level conflict handling, and minimum server-enforced production security remain future work.
+- Durable undo/redo, record-level conflict handling, and minimum server-enforced production security remain future work. The initial activity-history layer and lightweight save queue are in place; richer filtering/detail can be added later if the audit view grows.
 - Client-management expansion, recurring billing beyond the current service model, deeper reports, and attachments are deferred until their surrounding workflows are defined.
 - The old editor and remaining migration compatibility code cannot be removed until the historical cutover boundary, archive, and rollback checks are complete.
-- Historical direct employee-pay entries may still lack a stored payment event; the compatibility ledger continues reconstructing those until they are audited and reconciled.
+- Historical direct employee-pay entries may lack a stored payment event; they remain viewable through the legacy ledger/history path and are intentionally not migrated into the Tracker 2.0 event model.
 
 ### Next planned work
 
-- Audit and reconcile historical direct employee-pay entries that lack a stored payment event, then design persistent activity history around the unified payment-event path. This remains intentionally ahead of Square integration because it can be improved and tested using the current manual-payment model.
+- Prepare the first Tracker 2.0 production cutover: commit the release candidate, verify a rollback backup and live-data smoke pass, then keep Tracker 1.0 available as the fallback historical viewer. Square integration remains deferred.
 
 ## Changelog maintenance rules
 

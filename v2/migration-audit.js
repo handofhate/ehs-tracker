@@ -233,7 +233,7 @@
         run: state => {
           const matches = arrayAt(state, 'jobs').flatMap(job => (
             Array.isArray(job?.advances)
-              ? job.advances.filter(item => item?.splitEventId === undefined).map(item => `${job.id}:${sampleId(item)}`)
+              ? job.advances.filter(item => !String(item?.splitEventId || '').trim()).map(item => `${job.id}:${sampleId(item)}`)
               : []
           ));
           return result(matches.length, matches);
@@ -244,7 +244,7 @@
         label: 'Homewatch advances missing splitEventId',
         category: 'current-shape',
         run: state => {
-          const matches = homewatchItems(state, 'advances').filter(({ item }) => item?.splitEventId === undefined);
+          const matches = homewatchItems(state, 'advances').filter(({ item }) => !String(item?.splitEventId || '').trim());
           return result(matches.length, matches.map(({ homewatch, item }) => `${homewatch.id}:${sampleId(item)}`));
         }
       })

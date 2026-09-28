@@ -164,6 +164,10 @@
         done: !!note.done,
         pinned: !!(note.pinned || legacyImportant)
       }; });
+    if (!Array.isArray(s.activityHistory)) s.activityHistory = [];
+    s.activityHistory = s.activityHistory
+      .filter(event => event && typeof event === 'object' && event.id)
+      .slice(-500);
     if (!s.settings.clientColumns) s.settings.clientColumns = [...DEFAULT_CLIENT_COLUMNS];
     if (!s.settings.clientExpandCols) s.settings.clientExpandCols = [...clientColumnKeys];
     if (!s.settings.clientQuickCols) s.settings.clientQuickCols = [...DEFAULT_CLIENT_QUICK_COLUMNS];

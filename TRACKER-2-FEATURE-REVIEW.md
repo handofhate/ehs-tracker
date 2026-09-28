@@ -2,12 +2,14 @@
 
 This is the current feature direction for the local Tracker 2.0 preview. Tracker 1.0 remains available while this work is validated.
 
-The remaining work follows the canonical sequence in `TRACKER-2-TODO.md`: persistent activity history, regression coverage/save reliability, code-boundary cleanup, product/UI review, Square readiness/integration, and finally cutover. The employee-payment unification milestone is complete in the local preview.
+The remaining work follows the canonical sequence in `TRACKER-2-TODO.md`: browser regression coverage/save reliability, code-boundary cleanup, product/UI review, Square readiness/integration, and finally cutover. Employee-payment unification, the local preview's historical read-only boundary, and the initial persistent activity-history layer are complete.
+
+The current UI and feature set is accepted as a useful working baseline. Broad visibility, feature, and UI audits are maintenance work now and should be triggered by a concrete issue, workflow need, or team expansion rather than by redesign for its own sake.
 
 ## Agreed product direction
 
 - The normal creation entry point is one button: `New Job`.
-- `New Job` opens the unified job workflow. The old editor remains only as a temporary compatibility editor for legacy records.
+- `New Job` opens the unified job workflow. The old editor remains in the codebase only as a temporary removal target; historical records are view-only in the preview.
 - The default landing area is `Overview`, not the active-job list.
 - Overview is intended to be a useful work starting point, not an extra dashboard screen. It combines summary information and items needing attention with workspace notes. Existing tabs remain the navigation; redundant quick links are intentionally omitted.
 - Overview attention boxes now focus on active jobs, recurring services, outstanding invoice count/value, employee pay, and recent pay. Admin recent pay includes an employee selector; employees retain their own recent-pay view and can see the shared outstanding/pending invoice summary for now.
@@ -17,6 +19,7 @@ The remaining work follows the canonical sequence in `TRACKER-2-TODO.md`: persis
 - Workspace notes are displayed as truncated sticky-note cards. They can be opened in a full note view, marked done, edited by their author or an admin, and deleted by their author or an admin.
 - Employee payment entry points now use one underlying workflow that supports one or many jobs, recurring services, advances, adjustments, and split allocations. Job and recurring-service buttons remain useful shortcuts that open the same workflow with the source preselected.
 - Current billing meanings remain unchanged for now: pending means not invoiced or paid, invoiced means sent but unpaid, and paid means collected.
+- Historical Tracker 1.0 jobs remain visible in Tracker 2.0 client/job history but are read-only. Only jobs explicitly created through the Tracker 2.0 unified workflow are editable; unknown origins fail closed as historical.
 
 ## Settings direction
 
@@ -49,10 +52,10 @@ The temporary area contains the one-time debt feature and future migration/recov
 
 - Establish minimum production security for Square: server-side secrets, Firestore rules, and server-enforced admin authorization. This does not require enterprise-grade permissions or a large role system.
 - Keep invoice-summary visibility global for employees while the team is small; add per-user visibility only if a future multi-employee setup needs it.
-- Replace the full-state save drop-on-busy behavior with queued saves, then consider record-level writes and conflict detection.
-- Reconcile historical direct employee-pay entries that predate the unified payment-event path; keep the compatibility ledger until that audit passes.
-- Add persistent activity history as a separate concept from immediate session undo/redo. Financial reversals should preserve history instead of erasing it.
-- Decide whether employees should see all clients, schedules, and shared notes or only assigned records.
+- Keep the lightweight coalescing save queue. Consider record-level writes and conflict detection only if simultaneous multi-user editing becomes a real need.
+- Keep historical direct employee-pay entries as read-only legacy history instead of rewriting them into the new payment-event model. The compatibility ledger remains a viewing path until the eventual archive/cutover decision.
+- Expand activity history only when needed: filtering, richer financial detail, and durable undo/redo can build on the initial admin-only audit layer without changing the normal workflow.
+- Keep the current small-team employee visibility behavior. Revisit clients, schedules, and shared notes only if a concrete need or team expansion appears.
 
 ## Defer until Square work
 
@@ -66,7 +69,7 @@ The temporary area contains the one-time debt feature and future migration/recov
 
 ## Shelve or remove when exit conditions are met
 
-- Old new-job entry point: already removed from the normal preview menu; retain the old editor only for legacy records.
+- Old new-job entry point and legacy editor: removed from the Tracker 2.0 preview. Historical records remain viewable/read-only, while Tracker 1.0 on `main` remains the rollback and historical fallback until cutover.
 - One-time debt: remove after the balance is settled and the final historical audit is recorded.
 - Legacy partial-payment compatibility: remove after the two historical exception jobs are safely archived and the cutover boundary is established.
 - Migration cleanup tools: keep the completed audit record, but keep the one-time tools outside the active app and test path.
