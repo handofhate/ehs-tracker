@@ -254,6 +254,14 @@ function migrateState(s) {
   if (feeMigration.changed) feeMigrationPending = true;
   return migrated;
 }
+
+function _prepareLoadedState(raw) {
+  const migrated = migrateState(_cloneState(raw || {}));
+  if (!PREVIEW_MODE || !window.Tracker2PreviewFixtures) return migrated;
+  // Fixtures are merged into each live snapshot, so Refresh Live Data resets
+  // temporary edits but never removes the stable local preview dataset.
+  return migrateState(window.Tracker2PreviewFixtures.mergeIntoState(migrated));
+}
 const undoStack = [];
 const redoStack = [];
 const UNDO_MAX = 50;
@@ -361,7 +369,7 @@ async function redoAction() {
 }
 
 function _applyRestoredState(restored) {
-  state = migrateState(JSON.parse(JSON.stringify(restored)));
+  state = _prepareLoadedState(restored);
   if (currentUser) {
     const fresh = state.users.find(u => u.id === currentUser.id);
     if (fresh) currentUser = { id: fresh.id, name: fresh.name, isAdmin: fresh.isAdmin };
@@ -481,7 +489,7 @@ function load() {
 
   DOC.get().then(doc => {
     if (doc.exists) {
-      state = migrateState(doc.data());
+      state = _prepareLoadedState(doc.data());
       _lastSavedState = _cloneState(state);
       const persistFeeMigration = feeMigrationPending;
       feeMigrationPending = false;
@@ -495,7 +503,7 @@ function load() {
     } else if (legacy) {
       // First time using Firebase - migrate local data up
       try {
-        state = migrateState(JSON.parse(legacy));
+      state = _prepareLoadedState(JSON.parse(legacy));
         syncHomewatchAutoInvoices();
         save(); // push to Firestore
         _storageRemove('jobtracker_v2');
@@ -518,7 +526,7 @@ function load() {
   // Real-time listener - keeps all open tabs/devices in sync
   DOC.onSnapshot(doc => {
     if (doc.exists && !isSaving) {
-      const incoming = migrateState(doc.data());
+      const incoming = _prepareLoadedState(doc.data());
       const serverUpdate = V2_PERSISTENCE.receiveServerSnapshot(incoming);
       previewLatestServerState = serverUpdate.snapshot;
       if (PREVIEW_MODE && !serverUpdate.apply) {
@@ -2665,26 +2673,16 @@ function openEmployeePayment(preset = null) {
     ? preset.employeeId
     : (employeePaymentCtx.employeeId && employees.some(user => user.id === employeePaymentCtx.employeeId) ? employeePaymentCtx.employeeId : employees[0].id);
   employeePaymentCtx.employeeId = employeeId;
-  if (mode === 'owed') {
-    const plan = _calcEmployeePaymentPlan(employeeId);
-    const employee = getEmp(employeeId);
-    const allocById = {};
-    plan.rows.forEach(row => {
-      if (Math.abs(row.payoutTarget) > 0.005) allocById[row.id] = row.payoutTarget;
-    });
-    preset = {
-      ...(preset || {}),
-      employeeId,
-      includeAll: true,
-      payoutContext: true,
-      total: plan.payoutTotal,
-      date: preset?.date || today(),
-      label: preset?.label || ('Pay Owed' + (employee?.name ? ' - ' + employee.name : '')),
-      allocById
-    };
-  } else {
-    preset = { ...(preset || {}), employeeId };
-  }
+  const employee = getEmp(employeeId);
+  preset = {
+    ...(preset || {}),
+    employeeId,
+    includeAll: false,
+    payoutContext: mode === 'owed',
+    total: 0,
+    date: preset?.date || today(),
+    label: preset?.label || ''
+  };
   openSplitPay(preset);
 }
 function openEmployeePaymentForSource(sourceKind, sourceId) {
@@ -2694,31 +2692,35 @@ function openEmployeePaymentForSource(sourceKind, sourceId) {
     : state.jobs.find(item => item.id === sourceId);
   if (!source) return;
   const employeeId = source.employeeId || state.users.find(user => !user.isAdmin)?.id || '';
-  const calc = sourceKind === 'hw' ? calcHW(source) : calcJob(source);
-  const rowId = `sp_${sourceKind}_${source.id}`;
-  const currentBalance = _roundMoney(Math.max(0, calc.empBalance || 0));
   openEmployeePayment({
     mode: 'source',
     employeeId,
-    includeAll: true,
+    includeAll: false,
     payoutContext: false,
     sourceKind,
     sourceId: source.id,
-    total: currentBalance,
-    label: 'Pay Employee - ' + (source.name || (sourceKind === 'hw' ? 'Recurring Service' : 'Job')),
-    allocById: currentBalance > 0.005 ? { [rowId]: currentBalance } : {}
+    total: 0,
+    label: ''
   });
 }
-function _setSplitPayAllocations(allocById = {}, trackAdvances = false) {
+function _inferSplitPayType(input) {
+  const typeEl = document.getElementById(input.id + '_type');
+  if (!typeEl) return;
+  const amount = Number(input.value || 0);
+  if (Math.abs(amount) <= 0.005) {
+    typeEl.value = '';
+    return;
+  }
+  const owed = Math.max(0, Number(input.dataset.owed || 0));
+  if (amount < -0.005) typeEl.value = 'adjustment';
+  else if (owed <= 0.005) typeEl.value = 'advance';
+  else typeEl.value = '';
+}
+function _setSplitPayAllocations(allocById = {}) {
   document.querySelectorAll('.sp-alloc-input').forEach(el => {
     const amount = Number(allocById[el.id] || 0);
     el.value = Math.abs(amount) > 0.005 ? amount.toFixed(2) : '';
-    const typeEl = document.getElementById(el.id + '_type');
-    if (typeEl) {
-      if (trackAdvances && amount < -0.005) typeEl.value = 'adjustment';
-      else if (trackAdvances && amount > 0.005) typeEl.value = 'advance';
-      else typeEl.value = '';
-    }
+    _inferSplitPayType(el);
   });
   updateSplitTotals();
 }
@@ -2738,29 +2740,26 @@ function setSplitPayEmployee(employeeId) {
   }
   renderSplitPayAlloc();
   if (splitPayPayoutContext) {
-    const plan = _calcEmployeePaymentPlan(splitPayEmployeeId);
-    const employee = getEmp(splitPayEmployeeId);
-    const allocById = {};
-    plan.rows.forEach(row => {
-      if (Math.abs(row.payoutTarget) > 0.005) allocById[row.id] = row.payoutTarget;
-    });
-    document.getElementById('sp_total').value = plan.payoutTotal.toFixed(2);
-    document.getElementById('sp_label').value = 'Pay Owed' + (employee?.name ? ' - ' + employee.name : '');
-    _setSplitPayAllocations(allocById, false);
+    document.getElementById('sp_total').value = '0';
+    document.getElementById('sp_label').value = '';
+    _setSplitPayAllocations({});
   } else if (sourceCleared) {
-    document.getElementById('sp_total').value = '';
+    document.getElementById('sp_total').value = '0';
     document.getElementById('sp_label').value = '';
     updateSplitTotals();
   }
 }
 function openSplitPay(preset = null) {
   const employees = state.users.filter(user => !user.isAdmin);
-  splitPayIncludeAll = !!preset?.includeAll;
+  // Employee payments are allocated only to work that is still open. A
+  // zero-balance open source is automatically treated as an advance when it
+  // receives money.
+  splitPayIncludeAll = false;
   splitPayPayoutContext = !!preset?.payoutContext;
   splitPayEmployeeId = preset?.employeeId || employeePaymentCtx.employeeId || employees[0]?.id || '';
   employeePaymentCtx.employeeId = splitPayEmployeeId;
   splitPaySource = preset?.sourceKind && preset?.sourceId ? { kind: preset.sourceKind, id: preset.sourceId } : null;
-  document.getElementById('sp_total').value = '';
+  document.getElementById('sp_total').value = '0';
   document.getElementById('sp_date').value  = today();
   document.getElementById('sp_label').value = '';
   const employeeSelect = document.getElementById('sp_employee');
@@ -2768,102 +2767,145 @@ function openSplitPay(preset = null) {
     employeeSelect.innerHTML = _employeePaymentOptions(splitPayEmployeeId);
     employeeSelect.value = splitPayEmployeeId;
   }
-  const title = document.getElementById('sp_modalTitle');
-  if (title) title.textContent = splitPaySource ? 'Pay Employee' : (splitPayPayoutContext ? 'Pay Owed' : 'Employee Payment');
-  const track = document.getElementById('sp_toggleTrack');
-  if (track) track.dataset.on = 'false';
-  if (preset?.trackAdvances && track) track.dataset.on = 'true';
   renderSplitPayAlloc();
   if (preset) {
     if (preset.total !== undefined) document.getElementById('sp_total').value = Number(preset.total || 0).toFixed(2);
     if (preset.date) document.getElementById('sp_date').value = preset.date;
     if (preset.label !== undefined) document.getElementById('sp_label').value = preset.label || '';
-    _setSplitPayAllocations(preset.allocById || {}, !!preset.trackAdvances);
+    _setSplitPayAllocations(preset.allocById || {});
   }
   document.getElementById('splitPayModal').classList.remove('hidden');
 }
-function toggleSplitAdvances() {
-  const track = document.getElementById('sp_toggleTrack');
-  track.dataset.on = track.dataset.on === 'true' ? 'false' : 'true';
-  renderSplitPayAlloc();
+function fillSplitPayMax() {
+  const inputs = [...document.querySelectorAll('.sp-alloc-input')];
+  const allocById = {};
+  let total = 0;
+  inputs.forEach(input => {
+    const owed = Math.max(0, Number(input.dataset.owed || 0));
+    if (owed > 0.005) {
+      allocById[input.id] = owed;
+      total += owed;
+    }
+  });
+  document.getElementById('sp_total').value = total.toFixed(2);
+  _setSplitPayAllocations(allocById);
+}
+function clearSplitPayTotal() {
+  const input = document.getElementById('sp_total');
+  if (!input) return;
+  input.value = '';
+  updateSplitTotals();
 }
 function renderSplitPayAlloc() {
-  const activeJobs = state.jobs.filter(j => (!splitPayEmployeeId || j.employeeId === splitPayEmployeeId) && (splitPayIncludeAll || j.status !== 'complete') && (!splitPaySource || (splitPaySource.kind === 'job' && j.id === splitPaySource.id)));
-  const activeHW   = (state.homewatch || []).filter(hw => (!splitPayEmployeeId || hw.employeeId === splitPayEmployeeId) && (splitPayIncludeAll || hw.status !== 'paused') && (!splitPaySource || (splitPaySource.kind === 'hw' && hw.id === splitPaySource.id)));
+  const activeJobs = state.jobs.filter(j => (!splitPayEmployeeId || j.employeeId === splitPayEmployeeId) && j.status !== 'complete' && (!splitPaySource || (splitPaySource.kind === 'job' && j.id === splitPaySource.id)));
+  const activeHW   = (state.homewatch || []).filter(hw => (!splitPayEmployeeId || hw.employeeId === splitPayEmployeeId) && hw.status !== 'paused' && (!splitPaySource || (splitPaySource.kind === 'hw' && hw.id === splitPaySource.id)));
   const allocEl    = document.getElementById('sp_allocList');
-  const track = document.getElementById('sp_toggleTrack');
-  const thumb = document.getElementById('sp_toggleThumb');
-  const allowAdvances = track?.dataset.on === 'true';
-  const payoutContext = splitPayPayoutContext;
-  const visibleJobs = payoutContext
-    ? activeJobs.filter(j => Math.abs(Number(calcJob(j).potentialEmpBalance || 0)) > 0.005)
-    : activeJobs;
-  const visibleHW = payoutContext
-    ? activeHW.filter(hw => Math.abs(Number(calcHW(hw).potentialEmpBalance || 0)) > 0.005)
-    : activeHW;
-  if (track) track.style.background = allowAdvances ? 'var(--accent)' : 'var(--border2)';
-  if (thumb) thumb.style.transform = allowAdvances ? 'translateX(18px)' : 'translateX(0)';
-  const row = (id, name, bal, potentialBal) => {
+  const selectedSource = splitPaySource || null;
+  const prepare = (items, kind, balanceFor) => items
+    .map((item, index) => ({
+      item,
+      kind,
+      index,
+      balance: Number(balanceFor(item) || 0),
+      selected: !!selectedSource && selectedSource.kind === kind && selectedSource.id === item.id
+    }))
+    .sort((a, b) => (b.balance - a.balance) || (a.index - b.index));
+  const preparedJobs = prepare(activeJobs, 'job', job => calcJob(job).potentialEmpBalance);
+  const preparedHW = prepare(activeHW, 'hw', hw => calcHW(hw).potentialEmpBalance);
+  const isPriority = entry => entry.balance > 0.005 || entry.selected;
+  const priorityJobs = preparedJobs.filter(isPriority);
+  const priorityHW = preparedHW.filter(isPriority);
+  const otherJobs = preparedJobs.filter(entry => !isPriority(entry));
+  const otherHW = preparedHW.filter(entry => !isPriority(entry));
+  const row = (id, name, owedBalance) => {
+    const bal = Number(owedBalance || 0);
     const owedColor = bal > 0.005 ? 'var(--accent)' : bal < -0.005 ? 'var(--red)' : 'var(--text3)';
-    const advance = potentialBal - bal;
-    const balanceLabel = payoutContext ? 'pay owed' : 'owed';
-    const advanceStr = allowAdvances && !payoutContext && advance > 0.005
-      ? ` &nbsp;<span style="color:var(--text3)">+${fmt(advance)} potential</span>` : '';
     return `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
       <div style="flex:1;min-width:0">
         <div style="font-size:17px;font-weight:500">${name}</div>
-        <div style="font-family:var(--mono);font-size:13px;color:${owedColor}">${balanceLabel}: ${fmt(bal)}${advanceStr}</div>
+        <div style="font-family:var(--mono);font-size:13px;color:${owedColor}">owed: ${fmt(bal)}</div>
+        <div class="sp-allocation-breakdown" id="${id}_breakdown"></div>
       </div>
-      <select class="form-input sp-type-select" id="${id}_type" style="display:none;width:100px;font-size:12px;padding:4px 6px;flex-shrink:0">
-        <option value="">General</option>
+      <select class="form-input sp-type-select" id="${id}_type" aria-label="Flag for owed portion" title="This flag applies to the owed portion; any amount above it is always an advance." onchange="updateSplitTotals()" style="display:none;width:100px;font-size:12px;padding:4px 6px;flex-shrink:0">
+        <option value="" selected>General</option>
         <option value="advance">Advance</option>
         <option value="final">Final Pay</option>
         <option value="adjustment">Adjustment</option>
       </select>
-      <button class="btn btn-ghost btn-sm" id="${id}_maxBtn" data-step="0" onclick="maxAlloc('${id}',${bal},${potentialBal},${allowAdvances})" style="flex-shrink:0">Max</button>
-      <input class="form-input sp-alloc-input" type="number" step="0.01" placeholder="0.00"
-        id="${id}" style="max-width:100px" oninput="updateSplitTotals()" />
+      <button class="btn btn-ghost btn-sm" id="${id}_maxBtn" onclick="maxAlloc('${id}')" style="flex-shrink:0">MAX</button>
+      <input class="form-input split-pay-field sp-alloc-input" type="number" step="0.01" placeholder="0.00" data-owed="${bal}"
+        id="${id}" style="max-width:150px" onfocus="if(Number(this.value)===0) this.select()" oninput="_inferSplitPayType(this); updateSplitTotals()" />
+      <button class="btn btn-ghost btn-icon-only sp-clear-btn" type="button" onclick="clearSplitPayAllocation('${id}')" title="Clear amount" aria-label="Clear amount" style="min-width:30px;width:30px;height:30px;padding:0">${jobIconSvg('close')}</button>
     </div>`;
   };
-  let html = '';
-  if (visibleJobs.length) {
-    if (visibleHW.length) html += `<div style="font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);padding:4px 0 6px">Jobs</div>`;
-    html += visibleJobs.map(j => { const c = calcJob(j); const balance = payoutContext ? c.potentialEmpBalance : c.empBalance; return row(`sp_job_${j.id}`, esc(j.name), balance, c.potentialEmpBalance); }).join('');
-  }
-  if (visibleHW.length) {
-    html += `<div style="font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);padding:${visibleJobs.length?'12px':'4px'} 0 6px">Recurring Services</div>`;
-    html += visibleHW.map(hw => { const c = calcHW(hw); const balance = payoutContext ? c.potentialEmpBalance : c.empBalance; return row(`sp_hw_${hw.id}`, esc(hw.name), balance, c.potentialEmpBalance); }).join('');
+  const renderSections = (jobs, homewatch) => {
+    let sectionHtml = '';
+    if (jobs.length) {
+      if (homewatch.length) sectionHtml += '<div style="font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);padding:4px 0 6px">Jobs</div>';
+      sectionHtml += jobs.map(entry => row('sp_' + entry.kind + '_' + entry.item.id, esc(entry.item.name), entry.balance)).join('');
+    }
+    if (homewatch.length) {
+      sectionHtml += '<div style="font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);padding:' + (jobs.length ? '12px' : '4px') + ' 0 6px">Recurring Services</div>';
+      sectionHtml += homewatch.map(entry => row('sp_' + entry.kind + '_' + entry.item.id, esc(entry.item.name), entry.balance)).join('');
+    }
+    return sectionHtml;
+  };
+  let html = renderSections(priorityJobs, priorityHW);
+  const otherCount = otherJobs.length + otherHW.length;
+  if (otherCount) {
+    html += '<details id="sp_otherAllocations" class="sp-other-allocations">' +
+      '<summary>Other eligible work (' + otherCount + ')</summary>' +
+      '<div>' + renderSections(otherJobs, otherHW) + '</div>' +
+    '</details>';
   }
   allocEl.innerHTML = html || '<div style="color:var(--text3);font-size:16px;padding:8px 0">No eligible jobs or recurring services.</div>';
   updateSplitTotals();
 }
-function maxAlloc(inputId, bal, potentialBal, allowAdvances) {
-  const btn = document.getElementById(inputId + '_maxBtn');
-  const step = parseInt(btn?.dataset.step || '0');
+function maxAlloc(inputId) {
   const total = parseFloat(document.getElementById('sp_total').value) || 0;
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  const current = parseFloat(input.value) || 0;
+  const owed = Math.max(0, Number(input.dataset.owed || 0));
   let otherAllocated = 0;
   document.querySelectorAll('.sp-alloc-input').forEach(el => {
     if (el.id !== inputId) otherAllocated += parseFloat(el.value) || 0;
   });
-  const cap = total > 0 ? total - otherAllocated : Infinity;
-  const capTarget = (target) => {
-    if (!isFinite(cap)) return target;
-    if (target > cap) return cap;
-    return target;
-  };
-  let target;
-  if (!allowAdvances || Math.abs(potentialBal - bal) <= 0.005) {
-    target = capTarget(Math.max(0, bal));
-    if (btn) btn.dataset.step = '0';
-  } else if (step === 0) {
-    target = capTarget(Math.max(0, bal));
-    if (btn) btn.dataset.step = '1';
-  } else {
-    target = capTarget(Math.max(0, potentialBal));
-    if (btn) btn.dataset.step = '0';
-  }
-  document.getElementById(inputId).value = Math.abs(target) > 0.005 ? target.toFixed(2) : '';
+  const remaining = total - otherAllocated;
+  const target = Math.abs(total) <= 0.005
+    ? 0
+    : total < 0
+      ? Math.min(0, remaining)
+      : current >= owed - 0.005
+        ? Math.max(0, remaining)
+        : Math.min(owed, Math.max(0, remaining));
+  input.value = Math.abs(target) > 0.005 ? target.toFixed(2) : '';
+  _inferSplitPayType(input);
   updateSplitTotals();
+}
+function clearSplitPayAllocation(inputId) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  input.value = '';
+  _inferSplitPayType(input);
+  updateSplitTotals();
+}
+function updateSplitAllocationBreakdown(input) {
+  const breakdown = document.getElementById(input.id + '_breakdown');
+  if (!breakdown) return;
+  const amount = Number(input.value || 0);
+  const owed = Math.max(0, Number(input.dataset.owed || 0));
+  const payType = document.getElementById(input.id + '_type')?.value || '';
+  let text = '';
+  if (amount > owed + 0.005 && owed > 0.005) {
+    const owedType = payType === 'final' ? 'Final Pay' : 'General';
+    text = 'Records as: ' + fmt(owed) + ' ' + owedType + ' + ' + fmt(amount - owed) + ' Advance';
+  } else if (amount > 0.005 && owed <= 0.005) {
+    text = 'Records as: ' + fmt(amount) + ' Advance';
+  } else if (amount > 0.005 && payType === 'final') {
+    text = 'Records as: ' + fmt(amount) + ' Final Pay';
+  }
+  breakdown.textContent = text;
 }
 function updateSplitTotals() {
   const total = parseFloat(document.getElementById('sp_total').value) || 0;
@@ -2873,6 +2915,7 @@ function updateSplitTotals() {
     allocated += amt;
     const typeEl = document.getElementById(el.id + '_type');
     if (typeEl) typeEl.style.display = Math.abs(amt) > 0.005 ? '' : 'none';
+    updateSplitAllocationBreakdown(el);
   });
   const remaining = total - allocated;
   const remColor  = Math.abs(remaining) < 0.01 ? 'var(--green)' : remaining < 0 ? 'var(--red)' : 'var(--accent)';
@@ -2881,6 +2924,17 @@ function updateSplitTotals() {
     <span>Total <strong>${fmt(total)}</strong></span>
     <span>Allocated <strong style="color:var(--green)">${fmt(allocated)}</strong></span>
     <span>Remaining <strong style="color:${remColor}">${fmt(remaining)}</strong></span>`;
+}
+function _splitEmployeePaymentAllocation(amount, owed, payType) {
+  const payment = Number(amount || 0);
+  const balance = Math.max(0, Number(owed || 0));
+  if (payment > balance + 0.005 && balance > 0.005 && payType !== 'adjustment') {
+    return [
+      { amount: _roundMoney(balance), payType: payType === 'final' ? 'final' : '' },
+      { amount: _roundMoney(payment - balance), payType: 'advance' }
+    ];
+  }
+  return [{ amount: payment, payType }];
 }
 async function saveSplitPay() {
   const total   = parseFloat(document.getElementById('sp_total').value) || 0;
@@ -2893,36 +2947,46 @@ async function saveSplitPay() {
     const amt = parseFloat(el.value) || 0;
     if (Math.abs(amt) <= 0.005) return;
     allocated += amt;
-    const selectedType = (document.getElementById(el.id + '_type') || {}).value || '';
-    const payType = selectedType || (amt < -0.005 ? 'adjustment' : '');
-    if (el.id.startsWith('sp_job_')) jobEntries.push({ jobId: el.id.slice('sp_job_'.length), amount: amt, payType });
-    if (el.id.startsWith('sp_hw_'))  hwEntries.push({  hwId:  el.id.slice('sp_hw_'.length),  amount: amt, payType });
+    const typeEl = document.getElementById(el.id + '_type');
+    if (typeEl && !typeEl.value) _inferSplitPayType(el);
+    const payType = typeEl?.value || '';
+    const owed = Math.max(0, Number(el.dataset.owed || 0));
+    if (el.id.startsWith('sp_job_')) jobEntries.push({ jobId: el.id.slice('sp_job_'.length), amount: amt, owed, payType });
+    if (el.id.startsWith('sp_hw_'))  hwEntries.push({  hwId:  el.id.slice('sp_hw_'.length), amount: amt, owed, payType });
   });
   if (!jobEntries.length && !hwEntries.length) { showAlert('Please allocate at least one amount.'); return; }
+  const allEntries = [...jobEntries, ...hwEntries];
+  const hasAdvance = allEntries.some(entry => entry.payType === 'advance' || (entry.amount > 0.005 && entry.amount > entry.owed + 0.005) || (entry.amount > 0.005 && entry.owed <= 0.005));
+  const hasAdjustment = allEntries.some(entry => entry.payType === 'adjustment' || entry.amount < -0.005);
+  const paymentMode = hasAdjustment ? 'adjustment' : hasAdvance ? 'advance' : 'owed';
   const remaining = total - allocated;
   const doSave = async () => {
     const splitEventId = uid();
-    const trackAdvances = (document.getElementById('sp_toggleTrack')?.dataset.on === 'true');
+    const trackAdvances = hasAdvance;
     const eventLabel = label || 'Employee payment';
     const allocations = [];
     const employeeIds = new Set();
-    jobEntries.forEach(({ jobId, amount, payType }) => {
+    jobEntries.forEach(({ jobId, amount, owed, payType }) => {
       const job = state.jobs.find(j => j.id === jobId);
       if (job) {
         if (!job.advances) job.advances = [];
-        const advanceId = uid();
-        job.advances.push({ id: advanceId, label: eventLabel, amount, date, payType, splitEventId });
-        allocations.push({ sourceKind: 'job', sourceId: job.id, sourceName: job.name || 'Job', amount, payType: payType || '', advanceId });
+        _splitEmployeePaymentAllocation(amount, owed, payType).forEach(segment => {
+          const advanceId = uid();
+          job.advances.push({ id: advanceId, label: eventLabel, amount: segment.amount, date, payType: segment.payType, splitEventId });
+          allocations.push({ sourceKind: 'job', sourceId: job.id, sourceName: job.name || 'Job', amount: segment.amount, payType: segment.payType || '', advanceId });
+        });
         if (job.employeeId) employeeIds.add(job.employeeId);
       }
     });
-    hwEntries.forEach(({ hwId, amount, payType }) => {
+    hwEntries.forEach(({ hwId, amount, owed, payType }) => {
       const hw = (state.homewatch || []).find(h => h.id === hwId);
       if (hw) {
         if (!hw.advances) hw.advances = [];
-        const advanceId = uid();
-        hw.advances.push({ id: advanceId, label: eventLabel, amount, date, payType, splitEventId });
-        allocations.push({ sourceKind: 'hw', sourceId: hw.id, sourceName: hw.name || 'HomeWatch', amount, payType: payType || '', advanceId });
+        _splitEmployeePaymentAllocation(amount, owed, payType).forEach(segment => {
+          const advanceId = uid();
+          hw.advances.push({ id: advanceId, label: eventLabel, amount: segment.amount, date, payType: segment.payType, splitEventId });
+          allocations.push({ sourceKind: 'hw', sourceId: hw.id, sourceName: hw.name || 'HomeWatch', amount: segment.amount, payType: segment.payType || '', advanceId });
+        });
         if (hw.employeeId) employeeIds.add(hw.employeeId);
       }
     });
@@ -2933,6 +2997,7 @@ async function saveSplitPay() {
       label: eventLabel,
       total,
       mode: trackAdvances ? 'potential' : 'split',
+      paymentMode,
       employeeId: splitPayEmployeeId || (employeeIds.size === 1 ? [...employeeIds][0] : ''),
       allocations,
       createdAt: new Date().toISOString()
@@ -6759,7 +6824,7 @@ function importData(event) {
         const imported = V2_BACKUP.parseBackup(e.target.result);
         const beforeImport = `ehs-tracker-backup-before-import-${today()}-${Date.now()}.json`;
         _downloadStateBackup(beforeImport);
-        state = migrateState(imported);
+        state = _prepareLoadedState(imported);
         await save();
         renderAll();
         showAlert(`Import successful. A safety backup was downloaded first (${beforeImport}).`);

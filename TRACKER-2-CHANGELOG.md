@@ -4,7 +4,7 @@ This is the running changelog for the Tracker 2.0 rebuild and local preview. It 
 
 Tracker 2.0 is not released or cut over. Tracker 1.0 remains the production build, and the local preview does not permanently write to Firestore.
 
-## Unreleased — local preview through 2026-09-25
+## Unreleased — local preview through 2026-09-27
 
 ### Added
 
@@ -17,6 +17,7 @@ Tracker 2.0 is not released or cut over. Tracker 1.0 remains the production buil
 - Added an explicit historical boundary for the two jobs that still require legacy partial-payment compatibility.
 - Added the Tracker 2.0 Overview workspace with attention cards, shared invoice visibility, employee pay summaries, Recent Pay, and workspace notes.
 - Added sticky-note behavior including team/admin visibility, pinning, completion, editing, deletion, truncation, and expanded-note editing.
+- Added a stable local-only preview fixture dataset with three payout test jobs and three Overview notes. Fixtures are merged into live read snapshots and never written to Firestore.
 - Added automated domain tests, browser smoke tests, payment regression coverage, preview no-write checks, backup validation, and local Square helper tests.
 
 ### Changed
@@ -36,6 +37,16 @@ Tracker 2.0 is not released or cut over. Tracker 1.0 remains the production buil
 - Preserved historical client links and financial history while applying approved legacy cleanup matches.
 - Replaced the visible Pay Out and Split Pay header actions with one Employee Payment flow. Job and recurring-service payment buttons now open that same flow with the source and current balance preselected.
 - Kept the existing `splitPayments` storage name for compatibility while routing new employee payments through one save path with employee, date, total, and allocations recorded together.
+- Simplified employee payments by always listing open jobs and active recurring services. Payment intent is inferred automatically: positive allocations remain General/partial pay unless they exceed the current balance, over-balance or zero-balance allocations become Advances, and negative allocations become Adjustments. Final Pay remains an explicit per-source choice rather than being inferred from the amount.
+- Split a single over-balance allocation into separate General and Advance history records while keeping it one payment event, added sign-aware row Max behavior for negative adjustments and extra advances, and added clear buttons beside allocation inputs.
+- Removed the ambiguous "advance available" row label and grouped employee-payment sources by current pay owed. Sources with positive pay owed appear first; other eligible open work is available in a collapsed section, while a source opened directly from a job remains visible.
+- Aligned the employee-payment controls and kept browser regression coverage focused on payment defaults, source selection, allocation, and clear behavior rather than fragile styling details.
+- Simplified the employee-payment modal by changing the top MAX control to match allocation rows, centering it vertically, removing the redundant PAY OWED header, and removing the duplicate divider before Other eligible work.
+- Added a matching clear-X control around the total payment amount, placed MAX/input/clear in the same order as allocation rows, and widened individual allocation inputs from 100px to 150px.
+- Fixed the total-payment clear control and retained regression coverage for the control and its allocation behavior.
+- Made each allocation-row MAX button two-stage: the first click fills the owed portion, and a second click includes the remaining advance amount. Over-balance rows now default their visible flag to General, while the flag controls the owed portion and any excess is always Advance. Added a live breakdown showing the resulting records.
+- Removed the unnecessary adjustment breakdown text and disabled one-cent number-input spinner arrows throughout the preview.
+- Removed 21 low-value browser smoke assertions for deleted controls, exact copy, icon classes, pixel-level sizing, and other cosmetic implementation details. The smoke suite now protects user-visible behavior without requiring a particular visual implementation.
 
 ### Fixed and hardened
 

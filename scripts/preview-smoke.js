@@ -242,8 +242,6 @@ async function main() {
         closeModal('settingsModal');
         return {
           overviewActive: document.getElementById('tab-overview').classList.contains('active'),
-          overviewTitleRemoved: !document.querySelector('#tab-overview .overview-title'),
-          overviewSubtitle: document.querySelector('#tab-overview .overview-subtitle')?.textContent.trim(),
           attentionWidget: !!document.getElementById('summaryCards'),
           notesWidget: !!document.getElementById('overviewNotes'),
           activityLayout: (() => {
@@ -266,28 +264,18 @@ async function main() {
             return !!card && controls?.querySelectorAll('.summary-card-select').length === 2 &&
               card.querySelector('.summary-card-header')?.nextElementSibling?.classList.contains('summary-value');
           })(),
-          quickLinksRemoved: !document.querySelector('#tab-overview .overview-quick-links'),
-          newNoteLabel: document.querySelector('#overviewNoteForm')?.parentElement?.querySelector('.overview-panel-header button')?.textContent.trim(),
-          newJobLabel: document.getElementById('newJobBtn')?.textContent.trim(),
           newJobUsesUnified: document.getElementById('newJobBtn')?.getAttribute('onclick') === 'openUnifiedJobModal()',
-          quickJobButtonRemoved: !document.getElementById('newUnifiedJobBtn'),
           settingsLabels
         };
       });
       assert.equal(workspaceResult.overviewActive, true);
-      assert.equal(workspaceResult.overviewTitleRemoved, true);
-      assert.equal(workspaceResult.overviewSubtitle, 'Your starting point for jobs, money, and the things that need attention.');
       assert.equal(workspaceResult.attentionWidget, true);
       assert.equal(workspaceResult.notesWidget, true);
       assert.equal(workspaceResult.activityLayout, true);
       assert.equal(workspaceResult.invoiceLayout, true);
       assert.equal(workspaceResult.employeeHeaderControls, true);
       assert.equal(workspaceResult.recentPayFilterPosition, true);
-      assert.equal(workspaceResult.quickLinksRemoved, true);
-      assert.equal(workspaceResult.newNoteLabel, '+ New Note');
-      assert.equal(workspaceResult.newJobLabel, '+ New Job');
       assert.equal(workspaceResult.newJobUsesUnified, true);
-      assert.equal(workspaceResult.quickJobButtonRemoved, true);
       assert.deepEqual(workspaceResult.settingsLabels, [
         'Appearance', 'Client display', 'Job defaults', 'Team & permissions',
         'Financial rules', 'Square integration', 'Data & backup', 'Temporary tools'
@@ -298,36 +286,182 @@ async function main() {
         openEmployeePayment();
         const owedFlow = {
           modalOpen: !document.getElementById('splitPayModal').classList.contains('hidden'),
-          title: document.getElementById('sp_modalTitle')?.textContent.trim(),
+          defaultAmount: document.getElementById('sp_total')?.value,
+          defaultDescription: document.getElementById('sp_label')?.value,
+          otherEligibleWorkCollapsed: (() => {
+            const details = document.getElementById('sp_otherAllocations');
+            return !details || !details.open;
+          })(),
+          topClearButton: !!document.getElementById('sp_totalClearBtn'),
+          clearButtonCount: document.querySelectorAll('#splitPayModal .sp-clear-btn').length,
+          allocationRowCount: document.querySelectorAll('#splitPayModal .sp-alloc-input').length,
           employeeSelector: !!document.getElementById('sp_employee'),
-          allocationHeading: [...document.querySelectorAll('#splitPayModal .form-label')].find(el => /Allocate to Jobs/i.test(el.textContent))?.textContent.trim(),
-          oldPayOutModalRemoved: !document.getElementById('payOutModal'),
-          oldSplitPayHeaderRemoved: !document.getElementById('splitPayBtn')
         };
         closeModal('splitPayModal');
         openEmployeePaymentForSource('job', 'browser-smoke-job');
         const sourceFlow = {
-          title: document.getElementById('sp_modalTitle')?.textContent.trim(),
           sourceRowCount: document.querySelectorAll('#splitPayModal .sp-alloc-input').length,
           sourceRowId: document.querySelector('#splitPayModal .sp-alloc-input')?.id,
-          selectedEmployee: document.getElementById('sp_employee')?.value,
-          sourceLabel: document.querySelector('#splitPayModal #sp_allocList > div:not([style*="uppercase"])')?.textContent || ''
+          selectedEmployee: document.getElementById('sp_employee')?.value
         };
         closeModal('splitPayModal');
         openUnifiedJobModal('browser-smoke-job');
         return { owedFlow, sourceFlow };
       });
       assert.equal(employeePaymentEntryResult.owedFlow.modalOpen, true);
-      assert.equal(employeePaymentEntryResult.owedFlow.title, 'Pay Owed');
+      assert.equal(employeePaymentEntryResult.owedFlow.defaultAmount, '0.00');
+      assert.equal(employeePaymentEntryResult.owedFlow.defaultDescription, '');
+      assert.equal(employeePaymentEntryResult.owedFlow.otherEligibleWorkCollapsed, true);
+      assert.equal(employeePaymentEntryResult.owedFlow.topClearButton, true);
+      assert.equal(employeePaymentEntryResult.owedFlow.clearButtonCount, employeePaymentEntryResult.owedFlow.allocationRowCount + 1);
       assert.equal(employeePaymentEntryResult.owedFlow.employeeSelector, true);
-      assert.match(employeePaymentEntryResult.owedFlow.allocationHeading, /Allocate to Jobs/i);
-      assert.equal(employeePaymentEntryResult.owedFlow.oldPayOutModalRemoved, true);
-      assert.equal(employeePaymentEntryResult.owedFlow.oldSplitPayHeaderRemoved, true);
-      assert.equal(employeePaymentEntryResult.sourceFlow.title, 'Pay Employee');
       assert.equal(employeePaymentEntryResult.sourceFlow.sourceRowCount, 1);
       assert.equal(employeePaymentEntryResult.sourceFlow.sourceRowId, 'sp_job_browser-smoke-job');
       assert.equal(employeePaymentEntryResult.sourceFlow.selectedEmployee, 'browser-smoke-employee');
-      assert.match(employeePaymentEntryResult.sourceFlow.sourceLabel, /Browser Test Client/);
+
+      const paymentAllocationResult = await page.evaluate(() => {
+        const owedJob = _cloneState(state.jobs[0]);
+        owedJob.id = 'browser-smoke-owed-job';
+        owedJob.name = 'Browser Owed Job';
+        owedJob.quote = 500;
+        owedJob.quoteItems = [{ ...owedJob.quoteItems[0], id: 'browser-smoke-owed-line', amount: 500 }];
+        owedJob.milestones = [{ ...owedJob.milestones[0], id: 'browser-smoke-owed-milestone', amount: 500 }];
+        owedJob.unifiedLines = [{ ...owedJob.unifiedLines[0], id: 'browser-smoke-owed-line', amount: 500 }];
+        const advanceJob = _cloneState(owedJob);
+        advanceJob.id = 'browser-smoke-advance-job';
+        advanceJob.name = 'Browser Advance Job';
+        advanceJob.quote = 250;
+        advanceJob.quoteItems = [{ ...advanceJob.quoteItems[0], id: 'browser-smoke-advance-line', amount: 250 }];
+        advanceJob.milestones = [{ ...advanceJob.milestones[0], id: 'browser-smoke-advance-milestone', amount: 250 }];
+        advanceJob.unifiedLines = [{ ...advanceJob.unifiedLines[0], id: 'browser-smoke-advance-line', amount: 250 }];
+        advanceJob.workCompleted = false;
+        const completedJob = _cloneState(owedJob);
+        completedJob.id = 'browser-smoke-completed-job';
+        completedJob.name = 'Browser Completed Job';
+        completedJob.status = 'complete';
+        state.jobs = [state.jobs[0], owedJob, advanceJob, completedJob];
+
+        openEmployeePayment({ employeeId: 'browser-smoke-employee' });
+        let owedInputs = [...document.querySelectorAll('.sp-alloc-input')]
+          .filter(input => Number(input.dataset.owed || 0) > 0.005);
+        const maxOwedJob = owedInputs[0];
+        fillSplitPayMax();
+        const maxOwedResult = {
+          total: document.getElementById('sp_total').value,
+          amount: maxOwedJob.value,
+          type: document.getElementById(maxOwedJob.id + '_type')?.value,
+          completedJobHidden: !document.getElementById('sp_job_browser-smoke-completed-job')
+        };
+        const firstMaxTotal = document.getElementById('sp_total').value;
+        closeModal('splitPayModal');
+        openEmployeePayment({ employeeId: 'browser-smoke-employee' });
+        const reopenedBeforeMax = document.getElementById('sp_total').value;
+        fillSplitPayMax();
+        const reopenedAfterMax = document.getElementById('sp_total').value;
+        owedInputs = [...document.querySelectorAll('.sp-alloc-input')]
+          .filter(input => Number(input.dataset.owed || 0) > 0.005);
+        owedInputs.forEach(input => { input.value = ''; _inferSplitPayType(input); });
+        updateSplitTotals();
+        document.getElementById('sp_total').value = '100.00';
+        owedInputs[0].value = '50.00';
+        _inferSplitPayType(owedInputs[0]);
+        maxAlloc(owedInputs[1].id);
+        const partialAllocation = {
+          total: document.getElementById('sp_total').value,
+          first: owedInputs[0].value,
+          second: owedInputs[1].value,
+          firstType: document.getElementById(owedInputs[0].id + '_type')?.value,
+          secondType: document.getElementById(owedInputs[1].id + '_type')?.value,
+          remaining: document.getElementById('sp_totals').textContent.split(/\n/).map(line => line.trim()).filter(Boolean).join('\n')
+        };
+        owedInputs[0].value = '1000.00';
+        _inferSplitPayType(owedInputs[0]);
+        updateSplitTotals();
+        const overBalanceType = document.getElementById(owedInputs[0].id + '_type')?.value;
+        const overBalanceBreakdown = document.getElementById(owedInputs[0].id + '_breakdown')?.textContent;
+        document.getElementById(owedInputs[0].id + '_type').value = 'final';
+        updateSplitTotals();
+        const finalOverBalanceBreakdown = document.getElementById(owedInputs[0].id + '_breakdown')?.textContent;
+
+        document.querySelectorAll('.sp-alloc-input').forEach(input => { input.value = ''; _inferSplitPayType(input); });
+        updateSplitTotals();
+        document.getElementById('sp_total').value = (Number(owedInputs[0].dataset.owed) + 100).toFixed(2);
+        maxAlloc(owedInputs[0].id);
+        const firstExtraAllocation = owedInputs[0].value;
+        maxAlloc(owedInputs[0].id);
+        const extraAllocation = {
+          amount: owedInputs[0].value,
+          type: document.getElementById(owedInputs[0].id + '_type')?.value,
+          firstClickAmount: firstExtraAllocation,
+          owedAmount: Number(owedInputs[0].dataset.owed || 0).toFixed(2)
+        };
+
+        document.querySelectorAll('.sp-alloc-input').forEach(input => { input.value = ''; _inferSplitPayType(input); });
+        updateSplitTotals();
+        document.getElementById('sp_total').value = '-100.00';
+        maxAlloc(owedInputs[0].id);
+        const negativeAllocation = {
+          amount: owedInputs[0].value,
+          type: document.getElementById(owedInputs[0].id + '_type')?.value,
+          breakdown: document.getElementById(owedInputs[0].id + '_breakdown')?.textContent
+        };
+
+        document.querySelectorAll('.sp-alloc-input').forEach(input => { input.value = ''; _inferSplitPayType(input); });
+        updateSplitTotals();
+        document.getElementById('sp_total').value = '100.00';
+        const zeroBalanceInput = [...document.querySelectorAll('.sp-alloc-input')]
+          .find(input => Math.abs(Number(input.dataset.owed || 0)) < 0.005);
+        maxAlloc(zeroBalanceInput.id);
+        const advanceAllocation = {
+          zeroBalanceAmount: zeroBalanceInput.value,
+          zeroBalanceType: document.getElementById(zeroBalanceInput.id + '_type')?.value,
+          remaining: document.getElementById('sp_totals').textContent.split(/\n/).map(line => line.trim()).filter(Boolean).join('\n')
+        };
+        closeModal('splitPayModal');
+        return {
+          maxOwedResult,
+          firstMaxTotal,
+          reopenedBeforeMax,
+          reopenedAfterMax,
+          partialAllocation,
+          overBalanceType,
+          overBalanceBreakdown,
+          finalOverBalanceBreakdown,
+          extraAllocation,
+          negativeAllocation,
+          advanceAllocation,
+          splitPayment: _splitEmployeePaymentAllocation(1000, 500, 'advance')
+        };
+      });
+      assert.equal(paymentAllocationResult.maxOwedResult.type, '');
+      assert.equal(paymentAllocationResult.maxOwedResult.completedJobHidden, true);
+      assert.notEqual(paymentAllocationResult.maxOwedResult.total, '0.00');
+      assert.equal(paymentAllocationResult.reopenedBeforeMax, '0.00');
+      assert.equal(paymentAllocationResult.reopenedAfterMax, paymentAllocationResult.firstMaxTotal);
+      assert.deepEqual(paymentAllocationResult.partialAllocation, {
+        total: '100.00',
+        first: '50.00',
+        second: '50.00',
+        firstType: '',
+        secondType: '',
+        remaining: 'Total $100.00\nAllocated $100.00\nRemaining $0.00'
+      });
+      assert.equal(paymentAllocationResult.overBalanceType, '');
+      assert.match(paymentAllocationResult.overBalanceBreakdown, /General.*Advance/);
+      assert.match(paymentAllocationResult.finalOverBalanceBreakdown, /Final Pay.*Advance/);
+      assert.equal(paymentAllocationResult.extraAllocation.firstClickAmount, paymentAllocationResult.extraAllocation.owedAmount);
+      assert.equal(Number(paymentAllocationResult.extraAllocation.amount), Number(paymentAllocationResult.extraAllocation.owedAmount) + 100);
+      assert.equal(paymentAllocationResult.extraAllocation.type, '');
+      assert.equal(paymentAllocationResult.negativeAllocation.amount, '-100.00');
+      assert.equal(paymentAllocationResult.negativeAllocation.type, 'adjustment');
+      assert.equal(paymentAllocationResult.negativeAllocation.breakdown, '');
+      assert.deepEqual(paymentAllocationResult.splitPayment, [
+        { amount: 500, payType: '' },
+        { amount: 500, payType: 'advance' }
+      ]);
+      assert.equal(paymentAllocationResult.advanceAllocation.zeroBalanceAmount, '100.00');
+      assert.equal(paymentAllocationResult.advanceAllocation.zeroBalanceType, 'advance');
+      assert.match(paymentAllocationResult.advanceAllocation.remaining, /Remaining\s*\$0\.00/);
 
       const employeeOverviewResult = await page.evaluate(() => {
         const employee = state.users.find(user => !user.isAdmin);
@@ -362,8 +496,6 @@ async function main() {
         toggleOverviewNoteToggle('overviewNotePinned');
         saveOverviewNote();
         const note = state.dashboardNotes[0];
-        const pinnedClassBeforeEdit = document.querySelector('.overview-note-item')?.classList.contains('pinned');
-        const pinIconBeforeEdit = !!document.querySelector('.overview-note-item .ph-push-pin');
         openOverviewNote(note.id);
         const openedText = document.getElementById('overviewNoteModalText').value;
         const modalPinnedBeforeEdit = document.getElementById('overviewNoteModalPinned').classList.contains('on');
@@ -381,37 +513,21 @@ async function main() {
         return {
           openedText,
           savedText: expandedSavedText,
-          pinnedClassBeforeEdit,
-          pinIconBeforeEdit,
           modalPinnedBeforeEdit,
-          modalPinnedClass: document.getElementById('overviewNoteModal').classList.contains('pinned'),
           savedPinned: state.dashboardNotes[0]?.pinned,
           modalStaysOpenAfterSave,
           workspaceOriginEditCloses: document.getElementById('overviewNoteModal').classList.contains('hidden'),
-          workspaceOriginSavedText: state.dashboardNotes[0]?.text,
-          cardCount: document.querySelectorAll('.overview-note-item').length,
-          previewClamp: getComputedStyle(document.querySelector('.overview-note-text')).webkitLineClamp,
-          cardIcons: [...document.querySelectorAll('.overview-note-item .ph-duotone')].map(icon => icon.className).sort(),
-          modalCloseIcon: document.querySelector('#overviewNoteModal .overview-note-close .ph-duotone')?.className,
-          saveButtonStyle: document.getElementById('overviewNoteModalSaveBtn')?.classList.contains('btn-ghost')
+          workspaceOriginSavedText: state.dashboardNotes[0]?.text
         };
       });
       assert.deepEqual(overviewNoteResult, {
         openedText: 'Browser smoke workspace note',
         savedText: 'Edited workspace note',
-        pinnedClassBeforeEdit: true,
-        pinIconBeforeEdit: true,
         modalPinnedBeforeEdit: true,
-        modalPinnedClass: false,
         savedPinned: false,
         modalStaysOpenAfterSave: true,
         workspaceOriginEditCloses: true,
-        workspaceOriginSavedText: 'Workspace-origin edited note',
-        cardCount: 1,
-        previewClamp: '5',
-        cardIcons: ['ph-duotone ph-check-fat', 'ph-duotone ph-pencil-simple', 'ph-duotone ph-trash'],
-        modalCloseIcon: 'ph-duotone ph-x',
-        saveButtonStyle: true
+        workspaceOriginSavedText: 'Workspace-origin edited note'
       });
 
       const themeResult = await page.evaluate(() => {

@@ -10,8 +10,8 @@ This is the canonical order for the remaining Tracker 2.0 work. The category sec
 
 ### 1. Finish the no-Square core workflow
 
-1. **Unify employee payments** — replace the separate Pay Out and Split Pay presentation with one workflow that supports one or many jobs, advances, adjustments, and split allocations. This is the next implementation task.
-2. **Add persistent activity history** — design it alongside payment changes so edits, reversals, and employee-pay corrections remain explainable. Keep session undo/redo as the immediate safety feature while the durable history layer is introduced.
+1. **[Done] Unify employee payments** — replaced the separate Pay Out and Split Pay presentation with one workflow that supports one or many jobs, advances, adjustments, and split allocations. Job and recurring-service buttons remain prefilled entry points into the same workflow.
+2. **Add persistent activity history** — design it around the unified payment-event path so edits, reversals, and employee-pay corrections remain explainable. Keep session undo/redo as the immediate safety feature while the durable history layer is introduced.
 3. **Complete browser regression coverage** for the main job, client, payment, employee-pay, and historical-client workflows.
 4. **Improve save reliability** with queued saves, then evaluate record-level writes and conflict detection.
 
@@ -115,6 +115,7 @@ The detailed keep/fix/defer/remove decisions are maintained in `TRACKER-2-FEATUR
 - [x] Add browser smoke coverage for Overview cards, employee invoice visibility, Recent Pay controls, workspace notes, themes, and the preview no-write boundary.
 - [x] Create and maintain a running Tracker 2.0 changelog alongside the TODO and feature-review documents.
 - [x] Add automated browser regression coverage for manual payments, partial payments, generated-note cleanup, payout-ledger updates, and preview no-write behavior.
+- [x] Remove low-value cosmetic browser assertions so the smoke suite protects behavior instead of deleted controls, exact copy, icon classes, or pixel-level styling.
 - [ ] Split the large frontend into behavior-focused modules after the data model stabilizes.
 - [ ] Separate read models, calculations, persistence, and rendering so Tracker 2.0 changes do not require editing one monolithic file.
 - [ ] Review the full-state Firestore write model for conflict and accidental-overwrite risks.

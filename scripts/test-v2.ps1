@@ -12,6 +12,8 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'v2/fee-domain.js syntax check failed.' }
   node --check v2/state-domain.js
   if ($LASTEXITCODE -ne 0) { throw 'v2/state-domain.js syntax check failed.' }
+  node --check v2/preview-fixtures.js
+  if ($LASTEXITCODE -ne 0) { throw 'v2/preview-fixtures.js syntax check failed.' }
   node --check v2/migration-audit.js
   if ($LASTEXITCODE -ne 0) { throw 'v2/migration-audit.js syntax check failed.' }
   node --check scripts/migration-audit.js
@@ -55,6 +57,8 @@ try {
     'v2/fee-domain.test.js',
     'v2/state-domain.js',
     'v2/state-domain.test.js',
+    'v2/preview-fixtures.js',
+    'v2/preview-fixtures.test.js',
     'v2/migration-audit.js',
     'v2/migration-audit.test.js',
     'scripts/migration-audit.js',

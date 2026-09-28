@@ -411,6 +411,17 @@
   .form-input { width: 100%; background: var(--bg3); border: 1px solid var(--border2); border-radius: 3px; padding: 10px 12px; color: var(--text); font-family: var(--mono); font-size: 17px; outline: none; transition: border-color 0.15s; }
   .form-input:focus { border-color: var(--accent); }
   .form-input::placeholder { color: var(--text3); }
+  input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  /* Keep the unified employee-payment fields aligned across native input/select controls. */
+  .split-pay-field { height: 44px; min-height: 44px; box-sizing: border-box; line-height: 1.2; }
+  .sp-max-owed-btn, .sp-total-clear-btn { align-self: center; }
+  .sp-allocation-breakdown { font-family: var(--mono); font-size: 12px; color: var(--text3); margin-top: 3px; }
+  .sp-other-allocations { margin-top: 12px; padding-top: 8px; }
+  .sp-other-allocations > summary { cursor: pointer; color: var(--text2); font-family: var(--mono); font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; padding: 6px 0; }
+  .sp-other-allocations > summary:hover { color: var(--accent); }
+  .sp-other-allocations > summary::marker { color: var(--accent); }
   textarea.form-input { resize: vertical; min-height: 80px; font-family: var(--sans); }
   .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .form-hint { font-size: 15px; color: var(--text3); margin-top: 4px; }
@@ -1300,7 +1311,7 @@
         <div id="stab-fees" class="settings-panel">
           <div class="form-group">
             <label class="form-label">Percentage rate</label>
-            <div style="display:flex;align-items:center;gap:8px">
+          <div style="display:flex;align-items:center;gap:8px">
               <input class="form-input" id="s_feeRate" type="number" step="0.1" min="0" max="100" style="max-width:120px" />
               <span style="font-family:var(--mono);color:var(--text3)">%</span>
             </div>
@@ -1862,36 +1873,33 @@
 <!-- SPLIT PAY MODAL -->
 <div id="splitPayModal" class="modal-overlay hidden">
   <div class="modal modal-wide">
-    <div class="modal-title" id="sp_modalTitle">Employee Payment</div>
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">Employee</label>
-        <select class="form-input" id="sp_employee" onchange="setSplitPayEmployee(this.value)"></select>
+        <select class="form-input split-pay-field" id="sp_employee" onchange="setSplitPayEmployee(this.value)"></select>
       </div>
       <div class="form-group">
-        <label class="form-label">Total Payment / Adjustment ($)</label>
-        <input class="form-input" id="sp_total" type="number" step="0.01" placeholder="0.00" oninput="updateSplitTotals()" />
+        <label class="form-label">Amount paying today ($)</label>
+        <div id="sp_totalControls" style="display:flex;align-items:flex-start;gap:8px">
+          <button class="btn btn-ghost btn-sm sp-max-owed-btn" id="sp_totalMaxBtn" type="button" onclick="fillSplitPayMax()">MAX</button>
+          <input class="form-input split-pay-field" id="sp_total" type="number" step="0.01" value="0" placeholder="0.00" onfocus="if(Number(this.value)===0) this.select()" oninput="updateSplitTotals()" />
+          <button class="btn btn-ghost btn-icon-only sp-clear-btn sp-total-clear-btn" id="sp_totalClearBtn" type="button" onclick="clearSplitPayTotal()" title="Clear amount paying today" aria-label="Clear amount paying today" style="min-width:30px;width:30px;height:30px;padding:0"><i class="ph ph-x" aria-hidden="true"></i></button>
+        </div>
       </div>
     </div>
-    <div class="form-row">
+    <div class="form-row" style="grid-template-columns:minmax(0,1fr) 170px">
+      <div class="form-group">
+        <label class="form-label">Description (optional)</label>
+        <input class="form-input split-pay-field" id="sp_label" placeholder="e.g. Weekly pay" />
+      </div>
       <div class="form-group">
         <label class="form-label">Date</label>
-        <input class="form-input" id="sp_date" type="date" />
+        <input class="form-input split-pay-field" id="sp_date" type="date" />
       </div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Description (optional)</label>
-      <input class="form-input" id="sp_label" placeholder="e.g. Weekly pay" />
     </div>
     <div style="border-top:1px solid var(--border);padding-top:14px;margin-top:4px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
         <div class="form-label" style="margin:0">Allocate to Jobs &amp; Recurring Services</div>
-        <div style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none" onclick="toggleSplitAdvances()">
-          <span style="font-family:var(--mono);font-size:14px;color:var(--text3);text-transform:uppercase;letter-spacing:0.1em">Allow Advances / Projected Work</span>
-          <span id="sp_toggleTrack" data-on="false" style="display:inline-flex;align-items:center;width:40px;height:22px;border-radius:11px;background:var(--border2);transition:background 0.2s;cursor:pointer;flex-shrink:0;padding:2px;box-sizing:border-box">
-            <span id="sp_toggleThumb" style="width:18px;height:18px;border-radius:50%;background:#fff;transition:transform 0.2s;display:block"></span>
-          </span>
-        </div>
       </div>
       <div id="sp_allocList"></div>
     </div>
@@ -2068,6 +2076,7 @@
 <script src="v2/job-domain.js?v=20260925-1"></script>
 <script src="v2/fee-domain.js?v=20260925-1"></script>
 <script src="v2/state-domain.js?v=20260925-1"></script>
+<script src="v2/preview-fixtures.js?v=20260928-1"></script>
 <script src="v2/persistence-domain.js?v=20260925-1"></script>
 <script src="v2/history-domain.js?v=20260925-1"></script>
 <script src="v2/debt-feature.js?v=20260925-1"></script>
