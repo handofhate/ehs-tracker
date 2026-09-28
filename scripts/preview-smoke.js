@@ -293,6 +293,42 @@ async function main() {
         'Financial rules', 'Square integration', 'Data & backup', 'Temporary tools'
       ]);
 
+      const employeePaymentEntryResult = await page.evaluate(() => {
+        closeModal('unifiedJobModal');
+        openEmployeePayment();
+        const owedFlow = {
+          modalOpen: !document.getElementById('splitPayModal').classList.contains('hidden'),
+          title: document.getElementById('sp_modalTitle')?.textContent.trim(),
+          employeeSelector: !!document.getElementById('sp_employee'),
+          allocationHeading: [...document.querySelectorAll('#splitPayModal .form-label')].find(el => /Allocate to Jobs/i.test(el.textContent))?.textContent.trim(),
+          oldPayOutModalRemoved: !document.getElementById('payOutModal'),
+          oldSplitPayHeaderRemoved: !document.getElementById('splitPayBtn')
+        };
+        closeModal('splitPayModal');
+        openEmployeePaymentForSource('job', 'browser-smoke-job');
+        const sourceFlow = {
+          title: document.getElementById('sp_modalTitle')?.textContent.trim(),
+          sourceRowCount: document.querySelectorAll('#splitPayModal .sp-alloc-input').length,
+          sourceRowId: document.querySelector('#splitPayModal .sp-alloc-input')?.id,
+          selectedEmployee: document.getElementById('sp_employee')?.value,
+          sourceLabel: document.querySelector('#splitPayModal #sp_allocList > div:not([style*="uppercase"])')?.textContent || ''
+        };
+        closeModal('splitPayModal');
+        openUnifiedJobModal('browser-smoke-job');
+        return { owedFlow, sourceFlow };
+      });
+      assert.equal(employeePaymentEntryResult.owedFlow.modalOpen, true);
+      assert.equal(employeePaymentEntryResult.owedFlow.title, 'Pay Owed');
+      assert.equal(employeePaymentEntryResult.owedFlow.employeeSelector, true);
+      assert.match(employeePaymentEntryResult.owedFlow.allocationHeading, /Allocate to Jobs/i);
+      assert.equal(employeePaymentEntryResult.owedFlow.oldPayOutModalRemoved, true);
+      assert.equal(employeePaymentEntryResult.owedFlow.oldSplitPayHeaderRemoved, true);
+      assert.equal(employeePaymentEntryResult.sourceFlow.title, 'Pay Employee');
+      assert.equal(employeePaymentEntryResult.sourceFlow.sourceRowCount, 1);
+      assert.equal(employeePaymentEntryResult.sourceFlow.sourceRowId, 'sp_job_browser-smoke-job');
+      assert.equal(employeePaymentEntryResult.sourceFlow.selectedEmployee, 'browser-smoke-employee');
+      assert.match(employeePaymentEntryResult.sourceFlow.sourceLabel, /Browser Test Client/);
+
       const employeeOverviewResult = await page.evaluate(() => {
         const employee = state.users.find(user => !user.isAdmin);
         currentUser = { id: employee.id, name: employee.name, isAdmin: false };

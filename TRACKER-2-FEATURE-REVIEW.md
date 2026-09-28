@@ -15,7 +15,7 @@ The remaining work follows the canonical sequence in `TRACKER-2-TODO.md`: employ
 - Employee Recent Pay uses the same upper-right header control placement as the admin card.
 - Workspace notes begin as a lightweight shared/admin note board. A full chat or messaging system is deliberately deferred.
 - Workspace notes are displayed as truncated sticky-note cards. They can be opened in a full note view, marked done, edited by their author or an admin, and deleted by their author or an admin.
-- Employee payout entry points should eventually use one underlying payment workflow that supports one or many jobs, advances, adjustments, and split allocations.
+- Employee payment entry points now use one underlying workflow that supports one or many jobs, recurring services, advances, adjustments, and split allocations. Job and recurring-service buttons remain useful shortcuts that open the same workflow with the source preselected.
 - Current billing meanings remain unchanged for now: pending means not invoiced or paid, invoiced means sent but unpaid, and paid means collected.
 
 ## Settings direction
@@ -50,7 +50,7 @@ The temporary area contains the one-time debt feature and future migration/recov
 - Establish minimum production security for Square: server-side secrets, Firestore rules, and server-enforced admin authorization. This does not require enterprise-grade permissions or a large role system.
 - Keep invoice-summary visibility global for employees while the team is small; add per-user visibility only if a future multi-employee setup needs it.
 - Replace the full-state save drop-on-busy behavior with queued saves, then consider record-level writes and conflict detection.
-- Simplify Pay Out and Split Pay into one underlying payment model and workflow.
+- Reconcile historical direct employee-pay entries that predate the unified payment-event path; keep the compatibility ledger until that audit passes.
 - Add persistent activity history as a separate concept from immediate session undo/redo. Financial reversals should preserve history instead of erasing it.
 - Decide whether employees should see all clients, schedules, and shared notes or only assigned records.
 

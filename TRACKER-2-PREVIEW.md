@@ -20,6 +20,7 @@ The script opens `http://127.0.0.1:8765/index.html` in the browser. A local web 
 - Reloading or closing the preview discards temporary tracker edits.
 - The preview uses a separate browser-storage prefix for UI preferences and login state.
 - The preview starts on the Overview workspace, with one visible `New Job` button that opens the unified workflow.
+- Employee payments now use one visible `Pay Employee` workflow. Job and recurring-service payment buttons open that same workflow with the source preselected.
 - Overview workspace notes are temporary in the preview just like other edits; they are not written to Firestore.
 - Overview currently combines Active Jobs and Recurring Services, shared Outstanding/Pending Invoices, employee pay, Recent Pay, and workspace notes. Employees see the shared invoice summary for now; per-user visibility can be added later if the team expands.
 - The employee Recent Pay timeframe control is positioned in the card header, matching the admin Overview layout.

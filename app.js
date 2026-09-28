@@ -58,9 +58,11 @@ let state = {
 };
 let editingJobId = null;
 let addItemContext = null;
-let payOutCtx = { employeeId: '' };
+let employeePaymentCtx = { employeeId: '' };
 let splitPayIncludeAll = false;
 let splitPayEmployeeId = '';
+let splitPayPayoutContext = false;
+let splitPaySource = null;
 let expandedJobs = new Set(); // local only - never saved to Firestore
 let expandedHW   = new Set(); // local only - never saved to Firestore
 let expandedClients = new Set();
@@ -693,7 +695,6 @@ function syncHomewatchAutoInvoices() {
 // ─── HOMEWATCH ────────────────────────────────────────────────────────────────
 let editingHWId  = null;
 let hwPayContext = null;
-let hwPayMode    = 'payment'; // 'payment' | 'advance'
 
 function renderHomewatch() {
   const isAdmin = currentUser?.isAdmin;
@@ -769,7 +770,7 @@ function hwDetail(hw, c) {
         : '<div style="color:var(--text3);font-size:15px;padding:4px 0">No payments logged yet.</div>'}
       <div class="section-header admin-only" style="margin-top:12px">
         <span class="section-title">Paid to ${en}</span>
-        <button class="btn btn-ghost btn-sm" onclick="openAddHWAdvance('${hw.id}')">+ Pay Employee</button>
+        <button class="btn btn-ghost btn-sm" onclick="openEmployeePaymentForSource('hw','${hw.id}')">+ Pay Employee</button>
       </div>
       ${advances.length
         ? advances.slice().reverse().map(a=>`
@@ -868,18 +869,10 @@ function toggleHWPause(hwId) {
   save(); renderHomewatch(); renderSummary();
 }
 function openAddHWPayment(hwId) {
-  hwPayContext = hwId; hwPayMode = 'payment';
+  hwPayContext = hwId;
   const hw = (state.homewatch||[]).find(h=>h.id===hwId);
   document.getElementById('hwPayModalTitle').textContent = `Log Client Payment - ${hw?.name||''}`;
   document.getElementById('hwp_amount').value = hw?.monthlyRate||'';
-  document.getElementById('hwp_date').value   = today();
-  document.getElementById('hwPayModal').classList.remove('hidden');
-}
-function openAddHWAdvance(hwId) {
-  hwPayContext = hwId; hwPayMode = 'advance';
-  const hw = (state.homewatch||[]).find(h=>h.id===hwId);
-  document.getElementById('hwPayModalTitle').textContent = `Pay Employee - ${hw?.name||''}`;
-  document.getElementById('hwp_amount').value = '';
   document.getElementById('hwp_date').value   = today();
   document.getElementById('hwPayModal').classList.remove('hidden');
 }
@@ -889,12 +882,7 @@ function saveHWPayment() {
   if (!amount) { showAlert('Please enter an amount.'); return; }
   const hw = (state.homewatch||[]).find(h=>h.id===hwPayContext);
   if (!hw) return;
-  if (hwPayMode === 'advance') {
-    if (!hw.advances) hw.advances = [];
-    hw.advances.push({ id:uid(), amount, date });
-  } else {
-    hw.payments.push({ id:uid(), amount, date, status:'pending', feeConfig: V2_FEES.createFeeConfig(state.settings, date) });
-  }
+  hw.payments.push({ id:uid(), amount, date, status:'pending', feeConfig: V2_FEES.createFeeConfig(state.settings, date) });
   save(); closeModal('hwPayModal'); renderHomewatch(); renderSummary();
 }
 function removeHWAdvance(hwId, advId) {
@@ -2336,7 +2324,7 @@ function jobDetail(job, c) {
       <div class="detail-section">
         <div class="detail-section-header" style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
           <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">Employee Pay</div>
-          <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','advance')">+</button>
+          <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openEmployeePaymentForSource('job','${job.id}')">+ Pay Employee</button>
         </div>
         ${advHtml||'<div style="color:var(--text3);font-size:16px;padding:4px 0">No employee payments logged</div>'}
         <div class="total-line"><span style="color:var(--text2)">${employeePayNetLabel(c.advancesPaid)}</span><span class="line-item-value ${employeePayActivityClass(c.advancesPaid)}">${employeePayNetFmt(c.advancesPaid)}</span></div>
@@ -2638,117 +2626,150 @@ function renderSplitLedger() {
   }).join('');
 }
 
-// ─── SPLIT PAY ────────────────────────────────────────────────────────────────
-function _buildPayOutRows(employeeId) {
+// ─── EMPLOYEE PAYMENTS ───────────────────────────────────────────────────────
+// All new employee payments use this one modal and save path. The existing
+// splitPayments field remains as the storage name for compatibility with
+// historical ledger entries and migration reconstruction.
+function _buildEmployeePaymentRows(employeeId) {
   if (!employeeId) return [];
   const rows = [];
   state.jobs.filter(j => j.employeeId === employeeId).forEach(j => {
     const c = calcJob(j);
-    rows.push({
-      id: 'sp_job_' + j.id,
-      label: j.name || 'Job',
-      kind: 'job',
-      workPayBalance: Number(c.potentialEmpBalance || 0)
-    });
+    rows.push({ id: 'sp_job_' + j.id, label: j.name || 'Job', kind: 'job', currentBalance: Number(c.empBalance || 0), potentialBalance: Number(c.potentialEmpBalance || 0) });
   });
   (state.homewatch || []).filter(hw => hw.employeeId === employeeId).forEach(hw => {
     const c = calcHW(hw);
-    rows.push({
-      id: 'sp_hw_' + hw.id,
-      label: hw.name || 'HomeWatch',
-      kind: 'hw',
-      workPayBalance: Number(c.potentialEmpBalance || 0)
-    });
+    rows.push({ id: 'sp_hw_' + hw.id, label: hw.name || 'Recurring Service', kind: 'hw', currentBalance: Number(c.empBalance || 0), potentialBalance: Number(c.potentialEmpBalance || 0) });
   });
   return rows;
 }
-function _calcPayOutPlan(employeeId) {
-  const rows = _buildPayOutRows(employeeId).map(r => ({
-    ...r,
-    payoutTarget: _roundMoney(r.workPayBalance)
+function _calcEmployeePaymentPlan(employeeId) {
+  const rows = _buildEmployeePaymentRows(employeeId).map(row => ({
+    ...row,
+    payoutTarget: _roundMoney(row.potentialBalance)
   }));
-  const payoutTotal = _roundMoney(rows.reduce((s, r) => s + r.payoutTarget, 0));
-  return { rows, payoutTotal };
+  return { rows, payoutTotal: _roundMoney(rows.reduce((sum, row) => sum + row.payoutTarget, 0)) };
 }
-function openPayOut() {
+function _employeePaymentOptions(selectedId) {
+  return state.users
+    .filter(user => !user.isAdmin)
+    .map(user => `<option value="${esc(user.id)}"${user.id === selectedId ? ' selected' : ''}>${esc(user.name || 'Employee')}</option>`)
+    .join('');
+}
+function openEmployeePayment(preset = null) {
   if (!currentUser?.isAdmin) return;
-  const employees = state.users.filter(u => !u.isAdmin);
-  if (!employees.length) { showAlert('No employees available for payout.'); return; }
-  const select = document.getElementById('po_employee');
-  if (!select) return;
-  if (!payOutCtx.employeeId || !employees.some(e => e.id === payOutCtx.employeeId)) {
-    payOutCtx.employeeId = employees[0].id;
+  const employees = state.users.filter(user => !user.isAdmin);
+  if (!employees.length) { showAlert('No employees available for payment.'); return; }
+  const mode = preset?.mode || 'owed';
+  const employeeId = preset?.employeeId && employees.some(user => user.id === preset.employeeId)
+    ? preset.employeeId
+    : (employeePaymentCtx.employeeId && employees.some(user => user.id === employeePaymentCtx.employeeId) ? employeePaymentCtx.employeeId : employees[0].id);
+  employeePaymentCtx.employeeId = employeeId;
+  if (mode === 'owed') {
+    const plan = _calcEmployeePaymentPlan(employeeId);
+    const employee = getEmp(employeeId);
+    const allocById = {};
+    plan.rows.forEach(row => {
+      if (Math.abs(row.payoutTarget) > 0.005) allocById[row.id] = row.payoutTarget;
+    });
+    preset = {
+      ...(preset || {}),
+      employeeId,
+      includeAll: true,
+      payoutContext: true,
+      total: plan.payoutTotal,
+      date: preset?.date || today(),
+      label: preset?.label || ('Pay Owed' + (employee?.name ? ' - ' + employee.name : '')),
+      allocById
+    };
+  } else {
+    preset = { ...(preset || {}), employeeId };
   }
-  select.innerHTML = employees.map(e => `<option value="${e.id}"${e.id === payOutCtx.employeeId ? ' selected' : ''}>${esc(e.name || 'Employee')}</option>`).join('');
-  document.getElementById('po_date').value = today();
-  renderPayOut();
-  document.getElementById('payOutModal').classList.remove('hidden');
+  openSplitPay(preset);
 }
-function renderPayOut() {
-  const select = document.getElementById('po_employee');
-  if (!select) return;
-  payOutCtx.employeeId = select.value || payOutCtx.employeeId || '';
-  const plan = _calcPayOutPlan(payOutCtx.employeeId);
-  const totalsEl = document.getElementById('po_totals');
-  if (totalsEl) {
-    const totalColor = plan.payoutTotal < -0.005 ? 'var(--red)' : 'var(--green)';
-    totalsEl.innerHTML =
-      '<span>Pay owed from completed work <strong style="color:' + totalColor + '">' + fmt(plan.payoutTotal) + '</strong></span>';
-  }
-  const rowsEl = document.getElementById('po_rows');
-  const hintEl = document.getElementById('po_hint');
-  if (hintEl) {
-    hintEl.textContent = 'Based on completed work, regardless of client payment status. Negative balances are included to account for overpayments.';
-  }
-  const applyBtn = document.getElementById('po_applyBtn');
-  if (applyBtn) {
-    applyBtn.textContent = 'Use Pay Owed in Split Pay';
-    applyBtn.disabled = plan.payoutTotal <= 0.005;
-  }
-  if (rowsEl) {
-    const shown = plan.rows.filter(r => Math.abs(r.payoutTarget) > 0.005);
-    rowsEl.innerHTML = shown.length
-      ? shown.map(r =>
-          '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">' +
-            '<div style="min-width:0">' +
-              '<div style="font-size:15px">' + esc(r.label) + '</div>' +
-              '<div style="font-family:var(--mono);font-size:12px;color:var(--text3)">Pay owed: ' + fmt(r.workPayBalance) + '</div>' +
-            '</div>' +
-            '<div style="font-family:var(--mono);font-size:14px;color:' + (r.payoutTarget < -0.005 ? 'var(--red)' : 'var(--green)') + ';white-space:nowrap">' + fmt(r.payoutTarget) + '</div>' +
-          '</div>'
-        ).join('')
-      : '<div style="color:var(--text3);font-size:15px;padding:12px 0">No employee pay balances are currently owed.</div>';
-  }
-}
-function applyPayOutToSplitPay() {
-  const plan = _calcPayOutPlan(payOutCtx.employeeId);
-  const targetTotal = plan.payoutTotal;
-  if (targetTotal <= 0.005) {
-    showAlert('Nothing to pay out for this selection.');
-    return;
-  }
-  const emp = getEmp(payOutCtx.employeeId);
-  const allocById = {};
-  plan.rows.forEach(r => {
-    if (Math.abs(r.payoutTarget) > 0.005) allocById[r.id] = r.payoutTarget;
-  });
-  openSplitPay({
-    employeeId: payOutCtx.employeeId,
+function openEmployeePaymentForSource(sourceKind, sourceId) {
+  if (!currentUser?.isAdmin) return;
+  const source = sourceKind === 'hw'
+    ? (state.homewatch || []).find(item => item.id === sourceId)
+    : state.jobs.find(item => item.id === sourceId);
+  if (!source) return;
+  const employeeId = source.employeeId || state.users.find(user => !user.isAdmin)?.id || '';
+  const calc = sourceKind === 'hw' ? calcHW(source) : calcJob(source);
+  const rowId = `sp_${sourceKind}_${source.id}`;
+  const currentBalance = _roundMoney(Math.max(0, calc.empBalance || 0));
+  openEmployeePayment({
+    mode: 'source',
+    employeeId,
     includeAll: true,
-    trackAdvances: false,
-    total: targetTotal,
-    date: document.getElementById('po_date')?.value || today(),
-    label: 'Pay Owed' + (emp?.name ? ' - ' + emp.name : ''),
-    allocById
+    payoutContext: false,
+    sourceKind,
+    sourceId: source.id,
+    total: currentBalance,
+    label: 'Pay Employee - ' + (source.name || (sourceKind === 'hw' ? 'Recurring Service' : 'Job')),
+    allocById: currentBalance > 0.005 ? { [rowId]: currentBalance } : {}
   });
-  closeModal('payOutModal');
+}
+function _setSplitPayAllocations(allocById = {}, trackAdvances = false) {
+  document.querySelectorAll('.sp-alloc-input').forEach(el => {
+    const amount = Number(allocById[el.id] || 0);
+    el.value = Math.abs(amount) > 0.005 ? amount.toFixed(2) : '';
+    const typeEl = document.getElementById(el.id + '_type');
+    if (typeEl) {
+      if (trackAdvances && amount < -0.005) typeEl.value = 'adjustment';
+      else if (trackAdvances && amount > 0.005) typeEl.value = 'advance';
+      else typeEl.value = '';
+    }
+  });
+  updateSplitTotals();
+}
+function setSplitPayEmployee(employeeId) {
+  splitPayEmployeeId = employeeId || '';
+  employeePaymentCtx.employeeId = splitPayEmployeeId;
+  let sourceCleared = false;
+  if (splitPaySource) {
+    const source = splitPaySource.kind === 'hw'
+      ? (state.homewatch || []).find(item => item.id === splitPaySource.id)
+      : state.jobs.find(item => item.id === splitPaySource.id);
+    if (!source || source.employeeId !== splitPayEmployeeId) {
+      splitPaySource = null;
+      if (!splitPayPayoutContext) splitPayIncludeAll = false;
+      sourceCleared = true;
+    }
+  }
+  renderSplitPayAlloc();
+  if (splitPayPayoutContext) {
+    const plan = _calcEmployeePaymentPlan(splitPayEmployeeId);
+    const employee = getEmp(splitPayEmployeeId);
+    const allocById = {};
+    plan.rows.forEach(row => {
+      if (Math.abs(row.payoutTarget) > 0.005) allocById[row.id] = row.payoutTarget;
+    });
+    document.getElementById('sp_total').value = plan.payoutTotal.toFixed(2);
+    document.getElementById('sp_label').value = 'Pay Owed' + (employee?.name ? ' - ' + employee.name : '');
+    _setSplitPayAllocations(allocById, false);
+  } else if (sourceCleared) {
+    document.getElementById('sp_total').value = '';
+    document.getElementById('sp_label').value = '';
+    updateSplitTotals();
+  }
 }
 function openSplitPay(preset = null) {
+  const employees = state.users.filter(user => !user.isAdmin);
   splitPayIncludeAll = !!preset?.includeAll;
-  splitPayEmployeeId = preset?.employeeId || '';
+  splitPayPayoutContext = !!preset?.payoutContext;
+  splitPayEmployeeId = preset?.employeeId || employeePaymentCtx.employeeId || employees[0]?.id || '';
+  employeePaymentCtx.employeeId = splitPayEmployeeId;
+  splitPaySource = preset?.sourceKind && preset?.sourceId ? { kind: preset.sourceKind, id: preset.sourceId } : null;
   document.getElementById('sp_total').value = '';
   document.getElementById('sp_date').value  = today();
   document.getElementById('sp_label').value = '';
+  const employeeSelect = document.getElementById('sp_employee');
+  if (employeeSelect) {
+    employeeSelect.innerHTML = _employeePaymentOptions(splitPayEmployeeId);
+    employeeSelect.value = splitPayEmployeeId;
+  }
+  const title = document.getElementById('sp_modalTitle');
+  if (title) title.textContent = splitPaySource ? 'Pay Employee' : (splitPayPayoutContext ? 'Pay Owed' : 'Employee Payment');
   const track = document.getElementById('sp_toggleTrack');
   if (track) track.dataset.on = 'false';
   if (preset?.trackAdvances && track) track.dataset.on = 'true';
@@ -2757,18 +2778,7 @@ function openSplitPay(preset = null) {
     if (preset.total !== undefined) document.getElementById('sp_total').value = Number(preset.total || 0).toFixed(2);
     if (preset.date) document.getElementById('sp_date').value = preset.date;
     if (preset.label !== undefined) document.getElementById('sp_label').value = preset.label || '';
-    const allocById = preset.allocById || {};
-    document.querySelectorAll('.sp-alloc-input').forEach(el => {
-      const amt = Number(allocById[el.id] || 0);
-      el.value = Math.abs(amt) > 0.005 ? amt.toFixed(2) : '';
-      const typeEl = document.getElementById(el.id + '_type');
-      if (typeEl) {
-        if (preset.trackAdvances && amt < -0.005) typeEl.value = 'adjustment';
-        else if (preset.trackAdvances && amt > 0.005) typeEl.value = 'advance';
-        else typeEl.value = '';
-      }
-    });
-    updateSplitTotals();
+    _setSplitPayAllocations(preset.allocById || {}, !!preset.trackAdvances);
   }
   document.getElementById('splitPayModal').classList.remove('hidden');
 }
@@ -2778,13 +2788,13 @@ function toggleSplitAdvances() {
   renderSplitPayAlloc();
 }
 function renderSplitPayAlloc() {
-  const activeJobs = state.jobs.filter(j => (!splitPayEmployeeId || j.employeeId === splitPayEmployeeId) && (splitPayIncludeAll || j.status !== 'complete'));
-  const activeHW   = (state.homewatch || []).filter(hw => (!splitPayEmployeeId || hw.employeeId === splitPayEmployeeId) && (splitPayIncludeAll || hw.status !== 'paused'));
+  const activeJobs = state.jobs.filter(j => (!splitPayEmployeeId || j.employeeId === splitPayEmployeeId) && (splitPayIncludeAll || j.status !== 'complete') && (!splitPaySource || (splitPaySource.kind === 'job' && j.id === splitPaySource.id)));
+  const activeHW   = (state.homewatch || []).filter(hw => (!splitPayEmployeeId || hw.employeeId === splitPayEmployeeId) && (splitPayIncludeAll || hw.status !== 'paused') && (!splitPaySource || (splitPaySource.kind === 'hw' && hw.id === splitPaySource.id)));
   const allocEl    = document.getElementById('sp_allocList');
   const track = document.getElementById('sp_toggleTrack');
   const thumb = document.getElementById('sp_toggleThumb');
   const allowAdvances = track?.dataset.on === 'true';
-  const payoutContext = splitPayIncludeAll && !!splitPayEmployeeId;
+  const payoutContext = splitPayPayoutContext;
   const visibleJobs = payoutContext
     ? activeJobs.filter(j => Math.abs(Number(calcJob(j).potentialEmpBalance || 0)) > 0.005)
     : activeJobs;
@@ -2821,10 +2831,10 @@ function renderSplitPayAlloc() {
     html += visibleJobs.map(j => { const c = calcJob(j); const balance = payoutContext ? c.potentialEmpBalance : c.empBalance; return row(`sp_job_${j.id}`, esc(j.name), balance, c.potentialEmpBalance); }).join('');
   }
   if (visibleHW.length) {
-    html += `<div style="font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);padding:${visibleJobs.length?'12px':'4px'} 0 6px">HomeWatch</div>`;
+    html += `<div style="font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);padding:${visibleJobs.length?'12px':'4px'} 0 6px">Recurring Services</div>`;
     html += visibleHW.map(hw => { const c = calcHW(hw); const balance = payoutContext ? c.potentialEmpBalance : c.empBalance; return row(`sp_hw_${hw.id}`, esc(hw.name), balance, c.potentialEmpBalance); }).join('');
   }
-  allocEl.innerHTML = html || '<div style="color:var(--text3);font-size:16px;padding:8px 0">No active jobs or HomeWatch clients.</div>';
+  allocEl.innerHTML = html || '<div style="color:var(--text3);font-size:16px;padding:8px 0">No eligible jobs or recurring services.</div>';
   updateSplitTotals();
 }
 function maxAlloc(inputId, bal, potentialBal, allowAdvances) {
@@ -2874,7 +2884,7 @@ function updateSplitTotals() {
 }
 async function saveSplitPay() {
   const total   = parseFloat(document.getElementById('sp_total').value) || 0;
-  if (total <= 0) { showAlert('Please enter a total amount.'); return; }
+  if (Math.abs(total) <= 0.005) { showAlert('Please enter a non-zero total amount.'); return; }
   const date    = document.getElementById('sp_date').value;
   const label   = document.getElementById('sp_label').value.trim();
   let allocated = 0;
@@ -2893,7 +2903,7 @@ async function saveSplitPay() {
   const doSave = async () => {
     const splitEventId = uid();
     const trackAdvances = (document.getElementById('sp_toggleTrack')?.dataset.on === 'true');
-    const eventLabel = label || 'Split payment';
+    const eventLabel = label || 'Employee payment';
     const allocations = [];
     const employeeIds = new Set();
     jobEntries.forEach(({ jobId, amount, payType }) => {
@@ -2923,7 +2933,7 @@ async function saveSplitPay() {
       label: eventLabel,
       total,
       mode: trackAdvances ? 'potential' : 'split',
-      employeeId: employeeIds.size === 1 ? [...employeeIds][0] : '',
+      employeeId: splitPayEmployeeId || (employeeIds.size === 1 ? [...employeeIds][0] : ''),
       allocations,
       createdAt: new Date().toISOString()
     });

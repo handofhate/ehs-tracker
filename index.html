@@ -590,10 +590,9 @@
     .header-actions .btn-ghost.btn-sm,
     .header-actions .btn-primary { padding: 14px 14px; font-size: 20px; white-space: nowrap; text-align: left; }
     #newJobBtn { order: 1; }
-    #payOutBtn { order: 2; }
-    #splitPayBtn { order: 3; }
-    #splitLedgerBtn { order: 4; }
-    #undoRedoRow { order: 5; }
+    #employeePaymentBtn { order: 2; }
+    #splitLedgerBtn { order: 3; }
+    #undoRedoRow { order: 4; }
     #settingsBtn, #settingsEmpBtn, #signOutBtn { order: 50; }
     .desktop-menu-divider { order: 49; margin: 18px 0 14px; }
     .desktop-menu-divider { display: none !important; }
@@ -924,8 +923,7 @@
     <button class="btn btn-ghost btn-sm desktop-menu-trigger" id="desktopMenuBtn" onclick="toggleDesktopMenu()" aria-label="Open actions menu"><i class="ph ph-list"></i> Menu</button>
     <div class="desktop-menu-panel" id="desktopMenuPanel">
       <button class="btn btn-primary header-admin" id="newJobBtn" onclick="openUnifiedJobModal()">+ New Job</button>
-      <button class="btn btn-ghost btn-sm header-admin" id="payOutBtn" onclick="openPayOut()">$ Pay Out</button>
-      <button class="btn btn-ghost btn-sm header-admin" id="splitPayBtn" onclick="openSplitPay()"><i class="ph ph-split-horizontal"></i> Split Pay</button>
+      <button class="btn btn-ghost btn-sm header-admin" id="employeePaymentBtn" onclick="openEmployeePayment()">$ Pay Employee</button>
       <button class="btn btn-ghost btn-sm header-admin" id="splitLedgerBtn" onclick="openSplitLedger()"><i class="ph ph-book-open-text"></i> Ledger</button>
       <div class="desktop-menu-inline-two header-admin" id="undoRedoRow">
         <button class="btn btn-ghost btn-sm" id="undoBtn" onclick="undoAction()" style="opacity:0.35" title="Nothing to undo"><i class="ph ph-arrow-counter-clockwise"></i> Undo</button>
@@ -961,7 +959,7 @@
       </div>
       <div class="overview-actions">
         <button class="btn btn-primary btn-sm admin-only" onclick="openUnifiedJobModal()">+ New Job</button>
-        <button class="btn btn-ghost btn-sm admin-only" onclick="openPayOut()">$ Pay Employee</button>
+        <button class="btn btn-ghost btn-sm admin-only" onclick="openEmployeePayment()">$ Pay Employee</button>
       </div>
     </div>
     <div class="overview-grid">
@@ -1852,8 +1850,8 @@
 <!-- SPLIT LEDGER MODAL -->
 <div id="splitLedgerModal" class="modal-overlay hidden">
   <div class="modal modal-wide">
-    <div class="modal-title">Split Pay / Pay Out Ledger</div>
-    <div class="form-hint" style="margin-top:-12px;margin-bottom:10px">Shows combined transactions in one place, including reconstructed legacy groups.</div>
+    <div class="modal-title">Employee Payment Ledger</div>
+    <div class="form-hint" style="margin-top:-12px;margin-bottom:10px">Shows unified employee payments, including reconstructed legacy entries.</div>
     <div id="splitLedgerList" style="max-height:420px;overflow-y:auto"></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('splitLedgerModal')">Close</button>
@@ -1861,39 +1859,21 @@
   </div>
 </div>
 
-<!-- PAY OUT MODAL -->
-<div id="payOutModal" class="modal-overlay hidden">
-  <div class="modal modal-wide">
-    <div class="modal-title">Employee Pay Out</div>
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">Employee</label>
-        <select class="form-input" id="po_employee" onchange="renderPayOut()"></select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Date</label>
-        <input class="form-input" id="po_date" type="date" />
-      </div>
-    </div>
-    <div id="po_totals" style="background:var(--bg3);border:1px solid var(--border2);border-radius:3px;padding:12px 16px;font-family:var(--mono);font-size:14px;display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-bottom:10px"></div>
-    <div id="po_rows" style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:3px;padding:0 12px"></div>
-    <div class="form-hint" id="po_hint" style="margin-top:8px">Pay owed is based on completed work, regardless of client payment status.</div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal('payOutModal')">Cancel</button>
-      <button class="btn btn-primary" id="po_applyBtn" onclick="applyPayOutToSplitPay()">Use Pay Owed in Split Pay</button>
-    </div>
-  </div>
-</div>
-
 <!-- SPLIT PAY MODAL -->
 <div id="splitPayModal" class="modal-overlay hidden">
   <div class="modal modal-wide">
-    <div class="modal-title">Split Employee Payment</div>
+    <div class="modal-title" id="sp_modalTitle">Employee Payment</div>
     <div class="form-row">
       <div class="form-group">
-        <label class="form-label">Total Amount ($)</label>
+        <label class="form-label">Employee</label>
+        <select class="form-input" id="sp_employee" onchange="setSplitPayEmployee(this.value)"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Total Payment / Adjustment ($)</label>
         <input class="form-input" id="sp_total" type="number" step="0.01" placeholder="0.00" oninput="updateSplitTotals()" />
       </div>
+    </div>
+    <div class="form-row">
       <div class="form-group">
         <label class="form-label">Date</label>
         <input class="form-input" id="sp_date" type="date" />
@@ -1905,9 +1885,9 @@
     </div>
     <div style="border-top:1px solid var(--border);padding-top:14px;margin-top:4px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <div class="form-label" style="margin:0">Allocate to Jobs &amp; HomeWatch</div>
+        <div class="form-label" style="margin:0">Allocate to Jobs &amp; Recurring Services</div>
         <div style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none" onclick="toggleSplitAdvances()">
-          <span style="font-family:var(--mono);font-size:14px;color:var(--text3);text-transform:uppercase;letter-spacing:0.1em">Allow Advances</span>
+          <span style="font-family:var(--mono);font-size:14px;color:var(--text3);text-transform:uppercase;letter-spacing:0.1em">Allow Advances / Projected Work</span>
           <span id="sp_toggleTrack" data-on="false" style="display:inline-flex;align-items:center;width:40px;height:22px;border-radius:11px;background:var(--border2);transition:background 0.2s;cursor:pointer;flex-shrink:0;padding:2px;box-sizing:border-box">
             <span id="sp_toggleThumb" style="width:18px;height:18px;border-radius:50%;background:#fff;transition:transform 0.2s;display:block"></span>
           </span>
@@ -1918,7 +1898,7 @@
     <div id="sp_totals" style="background:var(--bg3);border:1px solid var(--border2);border-radius:3px;padding:12px 16px;font-family:var(--mono);font-size:15px;display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-top:14px"></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('splitPayModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveSplitPay()">Save Payment</button>
+      <button class="btn btn-primary" onclick="saveSplitPay()">Save Employee Payment</button>
     </div>
   </div>
 </div>

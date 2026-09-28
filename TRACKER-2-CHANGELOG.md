@@ -34,6 +34,8 @@ Tracker 2.0 is not released or cut over. Tracker 1.0 remains the production buil
 - Added automatic pre-import backups and clearer destructive import confirmation.
 - Removed zero-count legacy conversions after confirming they were no longer needed by current records.
 - Preserved historical client links and financial history while applying approved legacy cleanup matches.
+- Replaced the visible Pay Out and Split Pay header actions with one Employee Payment flow. Job and recurring-service payment buttons now open that same flow with the source and current balance preselected.
+- Kept the existing `splitPayments` storage name for compatibility while routing new employee payments through one save path with employee, date, total, and allocations recorded together.
 
 ### Fixed and hardened
 
@@ -53,10 +55,11 @@ Tracker 2.0 is not released or cut over. Tracker 1.0 remains the production buil
 - Persistent activity history, durable undo/redo, queued saves, record-level conflict handling, and minimum server-enforced production security remain future work.
 - Client-management expansion, recurring billing beyond the current service model, deeper reports, and attachments are deferred until their surrounding workflows are defined.
 - The old editor and remaining migration compatibility code cannot be removed until the historical cutover boundary, archive, and rollback checks are complete.
+- Historical direct employee-pay entries may still lack a stored payment event; the compatibility ledger continues reconstructing those until they are audited and reconciled.
 
 ### Next planned work
 
-- Audit and then unify the Pay Out and Split Pay flows into one underlying employee-payment workflow. This is intentionally ahead of Square integration because it can be improved and tested using the current manual-payment model.
+- Audit and reconcile historical direct employee-pay entries that lack a stored payment event, then design persistent activity history around the unified payment-event path. This remains intentionally ahead of Square integration because it can be improved and tested using the current manual-payment model.
 
 ## Changelog maintenance rules
 
