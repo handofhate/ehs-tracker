@@ -507,7 +507,15 @@ function load() {
   });
 }
 function uid() { return crypto.randomUUID(); }
-function today() { return new Date().toISOString().slice(0,10); }
+function localDateString(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+function today() { return localDateString(); }
 function fmt(n) {
   if (n === null || n === undefined || isNaN(n)) return '$0.00';
   n = _roundMoney(n);
@@ -6088,7 +6096,7 @@ function getApptDates(a) {
   const end = new Date(a.endDate + 'T00:00:00');
   let cur = new Date(a.date + 'T00:00:00');
   while (cur <= end) {
-    dates.push(cur.toISOString().slice(0,10));
+    dates.push(localDateString(cur));
     cur.setDate(cur.getDate() + 1);
   }
   return dates;

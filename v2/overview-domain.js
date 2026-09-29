@@ -14,12 +14,21 @@
     return Object.is(rounded, -0) ? 0 : rounded;
   }
 
+  function localDateString(date) {
+    const value = date instanceof Date ? date : new Date(date);
+    if (Number.isNaN(value.getTime())) return '';
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const day = String(value.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
   function recentEmployeePay(state, employeeId, timeframe, referenceDate = new Date(), roundMoney = defaultRoundMoney) {
     let cutoffStr = null;
     if (timeframe !== 'all') {
       const date = new Date(referenceDate);
       date.setDate(date.getDate() - parseInt(timeframe));
-      cutoffStr = date.toISOString().slice(0, 10);
+      cutoffStr = localDateString(date);
     }
     const inWindow = date => !cutoffStr || (date && date >= cutoffStr);
     let total = 0;

@@ -80,6 +80,7 @@ Tracker 2.0 is now the live GitHub Pages build. It uses the existing Firestore d
 - Added malformed-backup rejection and full-state backup serialization tests.
 - Added a persistent activity-history layer with a bounded 500-event trail, preview-safe temporary behavior, and domain tests for create/update/delete/settings events.
 - Added browser-level regression checks for unified jobs, notes, themes, payments, partial collections, fee-rate protection, and preview safety.
+- Fixed date-only values and recent-pay windows to use the computer's local calendar date instead of UTC, preventing evening actions and backup filenames from appearing one day ahead.
 - Added a structural checkpoint to the browser smoke test for backup round-tripping, realtime updates during temporary edits, redo as well as undo, and combined current/historical client history.
 - Added a centralized historical-boundary module that fails closed for unknown job origins and keeps legacy Tracker 1.0 jobs viewable but read-only in the Tracker 2.0 preview.
 - Corrected the migration audit to report blank as well as missing `splitEventId` values, without changing those historical records.

@@ -74,6 +74,21 @@ test('counts recent employee pay using a stable date window', () => {
   assert.equal(recentEmployeePay(state, 'emp', 'all', new Date('2026-09-28T12:00:00Z')), 90);
 });
 
+test('counts recent employee pay from the local calendar date after UTC rolls over', () => {
+  const state = {
+    jobs: [{
+      employeeId: 'emp',
+      advances: [
+        { date: '2026-09-27', amount: 40 },
+        { date: '2026-09-28', amount: 50 }
+      ]
+    }],
+    homewatch: []
+  };
+  const referenceDate = new Date(2026, 8, 28, 20, 0, 0);
+  assert.equal(recentEmployeePay(state, 'emp', '1', referenceDate), 90);
+});
+
 test('filters admin notes and sorts pinned notes before newest notes without mutating input', () => {
   const notes = [
     { id: 'old', date: '2026-09-01', pinned: false, audience: 'team' },
