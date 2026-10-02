@@ -2130,7 +2130,10 @@ function jobDetail(job, c) {
         <div class="detail-section-header" style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
           <div class="detail-section-title" style="margin-bottom:0;padding-bottom:0;border-bottom:none">${isHourly ? 'Hours' : 'Client Charges'}</div>
           ${isHourly
-            ? `<button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','hours')">+</button>`
+            ? `<div style="display:flex;align-items:center;gap:6px">
+                <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openAddItem('${job.id}','hours')" title="Add hours">+ Hours</button>
+                <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openPartialCollect('${job.id}')" title="Record payment">+ Payment</button>
+              </div>`
             : `<button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openPartialCollect('${job.id}')" title="Record payment">+</button>`}
         </div>
         ${isHourly

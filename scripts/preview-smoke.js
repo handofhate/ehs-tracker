@@ -271,6 +271,53 @@ async function main() {
         initialNote: 'Original note'
       });
 
+      const hourlyPaymentResult = await page.evaluate(async () => {
+        closeModal('unifiedJobModal');
+        const baseline = _cloneState(state);
+        const hourlyJob = {
+          ..._cloneState(state.jobs[0]),
+          id: 'browser-smoke-hourly-job',
+          name: 'Browser Hourly Client',
+          jobType: 'hourly',
+          quote: 0,
+          quoteItems: [],
+          milestones: [],
+          unifiedLines: [],
+          hours: [],
+          tips: [],
+          revenueItems: [],
+          partialCollections: [],
+          hourlyRate: 100,
+          hourlyStatus: 'pending'
+        };
+        state.jobs = [...baseline.jobs, hourlyJob];
+        expandedJobs.clear();
+        expandedJobs.add(hourlyJob.id);
+        renderJobs();
+        const cards = [...document.querySelectorAll('[id="job_browser-smoke-hourly-job"]')];
+        const hourlyCard = cards[0];
+        const hasSeparateActions = !!hourlyCard &&
+          hourlyCard.innerHTML.includes('>+ Hours<') &&
+          hourlyCard.innerHTML.includes('>+ Payment<');
+        hourlyCard?.querySelector('button[title="Record payment"]')?.click();
+        const paymentModalOpened = document.getElementById('partialCollectModal')?.classList.contains('hidden') === false &&
+          document.getElementById('pc_modalTitle')?.textContent === 'Log Revenue Payment';
+        document.getElementById('pc_tip').value = '10.00';
+        updatePartialCollectTotals();
+        savePartialCollect();
+        await new Promise(resolve => setTimeout(resolve, 50));
+        const savedTip = state.jobs.find(item => item.id === hourlyJob.id)?.tips?.[0];
+        const tipSaved = savedTip?.amount === 10 &&
+          document.getElementById('partialCollectModal')?.classList.contains('hidden');
+        state = baseline;
+        expandedJobs.clear();
+        previewSession.setServerSnapshot(state);
+        _clearPreviewHistory();
+        renderAll();
+        return { hasSeparateActions, paymentModalOpened, tipSaved };
+      });
+      assert.deepEqual(hourlyPaymentResult, { hasSeparateActions: true, paymentModalOpened: true, tipSaved: true });
+
       const activitySaveResult = await page.evaluate(async () => {
         closeModal('unifiedJobModal');
         const baseline = _cloneState(state);
