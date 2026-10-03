@@ -523,6 +523,24 @@ async function main() {
       assert.equal(employeePaymentEntryResult.sourceFlow.sourceRowId, 'sp_job_browser-smoke-job');
       assert.equal(employeePaymentEntryResult.sourceFlow.selectedEmployee, 'browser-smoke-employee');
 
+      const historicalPaymentEntryResult = await page.evaluate(() => {
+        closeModal('unifiedJobModal');
+        const historicalJob = _cloneState(state.jobs[0]);
+        historicalJob.id = 'browser-smoke-historical-pay-job';
+        historicalJob.name = 'Historical Owed Job';
+        historicalJob.createdVia = 'legacy';
+        state.jobs.push(historicalJob);
+        openEmployeePayment();
+        const historicalInput = document.getElementById('sp_job_browser-smoke-historical-pay-job');
+        const visible = !!historicalInput && document.getElementById('sp_allocList')?.textContent.includes('Historical pay adjustments');
+        closeModal('splitPayModal');
+        state.jobs = state.jobs.filter(job => job.id !== historicalJob.id);
+        renderAll();
+        openUnifiedJobModal('browser-smoke-job');
+        return { visible, inputPresent: !!historicalInput };
+      });
+      assert.deepEqual(historicalPaymentEntryResult, { visible: true, inputPresent: true });
+
       const paymentAllocationResult = await page.evaluate(() => {
         const owedJob = _cloneState(state.jobs[0]);
         owedJob.id = 'browser-smoke-owed-job';

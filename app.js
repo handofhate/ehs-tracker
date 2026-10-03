@@ -2583,6 +2583,10 @@ function clearSplitPayTotal() {
 }
 function renderSplitPayAlloc() {
   const activeJobs = state.jobs.filter(j => !_isHistoricalJob(j) && (!splitPayEmployeeId || j.employeeId === splitPayEmployeeId) && j.status !== 'complete' && (!splitPaySource || (splitPaySource.kind === 'job' && j.id === splitPaySource.id)));
+  // Historical jobs stay read-only for billing, materials, and general edits,
+  // but an employee settlement can still be recorded against an outstanding
+  // balance. This is the safe bridge for late payments on legacy work.
+  const historicalPayJobs = state.jobs.filter(j => _isHistoricalJob(j) && (!splitPayEmployeeId || j.employeeId === splitPayEmployeeId) && j.status !== 'complete' && calcJob(j).potentialEmpBalance > 0.005);
   const activeHW   = (state.homewatch || []).filter(hw => (!splitPayEmployeeId || hw.employeeId === splitPayEmployeeId) && hw.status !== 'paused' && (!splitPaySource || (splitPaySource.kind === 'hw' && hw.id === splitPaySource.id)));
   const allocEl    = document.getElementById('sp_allocList');
   const selectedSource = splitPaySource || null;
@@ -2596,6 +2600,7 @@ function renderSplitPayAlloc() {
     }))
     .sort((a, b) => (b.balance - a.balance) || (a.index - b.index));
   const preparedJobs = prepare(activeJobs, 'job', job => calcJob(job).potentialEmpBalance);
+  const preparedHistoricalJobs = prepare(historicalPayJobs, 'job', job => calcJob(job).potentialEmpBalance);
   const preparedHW = prepare(activeHW, 'hw', hw => calcHW(hw).potentialEmpBalance);
   const isPriority = entry => entry.balance > 0.005 || entry.selected;
   const priorityJobs = preparedJobs.filter(isPriority);
@@ -2636,6 +2641,11 @@ function renderSplitPayAlloc() {
     return sectionHtml;
   };
   let html = renderSections(priorityJobs, priorityHW);
+  if (preparedHistoricalJobs.length) {
+    html += '<div style="font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);padding:14px 0 6px;border-top:1px dashed var(--border);margin-top:8px">Historical pay adjustments</div>';
+    html += '<div style="font-size:13px;color:var(--text3);padding:0 0 4px">Billing details remain locked; outstanding employee pay can still be settled.</div>';
+    html += preparedHistoricalJobs.map(entry => row('sp_' + entry.kind + '_' + entry.item.id, esc(entry.item.name + (entry.item.date ? ' · ' + entry.item.date : '')), entry.balance)).join('');
+  }
   const otherCount = otherJobs.length + otherHW.length;
   if (otherCount) {
     html += '<details id="sp_otherAllocations" class="sp-other-allocations">' +

@@ -1571,6 +1571,7 @@
         <div>- Added persistent activity history, safer saving, locked per-record fee snapshots, and expanded automated tests</div>
         <div>- Date-only actions and backup filenames now follow the computer's local calendar date instead of UTC</div>
         <div>- Hourly jobs now have separate <strong>+ Hours</strong> and <strong>+ Payment</strong> actions, including employee tips</div>
+        <div>- Historical jobs remain billing-read-only but can still receive new employee-pay settlements for outstanding balances</div>
         <div>- Local no-write preview remains available for safe testing; full Square integration is deferred</div>
       </div>
       <div style="margin-bottom:14px">
@@ -2024,7 +2025,7 @@
 <script src="v2/legacy-partial-domain.js?v=20260925-1"></script>
 <script src="v2/historical-boundary.js?v=20260928-1"></script>
 <script src="v2/backup-domain.js?v=20260925-1"></script>
-<script src="app.js?v=20261001-1"></script>
+<script src="app.js?v=20261003-1"></script>
 
 <div id="undoToast">Undo applied</div>
 </body>
