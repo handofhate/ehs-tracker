@@ -1497,7 +1497,7 @@ function _historicalCloseoutState(job, calc = null) {
   // status, so checking item.status alone would incorrectly block closeout.
   const summary = getJobBillingSummary(job, c);
   return {
-    eligible: currentUser?.isAdmin && _jobWorkCompleted(job) && entries.length > 0
+    eligible: currentUser?.isAdmin && entries.length > 0
       && summary.pending.count === 0
       && summary.invoiced.count > 0
       && c.potentialEmpBalance <= 0.005,
