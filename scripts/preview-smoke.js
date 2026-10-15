@@ -434,7 +434,9 @@ async function main() {
         closeoutJob.id = 'browser-smoke-closeout-job';
         closeoutJob.name = 'Historical Closeout Client';
         closeoutJob.createdVia = 'legacy';
-        closeoutJob.milestones = [{ id: 'browser-smoke-closeout-milestone', label: 'Invoice', amount: 125, status: 'invoiced' }];
+        // Legacy records can be displayed as invoiced from their Square invoice
+        // id even when the newer literal status field was never backfilled.
+        closeoutJob.milestones = [{ id: 'browser-smoke-closeout-milestone', label: 'Invoice', amount: 125, status: 'pending', squareInvoiceId: 'legacy-invoice-1' }];
         closeoutJob.advances = [{ id: 'browser-smoke-closeout-advance', label: 'Prior pay', amount: calcJob(closeoutJob).potentialEmpBalance, date: '2026-01-01', payType: 'advance' }];
         state.jobs.push(closeoutJob);
         renderJobs();

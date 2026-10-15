@@ -1492,11 +1492,18 @@ function _historicalCloseoutState(job, calc = null) {
   if (!job || !_isHistoricalJob(job) || job.status === 'complete') return { eligible: false };
   const c = calc || calcJob(job);
   const entries = _jobBillingEntries(job);
-  const hasUninvoiced = entries.some(({ item }) => !['invoiced', 'collected'].includes(item?.status || 'pending'));
+  // Use the same billing interpretation shown in the card. Some Tracker 1.0
+  // records carry the Square invoice id but not the newer literal `invoiced`
+  // status, so checking item.status alone would incorrectly block closeout.
+  const summary = getJobBillingSummary(job, c);
   return {
-    eligible: currentUser?.isAdmin && _jobWorkCompleted(job) && entries.length > 0 && !hasUninvoiced && c.potentialEmpBalance <= 0.005,
+    eligible: currentUser?.isAdmin && _jobWorkCompleted(job) && entries.length > 0
+      && summary.pending.count === 0
+      && summary.invoiced.count > 0
+      && c.potentialEmpBalance <= 0.005,
     entries,
-    calc: c
+    calc: c,
+    summary
   };
 }
 
