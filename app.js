@@ -1499,8 +1499,7 @@ function _historicalCloseoutState(job, calc = null) {
   return {
     eligible: currentUser?.isAdmin
       && summary.pending.count === 0
-      && summary.invoiced.count > 0
-      && c.potentialEmpBalance <= 0.005,
+      && summary.invoiced.count > 0,
     entries,
     calc: c,
     summary
