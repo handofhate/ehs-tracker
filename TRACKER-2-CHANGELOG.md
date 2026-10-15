@@ -83,7 +83,7 @@ Tracker 2.0 is now the live GitHub Pages build. It uses the existing Firestore d
 - Fixed date-only values and recent-pay windows to use the computer's local calendar date instead of UTC, preventing evening actions and backup filenames from appearing one day ahead.
 - Added a dedicated `+ Payment` action to hourly jobs so employee tips and revenue payments are reachable without confusing them with `+ Hours`.
 - Kept historical jobs locked for billing and general edits while allowing new employee-pay settlements against an outstanding legacy balance.
-- Added a guarded historical closeout action that can mark fully invoiced legacy work paid and complete without reopening general edits, even when older work-complete fields were never backfilled.
+- Added a guarded historical closeout action that can mark fully invoiced legacy work paid and complete without reopening general edits, including older hourly records whose billing entry shape was incomplete.
 - Fixed historical closeout eligibility for legacy records whose Square invoice id indicates invoiced status even when the newer status field was never backfilled.
 - Added a structural checkpoint to the browser smoke test for backup round-tripping, realtime updates during temporary edits, redo as well as undo, and combined current/historical client history.
 - Added a centralized historical-boundary module that fails closed for unknown job origins and keeps legacy Tracker 1.0 jobs viewable but read-only in the Tracker 2.0 preview.

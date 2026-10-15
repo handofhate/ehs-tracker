@@ -1497,7 +1497,7 @@ function _historicalCloseoutState(job, calc = null) {
   // status, so checking item.status alone would incorrectly block closeout.
   const summary = getJobBillingSummary(job, c);
   return {
-    eligible: currentUser?.isAdmin && entries.length > 0
+    eligible: currentUser?.isAdmin
       && summary.pending.count === 0
       && summary.invoiced.count > 0
       && c.potentialEmpBalance <= 0.005,
@@ -1514,6 +1514,10 @@ function closeOutHistoricalJob(jobId) {
   showConfirm(
     'Mark every invoiced line as paid and complete this historical job? Billing details will remain otherwise locked.',
     () => {
+      if (!closeout.entries.length && _jobType(job) === 'hourly') {
+        job.hourlyStatus = 'collected';
+        job.hourlySquareInvoiceId = '';
+      }
       closeout.entries.forEach(({ item, hourly }) => {
         if (hourly) {
           job.hourlyStatus = 'collected';
