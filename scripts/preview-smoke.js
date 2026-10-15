@@ -429,6 +429,27 @@ async function main() {
       });
       assert.deepEqual(historicalBoundaryResult, { editBlocked: true, notesReadOnly: true, combinedClientHistory: true });
 
+      const historicalCloseoutResult = await page.evaluate(() => {
+        const closeoutJob = _cloneState(state.jobs[0]);
+        closeoutJob.id = 'browser-smoke-closeout-job';
+        closeoutJob.name = 'Historical Closeout Client';
+        closeoutJob.createdVia = 'legacy';
+        closeoutJob.milestones = [{ id: 'browser-smoke-closeout-milestone', label: 'Invoice', amount: 125, status: 'invoiced' }];
+        closeoutJob.advances = [{ id: 'browser-smoke-closeout-advance', label: 'Prior pay', amount: calcJob(closeoutJob).potentialEmpBalance, date: '2026-01-01', payType: 'advance' }];
+        state.jobs.push(closeoutJob);
+        renderJobs();
+        const card = document.querySelector('[id="job_browser-smoke-closeout-job"]');
+        const action = [...(card?.querySelectorAll('button') || [])].find(button => button.textContent.includes('Mark paid'));
+        const actionVisible = !!action;
+        action?.click();
+        const confirmVisible = !document.getElementById('confirmModal').classList.contains('hidden');
+        closeModal('confirmModal');
+        state.jobs = state.jobs.filter(job => job.id !== closeoutJob.id);
+        renderAll();
+        return { actionVisible, confirmVisible };
+      });
+      assert.deepEqual(historicalCloseoutResult, { actionVisible: true, confirmVisible: true });
+
       const workspaceResult = await page.evaluate(() => {
         renderAll();
         switchTab('overview', document.querySelector('.tabs .tab[data-tab="overview"]'));

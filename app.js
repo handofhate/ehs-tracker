@@ -1488,6 +1488,41 @@ function setAllBillingStatus(jobId, status) {
   renderJobs();
 }
 
+function _historicalCloseoutState(job, calc = null) {
+  if (!job || !_isHistoricalJob(job) || job.status === 'complete') return { eligible: false };
+  const c = calc || calcJob(job);
+  const entries = _jobBillingEntries(job);
+  const hasUninvoiced = entries.some(({ item }) => !['invoiced', 'collected'].includes(item?.status || 'pending'));
+  return {
+    eligible: currentUser?.isAdmin && _jobWorkCompleted(job) && entries.length > 0 && !hasUninvoiced && c.potentialEmpBalance <= 0.005,
+    entries,
+    calc: c
+  };
+}
+
+function closeOutHistoricalJob(jobId) {
+  const job = state.jobs.find(j => j.id === jobId);
+  const closeout = _historicalCloseoutState(job);
+  if (!closeout.eligible) return;
+  showConfirm(
+    'Mark every invoiced line as paid and complete this historical job? Billing details will remain otherwise locked.',
+    () => {
+      closeout.entries.forEach(({ item, hourly }) => {
+        if (hourly) {
+          job.hourlyStatus = 'collected';
+        } else {
+          item.status = 'collected';
+          item.partialCollectionId = '';
+        }
+      });
+      job.status = 'complete';
+      save();
+      renderJobs();
+    },
+    { title: 'Close out historical job', okLabel: 'Mark paid & complete', danger: false }
+  );
+}
+
 function jobBillingSummaryHtml(job, calc = null) {
   const summary = getJobBillingSummary(job, calc);
   const c = calc || calcJob(job);
@@ -1496,6 +1531,7 @@ function jobBillingSummaryHtml(job, calc = null) {
     invoiced: { label: 'Invoiced', cls: 'invoiced' },
     paid: { label: 'Paid', cls: 'paid' }
   };
+  const historicalCloseout = _historicalCloseoutState(job, c);
   const parts = ['pending', 'invoiced', 'paid']
     .filter(k => summary[k].count > 0)
     .map(k => {
@@ -1520,8 +1556,11 @@ function jobBillingSummaryHtml(job, calc = null) {
   const completeAction = canComplete
     ? `<button type="button" class="job-billing-action job-billing-complete" onclick="event.stopPropagation();completeJob('${job.id}')" title="Mark this job complete">Complete</button>`
     : '';
-  if (!parts.length && !completeAction) return '';
-  return `<div class="job-billing-strip" aria-label="Invoice status summary">${parts.join('')}${bulkAction}${completeAction}</div>`;
+  const historicalCloseoutAction = historicalCloseout.eligible
+    ? `<button type="button" class="job-billing-action job-billing-complete" onclick="event.stopPropagation();closeOutHistoricalJob('${job.id}')" title="Mark invoiced lines paid and complete this historical job">Mark paid &amp; complete</button>`
+    : '';
+  if (!parts.length && !completeAction && !historicalCloseoutAction) return '';
+  return `<div class="job-billing-strip" aria-label="Invoice status summary">${parts.join('')}${bulkAction}${completeAction}${historicalCloseoutAction}</div>`;
 }
 
 function jobBillingStatusClass(job, calc = null) {
