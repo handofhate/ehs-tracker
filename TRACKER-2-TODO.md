@@ -83,6 +83,7 @@ This is the canonical order for the remaining Tracker 2.0 work. The category sec
 - [x] Make the shared Outstanding/Pending Invoices summary visible to all employees for the current small-team setup.
 - [x] Align the employee Recent Pay timeframe control with the admin Overview card header.
 - [x] Replace the separate Pay Out and Split Pay presentation with one underlying employee-payment workflow; keep job and recurring-service buttons as prefilled entry points into that same flow.
+- [x] Allow unified-v2 jobs to reimburse employee-purchased materials while work/profit pay remains on hold; keep legacy jobs unchanged until their historical path is retired.
 - [x] Decide not to migrate or reconcile historical direct employee-pay entries; keep them viewable through the legacy ledger/history path and do not rewrite old financial data.
 - [x] Design persistent activity history as a separate layer from session undo/redo; keep the initial audit view admin-only and focused on meaningful saved changes.
 - [ ] Add the minimum server-enforced security needed before Square use: Firestore rules, protected functions, and admin authorization.

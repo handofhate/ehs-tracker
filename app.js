@@ -1405,10 +1405,13 @@ function jobCard(job) {
   const jobEmpName = currentUser?.isAdmin ? (getEmp(job.employeeId)?.name || '') : '';
   const billingClass = jobBillingStatusClass(job, c);
   const employeePayIncluded = _jobWorkCompleted(job);
-  const payStatusLabel = employeePayIncluded ? 'Adding to employee pay' : 'Employee pay on hold';
+  const reimbursementDueWhileHeld = !employeePayIncluded && Number(c.potentialEmpBalance || 0) > 0.005;
+  const payStatusLabel = employeePayIncluded
+    ? 'Adding to employee pay'
+    : reimbursementDueWhileHeld ? 'Work pay on hold · reimbursement due' : 'Employee pay on hold';
   const payStatusClass = employeePayIncluded ? '' : ' on-hold';
   const workHoldHtml = currentUser?.isAdmin && !historicalReadOnly && job.status !== 'complete'
-    ? `<button type="button" class="job-pay-status${payStatusClass}" onclick="event.stopPropagation();toggleJobWorkCompleted('${job.id}')" title="Toggle whether this job contributes to employee pay" aria-pressed="${employeePayIncluded ? 'true' : 'false'}">${payStatusLabel}</button>`
+    ? `<button type="button" class="job-pay-status${payStatusClass}" onclick="event.stopPropagation();toggleJobWorkCompleted('${job.id}')" title="Toggle whether this job contributes to employee work pay" aria-pressed="${employeePayIncluded ? 'true' : 'false'}">${payStatusLabel}</button>`
     : `<span class="job-pay-status${payStatusClass}" style="cursor:default">${payStatusLabel}</span>`;
   return `
   <div class="job-card ${sc} ${isExp?'expanded':''} ${billingClass}${historicalReadOnly ? ' historical-read-only' : ''}" id="job_${job.id}" onclick="toggleCardMobile(event, 'job', '${job.id}')">
@@ -1890,7 +1893,11 @@ function jobDetail(job, c) {
   const ownerPct = Math.round(effectiveOwnerShare*100);
   const empBalance = Number(c.potentialEmpBalance || 0);
   const empBalanceStatus = empBalance > 0.005 ? 'Still owed' : empBalance < -0.005 ? 'Overpaid by' : 'Paid in full';
-  const empHoldStatus = empBalance < -0.005 ? 'Employee credit' : 'Employee pay on hold';
+  const empHoldStatus = empBalance < -0.005
+    ? 'Employee credit'
+    : Number(c.potentialEmpBalance || 0) > 0.005 && Number(c.employeeReimbursement || 0) > 0.005
+      ? 'Work pay on hold · reimbursement due'
+      : 'Employee pay on hold';
   const employeeProjectedProfit = c.workCompleted
     ? _roundMoney(Number(c.potentialEmpTotalOwed || 0) - Number(c.empMats || 0) - Number(c.tipsTotal || 0))
     : 0;
@@ -2318,7 +2325,9 @@ function jobDetail(job, c) {
               <div class="settlement-breakdown-row total"><span>Employee total owed</span><strong>${fmt(c.potentialEmpTotalOwed)}</strong></div>
               <div class="settlement-breakdown-row"><span>Paid out</span><strong>${employeePaySettlementFmt(c.advancesPaid)}</strong></div>
               ${c.linkedDebtPaid>0?`<div class="settlement-breakdown-row"><span>Debt repayment</span><strong>-${fmt(c.linkedDebtPaid)}</strong></div>`:''}
-            ` : `<div style="color:var(--text3);font-size:13px;padding:4px 0">Employee pay will be calculated when the work is marked completed.</div>
+            ` : `<div style="color:var(--text3);font-size:13px;padding:4px 0">Work pay will be calculated when the work is marked completed.</div>
+              ${Number(c.employeeReimbursement || 0) > 0.005 ? `<div class="settlement-breakdown-row"><span>Materials reimbursement</span><strong>${fmt(c.employeeReimbursement)}</strong></div>` : ''}
+              ${Number(c.potentialEmpTotalOwed || 0) > 0.005 ? `<div class="settlement-breakdown-row total"><span>Employee amount currently owed</span><strong>${fmt(c.potentialEmpTotalOwed)}</strong></div>` : ''}
               ${Math.abs(c.advancesPaid) > 0.005 ? `<div class="settlement-breakdown-row"><span>${employeePayNetLabel(c.advancesPaid)}</span><strong>${employeePayNetFmt(c.advancesPaid)}</strong></div>` : ''}
               ${c.linkedDebtPaid > 0 ? `<div class="settlement-breakdown-row"><span>Debt repayment</span><strong>-${fmt(c.linkedDebtPaid)}</strong></div>` : ''}`}
           </div>

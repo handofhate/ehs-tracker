@@ -28,6 +28,13 @@
     return job?.workCompleted !== false;
   }
 
+  // Tracker 2.0 jobs record employee-purchased materials in the unified
+  // structure. Those expenses are payable even while the job's work/profit
+  // share is intentionally on hold. Legacy jobs keep their original behavior.
+  function supportsEarlyEmployeeReimbursement(job) {
+    return job?.createdVia === 'unified-v2';
+  }
+
   function isCollectedBillingItem(item, status = null) {
     const itemStatus = status ?? item?.status;
     return itemStatus === 'collected' || itemStatus === 'paid' || item?.billingState === 'paid';
@@ -153,17 +160,21 @@
     const tipsTotal = (job.tips || []).reduce((sum, tip) => sum + (tip.amount || 0), 0);
     const advancesPaid = (job.advances || []).reduce((sum, advance) => sum + (advance.amount || 0), 0);
     const workCompleted = jobWorkCompleted(job);
-    const empTotalOwed = workCompleted ? empProfit + empMats + tipsTotal : 0;
+    const employeeWorkPay = workCompleted ? empProfit + tipsTotal : 0;
+    const employeeReimbursement = workCompleted || supportsEarlyEmployeeReimbursement(job) ? empMats : 0;
+    const empTotalOwed = employeeWorkPay + employeeReimbursement;
     const linkedDebtPaid = (debtPayments || []).filter(payment => payment.linkedJobId === job.id).reduce((sum, payment) => sum + (payment.amount || 0), 0);
-    const empBalance = (workCompleted ? empTotalOwed : 0) - advancesPaid - linkedDebtPaid;
+    const empBalance = empTotalOwed - advancesPaid - linkedDebtPaid;
     const outstanding = contractTotal - collectedGross;
     const projectedGross = collectedGross + pendingGross;
     const projectedTxns = collectedTxns + pendingTxns;
     const projectedFees = projectedGross * feeRate + txnFee * projectedTxns + manualFees;
     const projectedNetRevenue = projectedGross - projectedFees;
     const projectedProfitPool = Math.max(0, projectedNetRevenue - totalMats);
-    const potentialEmpTotalOwed = workCompleted ? projectedProfitPool * effectiveEmpShare + empMats + tipsTotal : 0;
-    const potentialEmpBalance = (workCompleted ? potentialEmpTotalOwed : 0) - advancesPaid - linkedDebtPaid;
+    const potentialEmployeeWorkPay = workCompleted ? projectedProfitPool * effectiveEmpShare + tipsTotal : 0;
+    const potentialEmployeeReimbursement = workCompleted || supportsEarlyEmployeeReimbursement(job) ? empMats : 0;
+    const potentialEmpTotalOwed = potentialEmployeeWorkPay + potentialEmployeeReimbursement;
+    const potentialEmpBalance = potentialEmpTotalOwed - advancesPaid - linkedDebtPaid;
     const potentialOwnerProfit = projectedProfitPool * effectiveOwnerShare;
     const potentialOwnerTotal = potentialOwnerProfit + ownerMats;
     const potentialDebtContribution = debtFeature.debtContribution(job, projectedProfitPool, employee, settings);
@@ -176,7 +187,9 @@
       totalFees: roundMoney(totalFees), netRevenue: roundMoney(netRevenue), totalMats: roundMoney(totalMats),
       ownerMats: roundMoney(ownerMats), empMats: roundMoney(empMats), profitPool: roundMoney(profitPool),
       empProfit: roundMoney(empProfit), ownerProfit: roundMoney(ownerProfit), debtContribution: roundMoney(debtContribution),
-      tipsTotal: roundMoney(tipsTotal), empTotalOwed: roundMoney(empTotalOwed), advancesPaid: roundMoney(advancesPaid),
+      tipsTotal: roundMoney(tipsTotal), employeeWorkPay: roundMoney(employeeWorkPay), employeeReimbursement: roundMoney(employeeReimbursement),
+      potentialEmployeeWorkPay: roundMoney(potentialEmployeeWorkPay), potentialEmployeeReimbursement: roundMoney(potentialEmployeeReimbursement),
+      empTotalOwed: roundMoney(empTotalOwed), advancesPaid: roundMoney(advancesPaid),
       linkedDebtPaid: roundMoney(linkedDebtPaid), empBalance: roundMoney(empBalance), outstanding: roundMoney(outstanding),
       projectedGross: roundMoney(projectedGross), projectedFees: roundMoney(projectedFees), projectedNetRevenue: roundMoney(projectedNetRevenue),
       projectedProfitPool: roundMoney(projectedProfitPool), potentialEmpTotalOwed: roundMoney(potentialEmpTotalOwed),

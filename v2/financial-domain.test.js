@@ -87,6 +87,62 @@ test('holds employee pay while preserving owner-side financial calculations', ()
   assert.equal(result.empBalance, -50);
 });
 
+test('lets unified-v2 held jobs reimburse employee materials without releasing work pay', () => {
+  const job = {
+    id: 'held-reimbursement-job',
+    createdVia: 'unified-v2',
+    quote: 1000,
+    milestones: [{ pct: 100, status: 'collected' }],
+    tips: [{ amount: 25 }],
+    advances: [],
+    fees: [],
+    materials: [{ who: 'emp', costAmount: 75, chargeAmount: 0 }],
+    addOns: [],
+    subtractions: [],
+    workCompleted: false,
+    jobType: 'quoted'
+  };
+  const result = calcJob(job, { employee, settings: { feeRate: 0, txnFee: 0 }, debtPayments: [] });
+
+  assert.equal(result.ownerProfit, 314.5);
+  assert.equal(result.employeeWorkPay, 0);
+  assert.equal(result.employeeReimbursement, 75);
+  assert.equal(result.empTotalOwed, 75);
+  assert.equal(result.potentialEmpTotalOwed, 75);
+  assert.equal(result.potentialEmpBalance, 75);
+
+  const afterWorkCompletes = calcJob({ ...job, workCompleted: true }, {
+    employee,
+    settings: { feeRate: 0, txnFee: 0 },
+    debtPayments: []
+  });
+  assert.equal(afterWorkCompletes.employeeWorkPay, 635.5);
+  assert.equal(afterWorkCompletes.employeeReimbursement, 75);
+  assert.equal(afterWorkCompletes.potentialEmpTotalOwed, 710.5);
+});
+
+test('does not add early material reimbursement behavior to held legacy jobs', () => {
+  const job = {
+    id: 'held-legacy-reimbursement-job',
+    createdVia: 'legacy',
+    quote: 1000,
+    milestones: [{ pct: 100, status: 'collected' }],
+    materials: [{ who: 'emp', costAmount: 75, chargeAmount: 0 }],
+    tips: [],
+    advances: [],
+    fees: [],
+    addOns: [],
+    subtractions: [],
+    workCompleted: false,
+    jobType: 'quoted'
+  };
+  const result = calcJob(job, { employee, settings: { feeRate: 0, txnFee: 0 }, debtPayments: [] });
+
+  assert.equal(result.employeeReimbursement, 0);
+  assert.equal(result.empTotalOwed, 0);
+  assert.equal(result.potentialEmpBalance, 0);
+});
+
 test('calculates hourly jobs from logged hours, hourly additions, and material charges', () => {
   const job = {
     id: 'hourly-job',
