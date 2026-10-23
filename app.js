@@ -765,6 +765,7 @@ function hwDetail(hw, c) {
             </div>
           </div>`).join('')
         : '<div class="admin-only" style="color:var(--text3);font-size:15px;padding:4px 0">No payments made yet.</div>'}
+      ${c.employeeAdvanceApplied > 0.005 ? `<div class="line-item admin-only"><span>Paid from advance</span><span class="green">${fmt(c.employeeAdvanceApplied)}</span></div>` : ''}
       <div class="total-line admin-only" style="margin-top:8px">
         <span>Outstanding balance</span>
         <span class="${c.empBalance>0?'orange':'green'}">${fmt(Math.max(0,c.empBalance))}</span>
@@ -1672,7 +1673,12 @@ function payTypeBadgeHtml(payType, jobId, idx) {
   const { cls, label } = cfg[payType] || cfg[''];
   const job = state.jobs.find(j => j.id === jobId);
   const admin = currentUser?.isAdmin && !_isHistoricalJob(job);
-  return `<span class="status-badge ${cls}"${admin ? ` onclick="cyclePayType('${jobId}',${idx})" title="Click to cycle type"` : ''}>${label}</span>`;
+  const advanceManagedSeparately = payType === 'advance';
+  const canCycle = admin && !advanceManagedSeparately;
+  const title = advanceManagedSeparately
+    ? 'Advance is managed through Pay Employee'
+    : 'Click to cycle type';
+  return `<span class="status-badge ${cls}"${canCycle ? ` onclick="cyclePayType('${jobId}',${idx})"` : ''} title="${title}">${label}</span>`;
 }
 function toggleHeaderMobile(event, type, id) {
   if (window.innerWidth > 600) return;
@@ -1715,16 +1721,10 @@ function closeOtherJobPopovers(kind) {
 function cyclePayType(jobId, idx) {
   const job = state.jobs.find(j=>j.id===jobId);
   if (!job||!job.advances||job.advances[idx]===undefined) return;
-  const cycle = {'':'advance','advance':'final','final':'adjustment','adjustment':'tip','tip':''};
+  const cycle = {'':'final','final':'adjustment','adjustment':'tip','tip':''};
   const item = job.advances[idx];
+  if (item.payType === 'advance') return;
   const nextType = cycle[item.payType||''];
-  if (item.employeeAdvanceId && nextType !== 'advance') {
-    _deleteEmployeeAdvance(item.employeeAdvanceId);
-    delete item.employeeAdvanceId;
-  } else if (!item.employeeAdvanceId && nextType === 'advance') {
-    const record = _recordEmployeeAdvance({ employeeId: job.employeeId, amount: item.amount, label: item.label, date: item.date, sourceKind: 'job', sourceId: job.id });
-    if (record) item.employeeAdvanceId = record.id;
-  }
   item.payType = nextType;
   save(); renderJobs();
 }
@@ -2317,6 +2317,7 @@ function jobDetail(job, c) {
           <button class="btn btn-ghost btn-sm admin-only" style="padding:2px 8px" onclick="openEmployeePaymentForSource('job','${job.id}')">+ Pay Employee</button>
         </div>
         ${advHtml||'<div style="color:var(--text3);font-size:16px;padding:4px 0">No employee payments logged</div>'}
+        ${c.employeeAdvanceApplied > 0.005 ? `<div class="line-item"><div class="line-item-label">Paid from advance</div><div class="line-item-value green">${fmt(c.employeeAdvanceApplied)}</div></div>` : ''}
         <div class="total-line"><span style="color:var(--text2)">${employeePayNetLabel(c.advancesPaid)}</span><span class="line-item-value ${employeePayActivityClass(c.advancesPaid)}">${employeePayNetFmt(c.advancesPaid)}</span></div>
       </div>
 
