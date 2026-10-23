@@ -62,6 +62,16 @@
     };
   }
 
+  function cashDue(grossSelected, advanceBalance = 0, advanceApplicationCapacity = 0, moneyRound = roundMoney) {
+    const availableAdvance = moneyRound(Math.max(0, advanceBalance));
+    const capacity = moneyRound(Math.max(0, advanceApplicationCapacity));
+    const advanceApplied = moneyRound(Math.min(availableAdvance, capacity));
+    return {
+      advanceApplied,
+      netCashDue: moneyRound(Math.max(0, Number(grossSelected || 0) - advanceApplied))
+    };
+  }
+
   function splitAllocation(amount, owed, payType, moneyRound = roundMoney) {
     const payment = Number(amount || 0);
     const balance = Math.max(0, Number(owed || 0));
@@ -76,6 +86,7 @@
 
   return Object.freeze({
     buildPaymentRows,
+    cashDue,
     paymentPlan,
     splitAllocation
   });

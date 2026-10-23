@@ -2839,13 +2839,13 @@ function updateSplitTotals() {
     <span>Allocated <strong style="color:var(--green)">${fmt(allocated)}</strong></span>
     <span>Remaining <strong style="color:${remColor}">${fmt(remaining)}</strong></span>`;
   const advanceAvailable = _employeeAdvanceBalance(splitPayEmployeeId);
-  const advanceApplied = _roundMoney(Math.min(advanceAvailable, advanceApplicationCapacity));
+  const { advanceApplied, netCashDue } = V2_EMPLOYEE_PAYMENT.cashDue(grossSelected, advanceAvailable, advanceApplicationCapacity, _roundMoney);
   const summaryEl = document.getElementById('sp_paySummary');
   if (summaryEl) summaryEl.innerHTML = `
     <span>Gross pay selected <strong>${fmt(grossSelected)}</strong></span>
     <span>Advance balance <strong style="color:${advanceAvailable > 0.005 ? 'var(--red)' : 'var(--text2)'}">-${fmt(advanceAvailable)}</strong></span>
     <span>Advance applied <strong style="color:${advanceApplied > 0.005 ? 'var(--red)' : 'var(--text2)'}">-${fmt(advanceApplied)}</strong></span>
-    <span>Net cash due <strong style="color:var(--accent)">${fmt(Math.max(0, grossSelected - advanceApplied))}</strong></span>`;
+    <span>Net cash due <strong style="color:var(--accent)">${fmt(netCashDue)}</strong></span>`;
 }
 function _splitEmployeePaymentAllocation(amount, owed, payType) {
   return V2_EMPLOYEE_PAYMENT.splitAllocation(amount, owed, payType, _roundMoney);
@@ -2938,6 +2938,26 @@ async function saveSplitPay() {
   const allEntries = [...jobEntries, ...hwEntries];
   const hasNewAdvance = allEntries.some(entry => entry.amount > 0.005 && (entry.payType === 'advance' || entry.amount > entry.owed + 0.005 || entry.owed <= 0.005));
   const hasAdjustment = allEntries.some(entry => entry.payType === 'adjustment' || entry.amount < -0.005);
+  let grossSelected = 0;
+  let advanceApplicationCapacity = 0;
+  document.querySelectorAll('.sp-alloc-input').forEach(el => {
+    const amount = parseFloat(el.value) || 0;
+    const owed = Math.max(0, Number(el.dataset.owed || 0));
+    if (splitPaySelectedSources.has(el.id) && owed > 0.005) {
+      grossSelected += owed;
+      advanceApplicationCapacity += Math.max(0, owed - Math.max(0, amount));
+    }
+  });
+  const { netCashDue } = V2_EMPLOYEE_PAYMENT.cashDue(
+    grossSelected,
+    _employeeAdvanceBalance(splitPayEmployeeId),
+    advanceApplicationCapacity,
+    _roundMoney
+  );
+  if (!hasNewAdvance && !hasAdjustment && total > netCashDue + 0.01) {
+    showAlert(`This payment is above the employee's net cash due of ${fmt(netCashDue)} after applying the outstanding advance.`);
+    return;
+  }
   const paymentMode = hasAdjustment ? 'adjustment' : hasNewAdvance ? 'advance' : 'owed';
   const remaining = total - allocated;
   const doSave = async () => {

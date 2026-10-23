@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildPaymentRows, paymentPlan, splitAllocation } = require('./employee-payment-domain');
+const { buildPaymentRows, cashDue, paymentPlan, splitAllocation } = require('./employee-payment-domain');
 
 const calcJob = job => ({ empBalance: job.current, potentialEmpBalance: job.potential });
 const calcHW = item => ({ empBalance: item.current, potentialEmpBalance: item.potential });
@@ -41,6 +41,17 @@ test('builds a rounded payment plan and total from payment rows', () => {
     grossPay: 8,
     advanceBalance: 3,
     payoutTotal: 5
+  });
+});
+
+test('calculates cash due after applying an employee-level advance to selected work', () => {
+  assert.deepEqual(cashDue(358.28, 200, 358.28), {
+    advanceApplied: 200,
+    netCashDue: 158.28
+  });
+  assert.deepEqual(cashDue(134.38, 200, 0), {
+    advanceApplied: 0,
+    netCashDue: 134.38
   });
 });
 
