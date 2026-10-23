@@ -43,14 +43,22 @@
     return rows;
   }
 
-  function paymentPlan(rows, moneyRound = roundMoney) {
+  function paymentPlan(rows, advanceBalance = 0, moneyRound = roundMoney) {
     const normalizedRows = (rows || []).map(row => ({
       ...row,
       payoutTarget: moneyRound(row.potentialBalance)
     }));
+    const positivePay = moneyRound(normalizedRows.reduce((sum, row) => sum + Math.max(0, row.payoutTarget), 0));
+    const negativePay = moneyRound(normalizedRows.reduce((sum, row) => sum + Math.max(0, -row.payoutTarget), 0));
+    const grossPay = moneyRound(positivePay - negativePay);
+    const availableAdvance = moneyRound(Math.max(0, advanceBalance));
     return {
       rows: normalizedRows,
-      payoutTotal: moneyRound(normalizedRows.reduce((sum, row) => sum + row.payoutTarget, 0))
+      positivePay,
+      negativePay,
+      grossPay,
+      advanceBalance: availableAdvance,
+      payoutTotal: moneyRound(Math.max(0, grossPay - availableAdvance))
     };
   }
 

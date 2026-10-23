@@ -83,6 +83,43 @@ test('keeps historical partial compatibility after retiring zero-count conversio
   assert.equal(state.jobs[0].partialCollections[0].snapshotBefore.revenueItems.length, 0);
 });
 
+test('migrates explicitly marked job advances into the employee advance bucket without deleting history', () => {
+  const state = {
+    settings: {},
+    debtPayments: [],
+    splitPayments: [{
+      id: 'event-1', allocations: [{ sourceKind: 'job', sourceId: 'job-1', advanceId: 'legacy-advance' }]
+    }],
+    employeeAdvances: [],
+    users: [{ id: 'employee-1', name: 'Employee', isAdmin: false }],
+    appointments: [], clients: [], homewatch: [],
+    jobs: [{
+      id: 'job-1', name: 'Old job', employeeId: 'employee-1', advances: [
+        { id: 'legacy-advance', label: 'Advance', amount: 200, date: '2026-10-20', payType: 'advance', splitEventId: 'event-1' },
+        { id: 'ordinary-pay', label: 'Pay', amount: 50, date: '2026-10-20', payType: '', splitEventId: 'event-1' }
+      ]
+    }]
+  };
+  let nextId = 1;
+  let changed = 0;
+  migrateState(state, {
+    idFactory: () => `generated-${nextId++}`,
+    today: () => '2026-10-23',
+    onMigrationChange: () => { changed++; }
+  });
+
+  assert.equal(changed, 1);
+  assert.equal(state.employeeAdvances.length, 1);
+  assert.deepEqual(state.employeeAdvances[0], {
+    id: 'generated-1', employeeId: 'employee-1', label: 'Advance', amount: 200,
+    date: '2026-10-20', sourceKind: 'job', sourceId: 'job-1', sourceName: 'Old job',
+    splitEventId: 'event-1', legacySourceId: 'job:job-1:legacy-advance', legacyAdvanceId: 'legacy-advance', applications: []
+  });
+  assert.equal(state.jobs[0].advances[0].employeeAdvanceId, 'generated-1');
+  assert.equal(state.jobs[0].advances[1].employeeAdvanceId, undefined);
+  assert.equal(state.splitPayments[0].allocations[0].employeeAdvanceId, 'generated-1');
+});
+
 test('does not replace existing normalized values', () => {
   const state = {
     settings: {

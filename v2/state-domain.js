@@ -107,6 +107,9 @@
       : [];
     const normalizeInclude = options.normalizeOwedInclude || normalizeOwedInclude;
     const sanitizeUserTheme = options.sanitizeTheme || sanitizeTheme;
+    const markMigrationChanged = typeof options.onMigrationChange === 'function'
+      ? options.onMigrationChange
+      : () => {};
 
     if (!s.settings.empName) s.settings.empName = 'Employee';
     if (s.settings.debtOriginal === undefined) s.settings.debtOriginal = 2256.58;
@@ -122,6 +125,28 @@
     s.settings.owedSummaryInclude = normalizeInclude(s.settings.owedSummaryInclude);
     if (!s.debtPayments) s.debtPayments = [];
     if (!s.splitPayments) s.splitPayments = [];
+    if (!Array.isArray(s.employeeAdvances)) s.employeeAdvances = [];
+    (s.employeeAdvances || []).forEach(advance => {
+      if (!advance.id) advance.id = idFactory();
+      if (advance.employeeId === undefined) advance.employeeId = '';
+      if (advance.label === undefined) advance.label = 'Employee advance';
+      if (advance.date === undefined) advance.date = today();
+      if (advance.amount === undefined) advance.amount = 0;
+      if (advance.sourceKind === undefined) advance.sourceKind = '';
+      if (advance.sourceId === undefined) advance.sourceId = '';
+      if (advance.sourceName === undefined) advance.sourceName = '';
+      if (advance.splitEventId === undefined) advance.splitEventId = '';
+      if (!Array.isArray(advance.applications)) advance.applications = [];
+      advance.applications.forEach(application => {
+        if (!application.id) application.id = idFactory();
+        if (application.date === undefined) application.date = advance.date || today();
+        if (application.label === undefined) application.label = '';
+        if (application.sourceKind === undefined) application.sourceKind = '';
+        if (application.sourceId === undefined) application.sourceId = '';
+        if (application.amount === undefined) application.amount = 0;
+        if (application.splitEventId === undefined) application.splitEventId = '';
+      });
+    });
     (s.splitPayments || []).forEach(p => {
       if (!p.id) p.id = idFactory();
       if (p.date === undefined) p.date = today();
@@ -220,6 +245,39 @@
         if (a.date === undefined) a.date = '';
       });
     });
+    const knownAdvanceIds = new Set((s.employeeAdvances || []).map(advance => advance.legacySourceId).filter(Boolean));
+    const migrateLegacyAdvance = (source, sourceKind, advance) => {
+      if (!advance || advance.employeeAdvanceId || advance.payType !== 'advance') return;
+      const amount = Number(advance.amount || 0);
+      if (amount <= 0.005) return;
+      const legacySourceId = `${sourceKind}:${source.id}:${advance.id || ''}`;
+      if (knownAdvanceIds.has(legacySourceId)) return;
+      const employeeAdvanceId = idFactory();
+      s.employeeAdvances.push({
+        id: employeeAdvanceId,
+        employeeId: source.employeeId || '',
+        label: advance.label || 'Employee advance',
+        amount,
+        date: advance.date || today(),
+        sourceKind,
+        sourceId: source.id || '',
+        sourceName: source.name || '',
+        splitEventId: advance.splitEventId || '',
+        legacySourceId,
+        legacyAdvanceId: advance.id || '',
+        applications: []
+      });
+      advance.employeeAdvanceId = employeeAdvanceId;
+      knownAdvanceIds.add(legacySourceId);
+      markMigrationChanged('employeeAdvances');
+      (s.splitPayments || []).forEach(payment => {
+        (payment.allocations || []).forEach(allocation => {
+          if (allocation.sourceKind === sourceKind && allocation.sourceId === source.id && allocation.advanceId === advance.id) {
+            allocation.employeeAdvanceId = employeeAdvanceId;
+          }
+        });
+      });
+    };
     (s.jobs || []).forEach(job => {
       delete job._expanded; // moved to local localStorage - not stored in Firestore
       if (!job.employeeId && defaultEmp) job.employeeId = defaultEmp.id;
@@ -240,6 +298,7 @@
         if (a.payType === undefined) a.payType = '';
         if (a.label === undefined) a.label = '';
         if (a.date === undefined) a.date = '';
+        migrateLegacyAdvance(job, 'job', a);
       });
       (job.tips || []).forEach(t => {
         if (!t.id) t.id = idFactory();
@@ -282,6 +341,9 @@
       });
       if (job.isItemized === undefined) job.isItemized = false;
       if (!job.quoteItems) job.quoteItems = [];
+    });
+    (s.homewatch || []).forEach(hw => {
+      (hw.advances || []).forEach(advance => migrateLegacyAdvance(hw, 'hw', advance));
     });
     return s;
   }

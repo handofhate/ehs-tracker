@@ -57,7 +57,20 @@
     return quote > 0 ? (Number(milestone?.amount || 0) / quote) * 100 : 0;
   }
 
-  function calcJob(job, { employee = null, settings = {}, debtPayments = [] } = {}) {
+  function employeeAdvanceAppliedForSource(employeeAdvances, sourceKind, sourceId) {
+    return (employeeAdvances || []).reduce((sum, advance) => sum +
+      (advance.applications || [])
+        .filter(application => application.sourceKind === sourceKind && application.sourceId === sourceId)
+        .reduce((sourceSum, application) => sourceSum + Number(application.amount || 0), 0), 0);
+  }
+
+  function directAdvancesPaid(items) {
+    return (items || [])
+      .filter(advance => !advance.employeeAdvanceId)
+      .reduce((sum, advance) => sum + Number(advance.amount || 0), 0);
+  }
+
+  function calcJob(job, { employee = null, settings = {}, debtPayments = [], employeeAdvances = [] } = {}) {
     const empShare = employee?.empShare ?? 0.66;
     const { feeRate, txnFee } = feeDomain.forJob(job, settings);
     const normalOwnerShare = 1 - empShare;
@@ -158,7 +171,9 @@
     const ownerProfit = profitPool * effectiveOwnerShare;
     const debtContribution = debtFeature.debtContribution(job, profitPool, employee, settings);
     const tipsTotal = (job.tips || []).reduce((sum, tip) => sum + (tip.amount || 0), 0);
-    const advancesPaid = (job.advances || []).reduce((sum, advance) => sum + (advance.amount || 0), 0);
+    const directAdvances = directAdvancesPaid(job.advances);
+    const employeeAdvanceApplied = employeeAdvanceAppliedForSource(employeeAdvances, 'job', job.id);
+    const advancesPaid = directAdvances + employeeAdvanceApplied;
     const workCompleted = jobWorkCompleted(job);
     const employeeWorkPay = workCompleted ? empProfit + tipsTotal : 0;
     const employeeReimbursement = workCompleted || supportsEarlyEmployeeReimbursement(job) ? empMats : 0;
@@ -189,7 +204,7 @@
       empProfit: roundMoney(empProfit), ownerProfit: roundMoney(ownerProfit), debtContribution: roundMoney(debtContribution),
       tipsTotal: roundMoney(tipsTotal), employeeWorkPay: roundMoney(employeeWorkPay), employeeReimbursement: roundMoney(employeeReimbursement),
       potentialEmployeeWorkPay: roundMoney(potentialEmployeeWorkPay), potentialEmployeeReimbursement: roundMoney(potentialEmployeeReimbursement),
-      empTotalOwed: roundMoney(empTotalOwed), advancesPaid: roundMoney(advancesPaid),
+      empTotalOwed: roundMoney(empTotalOwed), directAdvancesPaid: roundMoney(directAdvances), employeeAdvanceApplied: roundMoney(employeeAdvanceApplied), advancesPaid: roundMoney(advancesPaid),
       linkedDebtPaid: roundMoney(linkedDebtPaid), empBalance: roundMoney(empBalance), outstanding: roundMoney(outstanding),
       projectedGross: roundMoney(projectedGross), projectedFees: roundMoney(projectedFees), projectedNetRevenue: roundMoney(projectedNetRevenue),
       projectedProfitPool: roundMoney(projectedProfitPool), potentialEmpTotalOwed: roundMoney(potentialEmpTotalOwed),
@@ -199,7 +214,7 @@
     };
   }
 
-  function calcHomewatch(homewatch, { employee = null, settings = {}, debtPayments = [] } = {}) {
+  function calcHomewatch(homewatch, { employee = null, settings = {}, debtPayments = [], employeeAdvances = [] } = {}) {
     const empShare = employee?.empShare ?? 0.66;
     const collectedPayments = (homewatch.payments || []).filter(payment => payment.status === 'collected');
     const collectedGross = collectedPayments.reduce((sum, payment) => sum + (payment.amount || 0), 0);
@@ -213,7 +228,9 @@
     const netRevenue = roundMoney(collectedGross - totalFees);
     const empOwed = roundMoney(netRevenue * empShare);
     const ownerOwed = roundMoney(netRevenue * (1 - empShare));
-    const advancesPaid = (homewatch.advances || []).reduce((sum, advance) => sum + (advance.amount || 0), 0);
+    const directAdvances = directAdvancesPaid(homewatch.advances);
+    const employeeAdvanceApplied = employeeAdvanceAppliedForSource(employeeAdvances, 'hw', homewatch.id);
+    const advancesPaid = directAdvances + employeeAdvanceApplied;
     const linkedDebtPaid = (debtPayments || []).filter(payment => payment.linkedHWId === homewatch.id).reduce((sum, payment) => sum + (payment.amount || 0), 0);
     const empBalance = empOwed - advancesPaid - linkedDebtPaid;
     const projectedFees = roundMoney(paymentFees([...(collectedPayments || []), ...(pendingPayments || [])]));
@@ -222,7 +239,7 @@
     return {
       collectedGross: roundMoney(collectedGross), pendingGross: roundMoney(pendingGross), totalFees: roundMoney(totalFees),
       netRevenue: roundMoney(netRevenue), empOwed: roundMoney(empOwed), ownerOwed: roundMoney(ownerOwed),
-      advancesPaid: roundMoney(advancesPaid), linkedDebtPaid: roundMoney(linkedDebtPaid), empBalance: roundMoney(empBalance),
+      advancesPaid: roundMoney(advancesPaid), directAdvancesPaid: roundMoney(directAdvances), employeeAdvanceApplied: roundMoney(employeeAdvanceApplied), linkedDebtPaid: roundMoney(linkedDebtPaid), empBalance: roundMoney(empBalance),
       potentialEmpBalance: roundMoney(potentialEmpOwed - advancesPaid - linkedDebtPaid)
     };
   }

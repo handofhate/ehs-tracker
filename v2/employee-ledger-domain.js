@@ -11,6 +11,7 @@
     const rows = [];
     (state?.jobs || []).forEach(job => {
       (job.advances || []).forEach(advance => {
+        if (advance.employeeAdvanceId) return;
         rows.push({
           sourceKind: 'job',
           sourceId: job.id,
@@ -22,6 +23,7 @@
     });
     (state?.homewatch || []).forEach(homewatch => {
       (homewatch.advances || []).forEach(advance => {
+        if (advance.employeeAdvanceId) return;
         rows.push({
           sourceKind: 'hw',
           sourceId: homewatch.id,
@@ -31,7 +33,22 @@
         });
       });
     });
+    (state?.employeeAdvances || []).filter(advance => advance?.splitEventId).forEach(advance => {
+      rows.push({
+        sourceKind: advance.sourceKind || 'employee',
+        sourceId: advance.sourceId || advance.employeeId || '',
+        sourceName: advance.sourceName || 'Employee advance',
+        employeeId: advance.employeeId || '',
+        employeeAdvanceId: advance.id || '',
+        advance
+      });
+    });
     return rows;
+  }
+
+  function sourceNameFor(state, sourceKind, sourceId) {
+    const collection = sourceKind === 'hw' ? (state?.homewatch || []) : (state?.jobs || []);
+    return collection.find(source => source.id === sourceId)?.name || (sourceKind === 'hw' ? 'HomeWatch' : 'Job');
   }
 
   function buildLedgerFromStoredEvents(state) {
@@ -44,16 +61,26 @@
       const linkedAdvances = collectAdvanceRows(state)
         .filter(({ advance }) => String(advance.splitEventId || '') === String(event.id));
       const storedAllocations = event.allocations || [];
-      const hasStoredAdvanceIds = storedAllocations.some(allocation => allocation?.advanceId);
-      if (!linkedAdvances.length && hasStoredAdvanceIds) return;
-      const allocations = linkedAdvances.length
-        ? linkedAdvances.map(({ sourceKind, sourceId, sourceName, advance }) => ({
+      const appliedAllocations = (event.advanceApplications || []).map(application => ({
+        sourceKind: application.sourceKind || '',
+        sourceId: application.sourceId || '',
+        sourceName: application.sourceName || sourceNameFor(state, application.sourceKind, application.sourceId),
+        amount: Number(application.amount || 0),
+        payType: 'advance',
+        advanceId: '',
+        employeeAdvanceId: application.employeeAdvanceId || ''
+      }));
+      const hasStoredAdvanceIds = storedAllocations.some(allocation => allocation?.advanceId || allocation?.employeeAdvanceId);
+      if (!linkedAdvances.length && !appliedAllocations.length && hasStoredAdvanceIds) return;
+      const allocations = (linkedAdvances.length
+        ? linkedAdvances.map(({ sourceKind, sourceId, sourceName, employeeAdvanceId, advance }) => ({
           sourceKind,
           sourceId,
           sourceName,
           amount: Number(advance.amount || 0),
           payType: advance.payType || '',
-          advanceId: advance.id || ''
+          advanceId: advance.id || '',
+          employeeAdvanceId: employeeAdvanceId || advance.employeeAdvanceId || ''
         }))
         : storedAllocations.map(allocation => ({
           sourceKind: allocation.sourceKind || '',
@@ -61,11 +88,10 @@
           sourceName: allocation.sourceName || '',
           amount: Number(allocation.amount || 0),
           payType: allocation.payType || '',
-          advanceId: allocation.advanceId || ''
-        }));
-      const total = linkedAdvances.length
-        ? allocations.reduce((sum, allocation) => sum + Number(allocation.amount || 0), 0)
-        : Number(event.total || 0);
+          advanceId: allocation.advanceId || '',
+          employeeAdvanceId: allocation.employeeAdvanceId || ''
+        }))).concat(appliedAllocations);
+      const total = allocations.reduce((sum, allocation) => sum + Number(allocation.amount || 0), 0);
       rows.push({
         id: `stored:${event.id}`,
         source: 'stored',
@@ -82,7 +108,8 @@
 
   function buildLedgerFromLegacy(state, byEventId = {}) {
     const groups = {};
-    collectAdvanceRows(state).forEach(({ sourceKind, sourceId, sourceName, employeeId, advance }) => {
+    collectAdvanceRows(state).forEach(({ sourceKind, sourceId, sourceName, employeeId, employeeAdvanceId, advance }) => {
+      if (employeeAdvanceId) return;
       const splitEventId = (advance.splitEventId || '').trim();
       if (splitEventId && byEventId[splitEventId]) return;
       const amount = Number(advance.amount || 0);
@@ -92,7 +119,7 @@
       if (!label) return;
       const key = `${date}||${label}`;
       if (!groups[key]) groups[key] = { date, label, allocations: [], employeeIds: new Set() };
-      groups[key].allocations.push({ sourceKind, sourceId, sourceName, amount, payType: advance.payType || '' });
+      groups[key].allocations.push({ sourceKind, sourceId, sourceName, amount, payType: advance.payType || '', employeeAdvanceId: employeeAdvanceId || '' });
       if (employeeId) groups[key].employeeIds.add(employeeId);
     });
     const rows = [];

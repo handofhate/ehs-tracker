@@ -43,7 +43,32 @@ test('calculates admin pay owed with job credits and recurring-service inclusion
     calcJob,
     calcHW
   });
-  assert.deepEqual(result, { jobPay: 100, jobCredit: 25, jobNet: 75, recurringBalance: 40, owedTotal: 75 });
+  assert.deepEqual(result, {
+    jobPay: 100,
+    jobCredit: 25,
+    jobNet: 75,
+    recurringBalance: 40,
+    grossOwed: 75,
+    advanceBalance: 0,
+    advanceCarry: 0,
+    owedTotal: 75
+  });
+});
+
+test('subtracts employee-level advances from gross pay without changing job balances', () => {
+  const result = employeePaySummary({
+    jobs: [{ employeeId: 'emp', balance: 650 }],
+    homewatch: [],
+    employeeAdvances: [{ employeeId: 'emp', amount: 200, applications: [] }],
+    employeeId: 'emp',
+    include: { jobs: true, homewatch: false },
+    calcJob,
+    calcHW
+  });
+  assert.equal(result.jobPay, 650);
+  assert.equal(result.advanceBalance, 200);
+  assert.equal(result.owedTotal, 450);
+  assert.equal(result.advanceCarry, 0);
 });
 
 test('builds the employee Overview counts and potential owed total', () => {

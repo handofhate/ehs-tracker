@@ -34,13 +34,18 @@
     let total = 0;
     (state?.jobs || []).filter(job => job.employeeId === employeeId).forEach(job => {
       (job.advances || []).forEach(advance => {
+        if (advance.employeeAdvanceId) return;
         if (inWindow(advance.date)) total += advance.amount || 0;
       });
     });
     (state?.homewatch || []).filter(homewatch => homewatch.employeeId === employeeId).forEach(homewatch => {
       (homewatch.advances || []).forEach(advance => {
+        if (advance.employeeAdvanceId) return;
         if (inWindow(advance.date)) total += advance.amount || 0;
       });
+    });
+    (state?.employeeAdvances || []).filter(advance => advance.employeeId === employeeId).forEach(advance => {
+      if (inWindow(advance.date)) total += advance.amount || 0;
     });
     return roundMoney(total);
   }
@@ -60,7 +65,16 @@
       }, { pendingCount: 0, pendingTotal: 0, invoicedCount: 0, invoicedTotal: 0 });
   }
 
-  function employeePaySummary({ jobs = [], homewatch = [], employeeId, include = {}, calcJob, calcHW, roundMoney = defaultRoundMoney }) {
+  function employeeAdvanceBalance(advances, employeeId, roundMoney = defaultRoundMoney) {
+    return roundMoney((advances || [])
+      .filter(advance => !employeeId || advance.employeeId === employeeId)
+      .reduce((sum, advance) => {
+        const applied = (advance.applications || []).reduce((applicationSum, application) => applicationSum + Number(application.amount || 0), 0);
+        return sum + Math.max(0, Number(advance.amount || 0) - applied);
+      }, 0));
+  }
+
+  function employeePaySummary({ jobs = [], homewatch = [], employeeAdvances = [], employeeId, include = {}, calcJob, calcHW, roundMoney = defaultRoundMoney }) {
     if (typeof calcJob !== 'function' || typeof calcHW !== 'function') {
       throw new Error('Employee pay summaries require job and recurring-service calculators.');
     }
@@ -70,11 +84,14 @@
     const jobCredit = roundMoney(activeJobs.reduce((sum, job) => sum + Math.max(0, -calcJob(job).potentialEmpBalance), 0));
     const jobNet = roundMoney(jobPay - jobCredit);
     const recurringBalance = roundMoney(employeeHomewatch.reduce((sum, item) => sum + calcHW(item).potentialEmpBalance, 0));
-    const owedTotal = roundMoney((include.jobs ? jobNet : 0) + (include.homewatch ? recurringBalance : 0));
-    return { jobPay, jobCredit, jobNet, recurringBalance, owedTotal };
+    const grossOwed = roundMoney((include.jobs ? jobNet : 0) + (include.homewatch ? recurringBalance : 0));
+    const advanceBalance = (include.jobs || include.homewatch) ? employeeAdvanceBalance(employeeAdvances, employeeId, roundMoney) : 0;
+    const owedTotal = roundMoney(Math.max(0, grossOwed - advanceBalance));
+    const advanceCarry = roundMoney(Math.max(0, advanceBalance - Math.max(0, grossOwed)));
+    return { jobPay, jobCredit, jobNet, recurringBalance, grossOwed, advanceBalance, advanceCarry, owedTotal };
   }
 
-  function employeeOverviewSummary({ jobs = [], homewatch = [], employeeId, calcJob, calcHW, roundMoney = defaultRoundMoney }) {
+  function employeeOverviewSummary({ jobs = [], homewatch = [], employeeAdvances = [], employeeId, calcJob, calcHW, roundMoney = defaultRoundMoney }) {
     if (typeof calcJob !== 'function' || typeof calcHW !== 'function') {
       throw new Error('Employee Overview summaries require job and recurring-service calculators.');
     }
@@ -82,14 +99,19 @@
     const employeeHomewatch = homewatch.filter(item => item.employeeId === employeeId);
     const activeHomewatch = employeeHomewatch.filter(item => item.status !== 'paused');
     const pausedHomewatch = employeeHomewatch.filter(item => item.status === 'paused');
-    const owed = employeeJobs.reduce((sum, job) => sum + calcJob(job).potentialEmpBalance, 0) +
+    const grossOwed = employeeJobs.reduce((sum, job) => sum + calcJob(job).potentialEmpBalance, 0) +
       employeeHomewatch.reduce((sum, item) => sum + calcHW(item).potentialEmpBalance, 0);
+    const advanceBalance = employeeAdvanceBalance(employeeAdvances, employeeId, roundMoney);
+    const owed = roundMoney(Math.max(0, grossOwed - advanceBalance));
     return {
       activeJobs: employeeJobs,
       activeHomewatch,
       pausedHomewatch,
       allHomewatch: employeeHomewatch,
-      potentialOwed: roundMoney(owed)
+      grossOwed: roundMoney(grossOwed),
+      advanceBalance,
+      advanceCarry: roundMoney(Math.max(0, advanceBalance - Math.max(0, grossOwed))),
+      potentialOwed: owed
     };
   }
 
@@ -104,6 +126,7 @@
 
   return Object.freeze({
     billingTotals,
+    employeeAdvanceBalance,
     employeeOverviewSummary,
     employeePaySummary,
     recentEmployeePay,

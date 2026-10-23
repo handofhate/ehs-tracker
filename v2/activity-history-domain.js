@@ -52,6 +52,7 @@
     { key: 'jobs', type: 'job', label: 'job', name: item => item?.name || item?.id || 'Job' },
     { key: 'clients', type: 'client', label: 'client', name: item => [item?.firstName, item?.surname].filter(Boolean).join(' ') || item?.company || item?.id || 'Client' },
     { key: 'homewatch', type: 'recurring-service', label: 'recurring service', name: item => item?.name || item?.clientName || item?.id || 'Recurring service' },
+    { key: 'employeeAdvances', type: 'employee-advance', label: 'employee advance', name: item => item?.label || item?.id || 'Employee advance' },
     { key: 'splitPayments', type: 'employee-payment', label: 'employee payment', name: item => item?.label || item?.id || 'Employee payment' },
     { key: 'debtPayments', type: 'debt-payment', label: 'debt payment', name: item => item?.label || item?.id || 'Debt payment' },
     { key: 'appointments', type: 'appointment', label: 'appointment', name: item => item?.clientName || item?.title || item?.id || 'Appointment' },

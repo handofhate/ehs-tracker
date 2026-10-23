@@ -30,13 +30,17 @@ test('builds a rounded payment plan and total from payment rows', () => {
   const result = paymentPlan([
     { id: 'one', potentialBalance: 10.126 },
     { id: 'two', potentialBalance: -2.125 }
-  ]);
+  ], 3);
   assert.deepEqual(result, {
     rows: [
       { id: 'one', potentialBalance: 10.126, payoutTarget: 10.13 },
       { id: 'two', potentialBalance: -2.125, payoutTarget: -2.13 }
     ],
-    payoutTotal: 8
+    positivePay: 10.13,
+    negativePay: 2.13,
+    grossPay: 8,
+    advanceBalance: 3,
+    payoutTotal: 5
   });
 });
 

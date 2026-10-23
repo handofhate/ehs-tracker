@@ -11,17 +11,46 @@ const {
 test('reconstructs stored ledger allocations from linked advances and hides deleted ghost events', () => {
   const state = {
     jobs: [{ id: 'job-1', name: 'Job One', employeeId: 'emp', advances: [{ id: 'advance-1', amount: 25, date: '2026-09-28', splitEventId: 'event-1' }] }],
+    employeeAdvances: [{ id: 'employee-advance-1', employeeId: 'emp', amount: 15, date: '2026-09-28', sourceKind: 'job', sourceId: 'job-1', splitEventId: 'event-1', applications: [] }],
     splitPayments: [
-      { id: 'event-1', date: '2026-09-28', label: 'Payment', total: 999, allocations: [{ sourceKind: 'job', sourceId: 'job-1', amount: 999, advanceId: 'advance-1' }] },
+      { id: 'event-1', date: '2026-09-28', label: 'Payment', total: 999, allocations: [{ sourceKind: 'job', sourceId: 'job-1', amount: 999, advanceId: 'advance-1', employeeAdvanceId: 'employee-advance-1' }] },
       { id: 'deleted-event', date: '2026-09-27', label: 'Deleted', total: 50, allocations: [{ sourceKind: 'job', sourceId: 'job-1', amount: 50, advanceId: 'deleted-advance' }] },
       { id: 'old-event', date: '2026-09-26', label: 'Old event', total: 10, allocations: [{ sourceKind: 'job', sourceId: 'job-1', amount: 10 }] }
     ]
   };
   const result = buildLedgerFromStoredEvents(state);
   assert.deepEqual(result.rows.map(row => row.id), ['stored:event-1', 'stored:old-event']);
-  assert.equal(result.rows[0].total, 25);
+  assert.equal(result.rows[0].total, 40);
   assert.equal(result.rows[0].allocations[0].advanceId, 'advance-1');
+  assert.equal(result.rows[0].allocations[1].employeeAdvanceId, 'employee-advance-1');
   assert.equal(result.byEventId['event-1'].label, 'Payment');
+});
+
+test('does not surface standalone employee advances as split-ledger ghost events', () => {
+  const state = {
+    employeeAdvances: [{ id: 'employee-advance-1', employeeId: 'emp', amount: 200, date: '2026-09-28', sourceKind: 'job', sourceId: 'job-1', splitEventId: 'deleted-event', applications: [] }],
+    jobs: [{ id: 'job-1', name: 'Job One', employeeId: 'emp', advances: [{ id: 'mirror-1', amount: 200, date: '2026-09-28', label: 'Advance', payType: 'advance', employeeAdvanceId: 'employee-advance-1' }] }],
+    splitPayments: []
+  };
+  assert.deepEqual(getLedgerEntries(state), []);
+});
+
+test('shows an existing employee advance applied during a later settlement', () => {
+  const state = {
+    jobs: [
+      { id: 'job-1', name: 'Cash Job', employeeId: 'emp', advances: [{ id: 'cash-1', amount: 450, splitEventId: 'settlement-1' }] },
+      { id: 'job-2', name: 'Applied Job', employeeId: 'emp', advances: [] }
+    ],
+    employeeAdvances: [{ id: 'employee-advance-1', employeeId: 'emp', amount: 200, applications: [{ id: 'application-1', sourceKind: 'job', sourceId: 'job-2', amount: 200, splitEventId: 'settlement-1' }] }],
+    splitPayments: [{
+      id: 'settlement-1', date: '2026-09-28', label: 'Employee payment', total: 450, grossSettled: 650,
+      allocations: [{ sourceKind: 'job', sourceId: 'job-1', amount: 450, advanceId: 'cash-1' }],
+      advanceApplications: [{ employeeAdvanceId: 'employee-advance-1', sourceKind: 'job', sourceId: 'job-2', amount: 200 }]
+    }]
+  };
+  const [row] = getLedgerEntries(state);
+  assert.equal(row.total, 650);
+  assert.deepEqual(row.allocations.map(allocation => [allocation.sourceName, allocation.amount]), [['Cash Job', 450], ['Applied Job', 200]]);
 });
 
 test('reconstructs legacy split rows without duplicating stored events', () => {

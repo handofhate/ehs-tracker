@@ -47,6 +47,7 @@ const previewSession = V2_PREVIEW_SESSION.createPreviewSession({ persistence: V2
 const V2_HISTORY = window.Tracker2History;
 const V2_ACTIVITY = window.Tracker2ActivityHistory;
 const V2_DEBT = window.Tracker2DebtFeature;
+const V2_EMPLOYEE_ADVANCE = window.Tracker2EmployeeAdvance;
 const V2_FINANCIAL = window.Tracker2Financial;
 const V2_BILLING = window.Tracker2Billing;
 const V2_OVERVIEW = window.Tracker2Overview;
@@ -70,6 +71,7 @@ let state = {
   },
   debtPayments: [],
   splitPayments: [],
+  employeeAdvances: [],
   jobs: [],
   users: [],
   appointments: [],
@@ -83,6 +85,7 @@ let splitPayIncludeAll = false;
 let splitPayEmployeeId = '';
 let splitPayPayoutContext = false;
 let splitPaySource = null;
+let splitPaySelectedSources = new Set();
 let expandedJobs = new Set(); // local only - never saved to Firestore
 let expandedHW   = new Set(); // local only - never saved to Firestore
 let expandedClients = new Set();
@@ -106,6 +109,7 @@ let schedView = 'list'; // 'list' | 'month'
 let selectedCalDay = null;
 let selectedDayFilter = null; // mobile day-drill-down
 let feeMigrationPending = false;
+let employeeAdvanceMigrationPending = false;
 const OWED_INCLUDE_DEFAULTS = { jobs: true, homewatch: true, potential: true };
 
 function _cloneState(value) {
@@ -270,7 +274,10 @@ function migrateState(s) {
     today,
     clientColumnKeys: CLIENT_COLS.map(c => c.key),
     normalizeOwedInclude,
-    sanitizeTheme: _sanitizeTheme
+    sanitizeTheme: _sanitizeTheme,
+    onMigrationChange: type => {
+      if (type === 'employeeAdvances') employeeAdvanceMigrationPending = true;
+    }
   });
   const feeMigration = V2_FEES.migrateStateFees(migrated, { today });
   if (feeMigration.changed) feeMigrationPending = true;
@@ -448,8 +455,10 @@ function load() {
       state = _prepareLoadedState(doc.data());
       _lastSavedState = _cloneState(state);
       const persistFeeMigration = feeMigrationPending;
+      const persistEmployeeAdvanceMigration = employeeAdvanceMigrationPending;
       feeMigrationPending = false;
-      if ((syncHomewatchAutoInvoices() || persistFeeMigration) && !PREVIEW_MODE) {
+      employeeAdvanceMigrationPending = false;
+      if ((syncHomewatchAutoInvoices() || persistFeeMigration || persistEmployeeAdvanceMigration) && !PREVIEW_MODE) {
         save({ recordActivity: false });
       }
       previewSession.setServerSnapshot(state);
@@ -489,8 +498,10 @@ function load() {
       state = serverUpdate.snapshot;
       _lastSavedState = _cloneState(state);
       const persistFeeMigration = feeMigrationPending;
+      const persistEmployeeAdvanceMigration = employeeAdvanceMigrationPending;
       feeMigrationPending = false;
-      if ((syncHomewatchAutoInvoices() || persistFeeMigration) && !PREVIEW_MODE) {
+      employeeAdvanceMigrationPending = false;
+      if ((syncHomewatchAutoInvoices() || persistFeeMigration || persistEmployeeAdvanceMigration) && !PREVIEW_MODE) {
         save({ recordActivity: false });
       }
       previewSession.setServerSnapshot(state);
@@ -607,14 +618,16 @@ function calcJob(job) {
   return V2_FINANCIAL.calcJob(job, {
     employee: getEmp(job.employeeId),
     settings: state.settings,
-    debtPayments: state.debtPayments
+    debtPayments: state.debtPayments,
+    employeeAdvances: state.employeeAdvances || []
   });
 }
 function calcHW(hw) {
   return V2_FINANCIAL.calcHomewatch(hw, {
     employee: getEmp(hw.employeeId),
     settings: state.settings,
-    debtPayments: state.debtPayments
+    debtPayments: state.debtPayments,
+    employeeAdvances: state.employeeAdvances || []
   });
 }
 
@@ -858,6 +871,8 @@ function removeHWAdvance(hwId, advId) {
   showConfirm('Remove this employee payment?', () => {
     const hw = (state.homewatch||[]).find(h=>h.id===hwId);
     if (!hw) return;
+    const item = (hw.advances || []).find(a => a.id === advId);
+    if (item?.employeeAdvanceId) _deleteEmployeeAdvance(item.employeeAdvanceId);
     hw.advances = (hw.advances||[]).filter(a=>a.id!==advId);
     save(); renderHomewatch(); renderSummary();
   });
@@ -1052,21 +1067,24 @@ function renderSummary() {
     const paySummary = V2_OVERVIEW.employeePaySummary({
       jobs: selectedEmpJobs,
       homewatch: selectedEmpHW,
+      employeeAdvances: state.employeeAdvances || [],
       employeeId: selectedEmployee?.id,
       include,
       calcJob,
       calcHW,
       roundMoney: _roundMoney
     });
-    const { jobPay, jobCredit, jobNet, recurringBalance: hwBal, owedTotal } = paySummary;
+    const { jobPay, jobCredit, recurringBalance: hwBal, advanceBalance, advanceCarry, owedTotal } = paySummary;
     const owedCard = selectedEmployee ? `<div class="summary-card">
       <div class="summary-card-header"><div class="summary-label">Employee Pay Owed</div><select class="summary-card-select" onchange="setOverviewPayEmployee(this.value)" aria-label="Employee for pay owed">${employeeOptions}</select></div>
-      <div class="summary-value ${owedTotal < 0 ? 'red' : 'orange'}">${fmt(owedTotal)}</div>
+      <div class="summary-value ${owedTotal > 0.005 ? 'orange' : 'green'}">${fmt(owedTotal)}</div>
       <div class="owed-breakdown">
         <div class="owed-breakdown-row"><span class="owed-breakdown-label">Jobs</span><span class="owed-breakdown-amount">${fmt(jobPay)}</span><button type="button" class="owed-toggle${include.jobs ? ' on' : ''}" onclick="event.stopPropagation();toggleSummaryOwedInclude('jobs')" aria-pressed="${include.jobs ? 'true' : 'false'}" title="Include Jobs in total"><span class="owed-toggle-thumb"></span></button></div>
-        ${jobCredit > 0.005 ? `<div class="owed-breakdown-row"><span class="owed-breakdown-label">Advance</span><span class="owed-breakdown-amount" style="color:var(--red)">-${fmt(jobCredit)}</span></div>` : ''}
+        ${jobCredit > 0.005 ? `<div class="owed-breakdown-row"><span class="owed-breakdown-label">Job credit</span><span class="owed-breakdown-amount" style="color:var(--red)">-${fmt(jobCredit)}</span></div>` : ''}
+        ${advanceBalance > 0.005 ? `<div class="owed-breakdown-row"><span class="owed-breakdown-label">Advance balance</span><span class="owed-breakdown-amount" style="color:var(--red)">-${fmt(advanceBalance)}</span></div>` : ''}
         <div class="owed-breakdown-row"><span class="owed-breakdown-label">Recurring</span><span class="owed-breakdown-amount">${fmt(hwBal)}</span><button type="button" class="owed-toggle${include.homewatch ? ' on' : ''}" onclick="event.stopPropagation();toggleSummaryOwedInclude('homewatch')" aria-pressed="${include.homewatch ? 'true' : 'false'}" title="Include recurring services in total"><span class="owed-toggle-thumb"></span></button></div>
       </div>
+      ${advanceCarry > 0.005 ? `<div class="summary-sub">Advance carried forward: ${fmt(advanceCarry)}</div>` : ''}
     </div>` : '';
     const recentPay = selectedEmployee ? _recentEmployeePay(selectedEmployee.id, overviewAdminPayTimeframe) : 0;
     const recentPayCard = selectedEmployee ? `<div class="summary-card">
@@ -1277,12 +1295,13 @@ function renderEmpSummary() {
   const overview = V2_OVERVIEW.employeeOverviewSummary({
     jobs: state.jobs,
     homewatch: state.homewatch || [],
+    employeeAdvances: state.employeeAdvances || [],
     employeeId: myId,
     calcJob,
     calcHW,
     roundMoney: _roundMoney
   });
-  const { activeJobs: active, activeHomewatch: activeHW, pausedHomewatch: pausedHW, potentialOwed: tOwed } = overview;
+  const { activeJobs: active, activeHomewatch: activeHW, pausedHomewatch: pausedHW, potentialOwed: tOwed, advanceBalance, advanceCarry } = overview;
 
   const tRecentPay = _recentEmployeePay(myId, empSummaryTimeframe);
   const tfOpts = _recentPayTimeframeOptions(empSummaryTimeframe);
@@ -1296,7 +1315,7 @@ function renderEmpSummary() {
       <div class="summary-value green">${fmt(tRecentPay)}</div>
       <div class="summary-sub">received</div>
     </div>
-    <div class="summary-card"><div class="summary-label">Currently Owed</div><div class="summary-value ${tOwed>0?'orange':tOwed<0?'red':'green'}">${fmt(tOwed)}</div><div class="summary-sub">from completed work</div></div>`;
+    <div class="summary-card"><div class="summary-label">Currently Owed</div><div class="summary-value ${tOwed>0?'orange':'green'}">${fmt(tOwed)}</div><div class="summary-sub">from completed work${advanceBalance > 0.005 ? ` · Advance: -${fmt(advanceBalance)}` : ''}${advanceCarry > 0.005 ? ` · Carry forward: ${fmt(advanceCarry)}` : ''}</div></div>`;
 }
 
 // ─── RENDER JOBS ─────────────────────────────────────────────────────────────
@@ -1697,7 +1716,16 @@ function cyclePayType(jobId, idx) {
   const job = state.jobs.find(j=>j.id===jobId);
   if (!job||!job.advances||job.advances[idx]===undefined) return;
   const cycle = {'':'advance','advance':'final','final':'adjustment','adjustment':'tip','tip':''};
-  job.advances[idx].payType = cycle[job.advances[idx].payType||''];
+  const item = job.advances[idx];
+  const nextType = cycle[item.payType||''];
+  if (item.employeeAdvanceId && nextType !== 'advance') {
+    _deleteEmployeeAdvance(item.employeeAdvanceId);
+    delete item.employeeAdvanceId;
+  } else if (!item.employeeAdvanceId && nextType === 'advance') {
+    const record = _recordEmployeeAdvance({ employeeId: job.employeeId, amount: item.amount, label: item.label, date: item.date, sourceKind: 'job', sourceId: job.id });
+    if (record) item.employeeAdvanceId = record.id;
+  }
+  item.payType = nextType;
   save(); renderJobs();
 }
 
@@ -2497,8 +2525,11 @@ function _buildEmployeePaymentRows(employeeId) {
     calcHW
   });
 }
+function _employeeAdvanceBalance(employeeId) {
+  return V2_EMPLOYEE_ADVANCE.balance(state, employeeId, _roundMoney);
+}
 function _calcEmployeePaymentPlan(employeeId) {
-  return V2_EMPLOYEE_PAYMENT.paymentPlan(_buildEmployeePaymentRows(employeeId), _roundMoney);
+  return V2_EMPLOYEE_PAYMENT.paymentPlan(_buildEmployeePaymentRows(employeeId), _employeeAdvanceBalance(employeeId), _roundMoney);
 }
 function _employeePaymentOptions(selectedId) {
   return state.users
@@ -2560,12 +2591,19 @@ function _inferSplitPayType(input) {
   else typeEl.value = '';
 }
 function _setSplitPayAllocations(allocById = {}) {
+  splitPaySelectedSources = new Set(Object.keys(allocById));
   document.querySelectorAll('.sp-alloc-input').forEach(el => {
     const amount = Number(allocById[el.id] || 0);
     el.value = Math.abs(amount) > 0.005 ? amount.toFixed(2) : '';
     _inferSplitPayType(el);
   });
   updateSplitTotals();
+}
+function setSplitPaySourceSelected(input) {
+  if (!input) return;
+  const amount = Number(input.value || 0);
+  if (Math.abs(amount) > 0.005) splitPaySelectedSources.add(input.id);
+  else splitPaySelectedSources.delete(input.id);
 }
 function setSplitPayEmployee(employeeId) {
   splitPayEmployeeId = employeeId || '';
@@ -2581,6 +2619,7 @@ function setSplitPayEmployee(employeeId) {
       sourceCleared = true;
     }
   }
+  splitPaySelectedSources = new Set();
   renderSplitPayAlloc();
   if (splitPayPayoutContext) {
     document.getElementById('sp_total').value = '0';
@@ -2598,6 +2637,7 @@ function openSplitPay(preset = null) {
   // zero-balance open source is automatically treated as an advance when it
   // receives money.
   splitPayIncludeAll = false;
+  splitPaySelectedSources = new Set();
   splitPayPayoutContext = !!preset?.payoutContext;
   splitPayEmployeeId = preset?.employeeId || employeePaymentCtx.employeeId || employees[0]?.id || '';
   employeePaymentCtx.employeeId = splitPayEmployeeId;
@@ -2623,15 +2663,27 @@ function fillSplitPayMax() {
   const inputs = [...document.querySelectorAll('.sp-alloc-input')];
   const allocById = {};
   let total = 0;
+  let advanceRemaining = _employeeAdvanceBalance(splitPayEmployeeId);
   inputs.forEach(input => {
     const owed = Math.max(0, Number(input.dataset.owed || 0));
     if (owed > 0.005) {
-      allocById[input.id] = owed;
-      total += owed;
+      splitPaySelectedSources.add(input.id);
+      const advanceApplied = Math.min(owed, advanceRemaining);
+      const cashAmount = _roundMoney(owed - advanceApplied);
+      advanceRemaining = _roundMoney(advanceRemaining - advanceApplied);
+      if (cashAmount > 0.005) {
+        allocById[input.id] = cashAmount;
+        total += cashAmount;
+      }
     }
   });
   document.getElementById('sp_total').value = total.toFixed(2);
-  _setSplitPayAllocations(allocById);
+  document.querySelectorAll('.sp-alloc-input').forEach(el => {
+    const amount = Number(allocById[el.id] || 0);
+    el.value = Math.abs(amount) > 0.005 ? amount.toFixed(2) : '';
+    _inferSplitPayType(el);
+  });
+  updateSplitTotals();
 }
 function clearSplitPayTotal() {
   const input = document.getElementById('sp_total');
@@ -2682,7 +2734,7 @@ function renderSplitPayAlloc() {
       </select>
       <button class="btn btn-ghost btn-sm" id="${id}_maxBtn" onclick="maxAlloc('${id}')" style="flex-shrink:0">MAX</button>
       <input class="form-input split-pay-field sp-alloc-input" type="number" step="0.01" placeholder="0.00" data-owed="${bal}"
-        id="${id}" style="max-width:150px" onfocus="if(Number(this.value)===0) this.select()" oninput="_inferSplitPayType(this); updateSplitTotals()" />
+        id="${id}" style="max-width:150px" onfocus="if(Number(this.value)===0) this.select()" oninput="setSplitPaySourceSelected(this); _inferSplitPayType(this); updateSplitTotals()" />
       <button class="btn btn-ghost btn-icon-only sp-clear-btn" type="button" onclick="clearSplitPayAllocation('${id}')" title="Clear amount" aria-label="Clear amount" style="min-width:30px;width:30px;height:30px;padding:0">${jobIconSvg('close')}</button>
     </div>`;
   };
@@ -2733,12 +2785,14 @@ function maxAlloc(inputId) {
         ? Math.max(0, remaining)
         : Math.min(owed, Math.max(0, remaining));
   input.value = Math.abs(target) > 0.005 ? target.toFixed(2) : '';
+  setSplitPaySourceSelected(input);
   _inferSplitPayType(input);
   updateSplitTotals();
 }
 function clearSplitPayAllocation(inputId) {
   const input = document.getElementById(inputId);
   if (!input) return;
+  splitPaySelectedSources.delete(inputId);
   input.value = '';
   _inferSplitPayType(input);
   updateSplitTotals();
@@ -2763,9 +2817,16 @@ function updateSplitAllocationBreakdown(input) {
 function updateSplitTotals() {
   const total = parseFloat(document.getElementById('sp_total').value) || 0;
   let allocated = 0;
+  let grossSelected = 0;
+  let advanceApplicationCapacity = 0;
   document.querySelectorAll('.sp-alloc-input').forEach(el => {
     const amt = parseFloat(el.value) || 0;
     allocated += amt;
+    const owed = Math.max(0, Number(el.dataset.owed || 0));
+    if (splitPaySelectedSources.has(el.id) && owed > 0.005) {
+      grossSelected += owed;
+      advanceApplicationCapacity += Math.max(0, owed - Math.max(0, amt));
+    }
     const typeEl = document.getElementById(el.id + '_type');
     if (typeEl) typeEl.style.display = Math.abs(amt) > 0.005 ? '' : 'none';
     updateSplitAllocationBreakdown(el);
@@ -2777,9 +2838,82 @@ function updateSplitTotals() {
     <span>Total <strong>${fmt(total)}</strong></span>
     <span>Allocated <strong style="color:var(--green)">${fmt(allocated)}</strong></span>
     <span>Remaining <strong style="color:${remColor}">${fmt(remaining)}</strong></span>`;
+  const advanceAvailable = _employeeAdvanceBalance(splitPayEmployeeId);
+  const advanceApplied = _roundMoney(Math.min(advanceAvailable, advanceApplicationCapacity));
+  const summaryEl = document.getElementById('sp_paySummary');
+  if (summaryEl) summaryEl.innerHTML = `
+    <span>Gross pay selected <strong>${fmt(grossSelected)}</strong></span>
+    <span>Advance balance <strong style="color:${advanceAvailable > 0.005 ? 'var(--red)' : 'var(--text2)'}">-${fmt(advanceAvailable)}</strong></span>
+    <span>Advance applied <strong style="color:${advanceApplied > 0.005 ? 'var(--red)' : 'var(--text2)'}">-${fmt(advanceApplied)}</strong></span>
+    <span>Net cash due <strong style="color:var(--accent)">${fmt(Math.max(0, grossSelected - advanceApplied))}</strong></span>`;
 }
 function _splitEmployeePaymentAllocation(amount, owed, payType) {
   return V2_EMPLOYEE_PAYMENT.splitAllocation(amount, owed, payType, _roundMoney);
+}
+function _employeeAdvanceSource(sourceKind, sourceId) {
+  if (sourceKind === 'hw') return (state.homewatch || []).find(item => item.id === sourceId) || null;
+  return state.jobs.find(item => item.id === sourceId) || null;
+}
+function _recordEmployeeAdvance({ employeeId, amount, label, date, sourceKind = '', sourceId = '', splitEventId = '' }) {
+  const advanceAmount = _roundMoney(amount);
+  if (advanceAmount <= 0.005) return null;
+  if (!Array.isArray(state.employeeAdvances)) state.employeeAdvances = [];
+  const source = sourceKind && sourceId ? _employeeAdvanceSource(sourceKind, sourceId) : null;
+  const record = {
+    id: uid(),
+    employeeId: employeeId || source?.employeeId || '',
+    label: label || 'Employee advance',
+    amount: advanceAmount,
+    date: date || today(),
+    sourceKind: sourceKind || '',
+    sourceId: sourceId || '',
+    sourceName: source?.name || '',
+    splitEventId: splitEventId || '',
+    applications: []
+  };
+  state.employeeAdvances.push(record);
+  if (splitEventId && source) {
+    if (!source.advances) source.advances = [];
+    source.advances.push({
+      id: uid(),
+      label: record.label,
+      amount: advanceAmount,
+      date: record.date,
+      payType: 'advance',
+      splitEventId,
+      employeeAdvanceId: record.id
+    });
+  }
+  return record;
+}
+function _ensureEmployeeAdvanceMirror(sourceKind, source, record) {
+  if (!source || !record || !sourceKind) return;
+  if (!source.advances) source.advances = [];
+  const mirror = source.advances.find(item => item.employeeAdvanceId === record.id);
+  if (mirror) {
+    mirror.label = record.label;
+    mirror.amount = record.amount;
+    mirror.date = record.date;
+    mirror.payType = 'advance';
+    return;
+  }
+  source.advances.push({
+    id: uid(),
+    label: record.label,
+    amount: record.amount,
+    date: record.date,
+    payType: 'advance',
+    employeeAdvanceId: record.id
+  });
+}
+function _deleteEmployeeAdvance(employeeAdvanceId) {
+  if (!employeeAdvanceId) return;
+  state.employeeAdvances = (state.employeeAdvances || []).filter(advance => advance.id !== employeeAdvanceId);
+  (state.splitPayments || []).forEach(event => {
+    if (Array.isArray(event.advanceApplications)) {
+      event.advanceApplications = event.advanceApplications.filter(application => application.employeeAdvanceId !== employeeAdvanceId);
+    }
+  });
 }
 async function saveSplitPay() {
   const total   = parseFloat(document.getElementById('sp_total').value) || 0;
@@ -2790,59 +2924,92 @@ async function saveSplitPay() {
   const jobEntries = [], hwEntries = [];
   document.querySelectorAll('.sp-alloc-input').forEach(el => {
     const amt = parseFloat(el.value) || 0;
-    if (Math.abs(amt) <= 0.005) return;
+    const owed = Math.max(0, Number(el.dataset.owed || 0));
+    const selected = splitPaySelectedSources.has(el.id);
+    if (Math.abs(amt) <= 0.005 && !(selected && owed > 0.005)) return;
     allocated += amt;
     const typeEl = document.getElementById(el.id + '_type');
     if (typeEl && !typeEl.value) _inferSplitPayType(el);
     const payType = typeEl?.value || '';
-    const owed = Math.max(0, Number(el.dataset.owed || 0));
     if (el.id.startsWith('sp_job_')) jobEntries.push({ jobId: el.id.slice('sp_job_'.length), amount: amt, owed, payType });
     if (el.id.startsWith('sp_hw_'))  hwEntries.push({  hwId:  el.id.slice('sp_hw_'.length), amount: amt, owed, payType });
   });
   if (!jobEntries.length && !hwEntries.length) { showAlert('Please allocate at least one amount.'); return; }
   const allEntries = [...jobEntries, ...hwEntries];
-  const hasAdvance = allEntries.some(entry => entry.payType === 'advance' || (entry.amount > 0.005 && entry.amount > entry.owed + 0.005) || (entry.amount > 0.005 && entry.owed <= 0.005));
+  const hasNewAdvance = allEntries.some(entry => entry.amount > 0.005 && (entry.payType === 'advance' || entry.amount > entry.owed + 0.005 || entry.owed <= 0.005));
   const hasAdjustment = allEntries.some(entry => entry.payType === 'adjustment' || entry.amount < -0.005);
-  const paymentMode = hasAdjustment ? 'adjustment' : hasAdvance ? 'advance' : 'owed';
+  const paymentMode = hasAdjustment ? 'adjustment' : hasNewAdvance ? 'advance' : 'owed';
   const remaining = total - allocated;
   const doSave = async () => {
     const splitEventId = uid();
-    const trackAdvances = hasAdvance;
     const eventLabel = label || 'Employee payment';
     const allocations = [];
+    const advanceApplications = [];
+    const newAdvanceIds = [];
     const employeeIds = new Set();
-    jobEntries.forEach(({ jobId, amount, owed, payType }) => {
-      const job = state.jobs.find(j => j.id === jobId);
-      if (job) {
-        if (!job.advances) job.advances = [];
-        _splitEmployeePaymentAllocation(amount, owed, payType).forEach(segment => {
-          const advanceId = uid();
-          job.advances.push({ id: advanceId, label: eventLabel, amount: segment.amount, date, payType: segment.payType, splitEventId });
-          allocations.push({ sourceKind: 'job', sourceId: job.id, sourceName: job.name || 'Job', amount: segment.amount, payType: segment.payType || '', advanceId });
-        });
-        if (job.employeeId) employeeIds.add(job.employeeId);
-      }
-    });
-    hwEntries.forEach(({ hwId, amount, owed, payType }) => {
-      const hw = (state.homewatch || []).find(h => h.id === hwId);
-      if (hw) {
-        if (!hw.advances) hw.advances = [];
-        _splitEmployeePaymentAllocation(amount, owed, payType).forEach(segment => {
-          const advanceId = uid();
-          hw.advances.push({ id: advanceId, label: eventLabel, amount: segment.amount, date, payType: segment.payType, splitEventId });
-          allocations.push({ sourceKind: 'hw', sourceId: hw.id, sourceName: hw.name || 'HomeWatch', amount: segment.amount, payType: segment.payType || '', advanceId });
-        });
-        if (hw.employeeId) employeeIds.add(hw.employeeId);
-      }
+    const sourceEntries = [
+      ...jobEntries.map(entry => ({ ...entry, sourceKind: 'job', sourceId: entry.jobId })),
+      ...hwEntries.map(entry => ({ ...entry, sourceKind: 'hw', sourceId: entry.hwId }))
+    ];
+    const advanceRequests = sourceEntries
+      .filter(entry => entry.amount >= -0.005 && entry.owed > 0.005)
+      .map(entry => ({
+        sourceKind: entry.sourceKind,
+        sourceId: entry.sourceId,
+        available: Math.max(0, entry.owed - Math.max(0, entry.amount))
+      }));
+    const advanceTargets = V2_EMPLOYEE_ADVANCE.allocateToSources(
+      _employeeAdvanceBalance(splitPayEmployeeId),
+      advanceRequests,
+      _roundMoney
+    );
+    const applied = V2_EMPLOYEE_ADVANCE.applyToSources(
+      (state.employeeAdvances || []).filter(advance => advance.employeeId === splitPayEmployeeId),
+      advanceTargets,
+      { date, label: eventLabel, splitEventId, idFactory: uid }
+    );
+    applied.forEach(item => advanceApplications.push(item));
+    sourceEntries.forEach(entry => {
+      const source = _employeeAdvanceSource(entry.sourceKind, entry.sourceId);
+      if (!source) return;
+      if (source.employeeId) employeeIds.add(source.employeeId);
+      if (Math.abs(entry.amount) <= 0.005) return;
+      _splitEmployeePaymentAllocation(entry.amount, entry.owed, entry.payType).forEach(segment => {
+        if (segment.payType === 'advance' && segment.amount > 0.005) {
+          const record = _recordEmployeeAdvance({
+            employeeId: source.employeeId || splitPayEmployeeId,
+            amount: segment.amount,
+            label: eventLabel,
+            date,
+            sourceKind: entry.sourceKind,
+            sourceId: source.id,
+            splitEventId
+          });
+          if (record) {
+            newAdvanceIds.push(record.id);
+            allocations.push({ sourceKind: entry.sourceKind, sourceId: source.id, sourceName: source.name || (entry.sourceKind === 'hw' ? 'HomeWatch' : 'Job'), amount: segment.amount, payType: 'advance', employeeAdvanceId: record.id });
+          }
+          return;
+        }
+        if (!source.advances) source.advances = [];
+        const advanceId = uid();
+        source.advances.push({ id: advanceId, label: eventLabel, amount: segment.amount, date, payType: segment.payType, splitEventId });
+        allocations.push({ sourceKind: entry.sourceKind, sourceId: source.id, sourceName: source.name || (entry.sourceKind === 'hw' ? 'HomeWatch' : 'Job'), amount: segment.amount, payType: segment.payType || '', advanceId });
+      });
     });
     if (!state.splitPayments) state.splitPayments = [];
+    const advanceApplied = _roundMoney(advanceApplications.reduce((sum, item) => sum + item.amount, 0));
+    const trackAdvances = newAdvanceIds.length > 0;
     state.splitPayments.push({
       id: splitEventId,
       date: date || today(),
       label: eventLabel,
       total,
-      mode: trackAdvances ? 'potential' : 'split',
-      paymentMode,
+      grossSettled: _roundMoney(total + advanceApplied),
+      advanceApplied,
+      advanceApplications,
+      mode: trackAdvances ? 'potential' : (advanceApplied > 0.005 ? 'settlement' : 'split'),
+      paymentMode: advanceApplied > 0.005 && !hasAdjustment ? 'settlement' : paymentMode,
       employeeId: splitPayEmployeeId || (employeeIds.size === 1 ? [...employeeIds][0] : ''),
       allocations,
       createdAt: new Date().toISOString()
@@ -3621,6 +3788,9 @@ function removeItem(jobId, key, idx) {
   }
   if (key === 'materials' && item?.id) {
     j.addOns = (j.addOns || []).filter(a => !(a.chargeType === 'materials' && a.sourceItemId === item.id));
+  }
+  if (key === 'advances' && item?.employeeAdvanceId) {
+    _deleteEmployeeAdvance(item.employeeAdvanceId);
   }
   j[key].splice(idx,1); save(); renderJobs();
 }
@@ -5066,9 +5236,34 @@ function saveItem() {
   } else if (type==='advance') {
     const date = document.getElementById('ai_date')?.value||'';
     const payType = document.getElementById('ai_paytype')?.value||'';
-    if (itemId) {
-      const item = job.advances.find(x=>x.id===itemId);
-      if (item) { item.label=label; item.amount=amount; item.date=date; item.payType=payType; }
+    const existing = itemId ? job.advances.find(x=>x.id===itemId) : null;
+    if (existing?.employeeAdvanceId && payType !== 'advance') {
+      _deleteEmployeeAdvance(existing.employeeAdvanceId);
+      delete existing.employeeAdvanceId;
+    }
+    if (payType === 'advance') {
+      let record = existing?.employeeAdvanceId
+        ? (state.employeeAdvances || []).find(advance => advance.id === existing.employeeAdvanceId)
+        : null;
+      if (record) {
+        record.label = label || 'Employee advance';
+        record.amount = _roundMoney(amount);
+        record.date = date || today();
+        record.employeeId = job.employeeId || record.employeeId || '';
+        record.sourceKind = 'job';
+        record.sourceId = job.id;
+        record.sourceName = job.name || '';
+        _ensureEmployeeAdvanceMirror('job', job, record);
+        existing.label = record.label;
+        existing.amount = record.amount;
+        existing.date = record.date;
+        existing.payType = 'advance';
+      } else {
+        record = _recordEmployeeAdvance({ employeeId: job.employeeId, amount, label, date, sourceKind: 'job', sourceId: job.id });
+        if (record) _ensureEmployeeAdvanceMirror('job', job, record);
+      }
+    } else if (itemId) {
+      if (existing) { existing.label=label; existing.amount=amount; existing.date=date; existing.payType=payType; }
     } else {
       job.advances.push({ id:uid(), label, amount, date, payType });
     }
