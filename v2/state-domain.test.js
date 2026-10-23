@@ -88,13 +88,13 @@ test('migrates explicitly marked job advances into the employee advance bucket w
     settings: {},
     debtPayments: [],
     splitPayments: [{
-      id: 'event-1', allocations: [{ sourceKind: 'job', sourceId: 'job-1', advanceId: 'legacy-advance' }]
+      id: 'event-1', allocations: [{ sourceKind: 'job', sourceId: 'job-1', advanceId: 'legacy-advance', payType: 'advance' }]
     }],
     employeeAdvances: [],
     users: [{ id: 'employee-1', name: 'Employee', isAdmin: false }],
     appointments: [], clients: [], homewatch: [],
     jobs: [{
-      id: 'job-1', name: 'Old job', employeeId: 'employee-1', advances: [
+      id: 'job-1', name: 'Current job', createdVia: 'unified-v2', status: 'active', employeeId: 'employee-1', advances: [
         { id: 'legacy-advance', label: 'Advance', amount: 200, date: '2026-10-20', payType: 'advance', splitEventId: 'event-1' },
         { id: 'ordinary-pay', label: 'Pay', amount: 50, date: '2026-10-20', payType: '', splitEventId: 'event-1' }
       ]
@@ -112,7 +112,7 @@ test('migrates explicitly marked job advances into the employee advance bucket w
   assert.equal(state.employeeAdvances.length, 1);
   assert.deepEqual(state.employeeAdvances[0], {
     id: 'generated-1', employeeId: 'employee-1', label: 'Advance', amount: 200,
-    date: '2026-10-20', sourceKind: 'job', sourceId: 'job-1', sourceName: 'Old job',
+    date: '2026-10-20', sourceKind: 'job', sourceId: 'job-1', sourceName: 'Current job',
     splitEventId: 'event-1', legacySourceId: 'job:job-1:legacy-advance', legacyAdvanceId: 'legacy-advance', applications: []
   });
   assert.equal(state.jobs[0].advances[0].employeeAdvanceId, 'generated-1');

@@ -248,6 +248,19 @@
     const knownAdvanceIds = new Set((s.employeeAdvances || []).map(advance => advance.legacySourceId).filter(Boolean));
     const migrateLegacyAdvance = (source, sourceKind, advance) => {
       if (!advance || advance.employeeAdvanceId || advance.payType !== 'advance') return;
+      const isCurrentSource = sourceKind === 'job'
+        ? source.createdVia === 'unified-v2' && source.status !== 'complete'
+        : source.status !== 'paused';
+      const hasExplicitSplitAllocation = (s.splitPayments || []).some(payment =>
+        (payment.allocations || []).some(allocation =>
+          allocation.sourceKind === sourceKind &&
+          allocation.sourceId === source.id &&
+          allocation.advanceId === advance.id &&
+          allocation.payType === 'advance'));
+      // Only migrate advances created by the newer employee-payment flow on
+      // current work. Older job-level pay history may already be settled and
+      // must remain job-level so it is not counted a second time globally.
+      if (!isCurrentSource || !hasExplicitSplitAllocation) return;
       const amount = Number(advance.amount || 0);
       if (amount <= 0.005) return;
       const legacySourceId = `${sourceKind}:${source.id}:${advance.id || ''}`;
