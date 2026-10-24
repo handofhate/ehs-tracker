@@ -2622,6 +2622,7 @@ function setSplitPayEmployee(employeeId) {
   }
   splitPaySelectedSources = new Set();
   renderSplitPayAlloc();
+  toggleStandaloneAdvance();
   if (splitPayPayoutContext) {
     document.getElementById('sp_total').value = '0';
     document.getElementById('sp_label').value = '';
@@ -2643,6 +2644,10 @@ function openSplitPay(preset = null) {
   splitPayEmployeeId = preset?.employeeId || employeePaymentCtx.employeeId || employees[0]?.id || '';
   employeePaymentCtx.employeeId = splitPayEmployeeId;
   splitPaySource = preset?.sourceKind && preset?.sourceId ? { kind: preset.sourceKind, id: preset.sourceId } : null;
+  const standaloneEl = document.getElementById('sp_standaloneAdvance');
+  if (standaloneEl) standaloneEl.checked = false;
+  const standaloneWrap = document.getElementById('sp_standaloneWrap');
+  if (standaloneWrap) standaloneWrap.style.display = splitPaySource ? 'none' : '';
   document.getElementById('sp_total').value = '0';
   document.getElementById('sp_date').value  = today();
   document.getElementById('sp_label').value = '';
@@ -2658,9 +2663,11 @@ function openSplitPay(preset = null) {
     if (preset.label !== undefined) document.getElementById('sp_label').value = preset.label || '';
     _setSplitPayAllocations(preset.allocById || {});
   }
+  toggleStandaloneAdvance();
   document.getElementById('splitPayModal').classList.remove('hidden');
 }
 function fillSplitPayMax() {
+  if (document.getElementById('sp_standaloneAdvance')?.checked) return;
   const inputs = [...document.querySelectorAll('.sp-alloc-input')];
   const allocById = {};
   let total = 0;
@@ -2690,6 +2697,23 @@ function clearSplitPayTotal() {
   const input = document.getElementById('sp_total');
   if (!input) return;
   input.value = '';
+  updateSplitTotals();
+}
+function toggleStandaloneAdvance() {
+  const standalone = document.getElementById('sp_standaloneAdvance')?.checked === true;
+  const allocationSection = document.getElementById('sp_allocationSection');
+  const hint = document.getElementById('sp_standaloneHint');
+  const maxButton = document.getElementById('sp_totalMaxBtn');
+  if (allocationSection) allocationSection.style.display = standalone ? 'none' : '';
+  if (hint) hint.style.display = standalone ? '' : 'none';
+  if (maxButton) maxButton.style.display = standalone ? 'none' : '';
+  if (standalone) {
+    splitPaySelectedSources = new Set();
+    document.querySelectorAll('.sp-alloc-input').forEach(input => {
+      input.value = '';
+      _inferSplitPayType(input);
+    });
+  }
   updateSplitTotals();
 }
 function renderSplitPayAlloc() {
@@ -2817,6 +2841,16 @@ function updateSplitAllocationBreakdown(input) {
 }
 function updateSplitTotals() {
   const total = parseFloat(document.getElementById('sp_total').value) || 0;
+  const standalone = document.getElementById('sp_standaloneAdvance')?.checked === true;
+  const summaryEl = document.getElementById('sp_paySummary');
+  const totalsEl = document.getElementById('sp_totals');
+  if (standalone) {
+    if (totalsEl) totalsEl.innerHTML = `<span>Standalone advance <strong>${fmt(Math.max(0, total))}</strong></span>`;
+    if (summaryEl) summaryEl.innerHTML = `
+      <span>Standalone advance <strong>${fmt(Math.max(0, total))}</strong></span>
+      <span>No job allocation</span>`;
+    return;
+  }
   let allocated = 0;
   let grossSelected = 0;
   let advanceApplicationCapacity = 0;
@@ -2834,14 +2868,13 @@ function updateSplitTotals() {
   });
   const remaining = total - allocated;
   const remColor  = Math.abs(remaining) < 0.01 ? 'var(--green)' : remaining < 0 ? 'var(--red)' : 'var(--accent)';
-  const el = document.getElementById('sp_totals');
+  const el = totalsEl;
   if (el) el.innerHTML = `
     <span>Total <strong>${fmt(total)}</strong></span>
     <span>Allocated <strong style="color:var(--green)">${fmt(allocated)}</strong></span>
     <span>Remaining <strong style="color:${remColor}">${fmt(remaining)}</strong></span>`;
   const advanceAvailable = _employeeAdvanceBalance(splitPayEmployeeId);
   const { advanceApplied, netCashDue } = V2_EMPLOYEE_PAYMENT.cashDue(grossSelected, advanceAvailable, advanceApplicationCapacity, _roundMoney);
-  const summaryEl = document.getElementById('sp_paySummary');
   if (summaryEl) summaryEl.innerHTML = `
     <span>Gross pay selected <strong>${fmt(grossSelected)}</strong></span>
     <span>Advance balance <strong style="color:${advanceAvailable > 0.005 ? 'var(--red)' : 'var(--text2)'}">-${fmt(advanceAvailable)}</strong></span>
@@ -2921,6 +2954,37 @@ async function saveSplitPay() {
   if (Math.abs(total) <= 0.005) { showAlert('Please enter a non-zero total amount.'); return; }
   const date    = document.getElementById('sp_date').value;
   const label   = document.getElementById('sp_label').value.trim();
+  const standaloneAdvance = document.getElementById('sp_standaloneAdvance')?.checked === true;
+  if (standaloneAdvance) {
+    if (total <= 0.005) { showAlert('A standalone advance must be a positive amount.'); return; }
+    const splitEventId = uid();
+    const eventLabel = label || 'Employee advance';
+    const record = _recordEmployeeAdvance({
+      employeeId: splitPayEmployeeId,
+      amount: total,
+      label: eventLabel,
+      date,
+      splitEventId
+    });
+    if (!record) return;
+    if (!state.splitPayments) state.splitPayments = [];
+    state.splitPayments.push({
+      id: splitEventId,
+      date: date || today(),
+      label: eventLabel,
+      total,
+      grossSettled: total,
+      advanceApplied: 0,
+      advanceApplications: [],
+      mode: 'potential',
+      paymentMode: 'advance',
+      employeeId: splitPayEmployeeId,
+      allocations: [],
+      createdAt: new Date().toISOString()
+    });
+    await save(); renderAll(); closeModal('splitPayModal');
+    return;
+  }
   let allocated = 0;
   const jobEntries = [], hwEntries = [];
   document.querySelectorAll('.sp-alloc-input').forEach(el => {

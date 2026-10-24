@@ -1828,6 +1828,11 @@
       </div>
     </div>
     <div id="sp_paySummary" style="background:var(--bg3);border:1px solid var(--border2);border-radius:3px;padding:10px 14px;font-family:var(--mono);font-size:13px;display:flex;flex-direction:column;align-items:flex-end;gap:4px;margin-bottom:12px"></div>
+    <div id="sp_standaloneWrap" class="unified-checkbox" style="margin:0 0 12px">
+      <input type="checkbox" id="sp_standaloneAdvance" onchange="toggleStandaloneAdvance()" />
+      <span>Record as a standalone advance (not assigned to a job)</span>
+    </div>
+    <div id="sp_standaloneHint" style="display:none;color:var(--text2);font-size:14px;padding:0 0 12px">This creates an employee-level advance. It will be applied automatically when you pay future work.</div>
     <div class="form-row" style="grid-template-columns:minmax(0,1fr) 170px">
       <div class="form-group">
         <label class="form-label">Description (optional)</label>
@@ -1838,7 +1843,7 @@
         <input class="form-input split-pay-field" id="sp_date" type="date" />
       </div>
     </div>
-    <div style="border-top:1px solid var(--border);padding-top:14px;margin-top:4px">
+    <div id="sp_allocationSection" style="border-top:1px solid var(--border);padding-top:14px;margin-top:4px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
         <div class="form-label" style="margin:0">Allocate to Jobs &amp; Recurring Services</div>
       </div>
@@ -2034,7 +2039,7 @@
 <script src="v2/legacy-partial-domain.js?v=20260925-1"></script>
 <script src="v2/historical-boundary.js?v=20260928-1"></script>
 <script src="v2/backup-domain.js?v=20260925-1"></script>
-<script src="app.js?v=20261023-3"></script>
+<script src="app.js?v=20261024-1"></script>
 
 <div id="undoToast">Undo applied</div>
 </body>
