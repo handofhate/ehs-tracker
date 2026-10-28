@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildPaymentRows, cashDue, paymentPlan, splitAllocation } = require('./employee-payment-domain');
+const { buildPaymentRows, cashDue, maxAdvanceApplication, paymentPlan, splitAllocation } = require('./employee-payment-domain');
 
 const calcJob = job => ({ empBalance: job.current, potentialEmpBalance: job.potential });
 const calcHW = item => ({ empBalance: item.current, potentialEmpBalance: item.potential });
@@ -53,6 +53,12 @@ test('calculates cash due after applying an employee-level advance to selected w
     advanceApplied: 0,
     netCashDue: 134.38
   });
+});
+
+test('limits an advance application to the amount of selected work not covered by cash', () => {
+  assert.equal(maxAdvanceApplication(400, 507.21, 407.21), 100);
+  assert.equal(maxAdvanceApplication(400, 507.21, 0), 400);
+  assert.equal(maxAdvanceApplication(400, 507.21, 600), 0);
 });
 
 test('splits an over-balance payment into owed and advance records', () => {

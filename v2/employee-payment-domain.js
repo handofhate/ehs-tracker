@@ -72,6 +72,12 @@
     };
   }
 
+  function maxAdvanceApplication(advanceBalance = 0, grossOwed = 0, cashPaid = 0, moneyRound = roundMoney) {
+    const availableAdvance = moneyRound(Math.max(0, advanceBalance));
+    const remainingGross = moneyRound(Math.max(0, Number(grossOwed || 0) - Math.max(0, Number(cashPaid || 0))));
+    return moneyRound(Math.min(availableAdvance, remainingGross));
+  }
+
   function splitAllocation(amount, owed, payType, moneyRound = roundMoney) {
     const payment = Number(amount || 0);
     const balance = Math.max(0, Number(owed || 0));
@@ -87,6 +93,7 @@
   return Object.freeze({
     buildPaymentRows,
     cashDue,
+    maxAdvanceApplication,
     paymentPlan,
     splitAllocation
   });

@@ -1833,6 +1833,22 @@
       <span>Record as a standalone advance (not assigned to a job)</span>
     </div>
     <div id="sp_standaloneHint" style="display:none;color:var(--text2);font-size:14px;padding:0 0 12px">This creates an employee-level advance. It will be applied automatically when you pay future work.</div>
+    <div id="sp_applyAdvanceWrap" style="display:none;margin:0 0 12px;padding:10px 12px;border:1px solid var(--border2);border-radius:3px;background:var(--bg3)">
+      <div class="unified-checkbox" style="margin:0">
+        <input type="checkbox" id="sp_applyAdvance" onchange="toggleAdvanceApplication()" />
+        <span>Apply existing advance to this payment</span>
+      </div>
+      <div id="sp_applyAdvanceControls" style="display:none;margin-top:10px">
+        <div style="display:flex;align-items:flex-end;gap:8px">
+          <div style="flex:1">
+            <label class="form-label" for="sp_advanceApply">Advance applied ($)</label>
+            <input class="form-input split-pay-field" id="sp_advanceApply" type="number" min="0" step="0.01" value="0" placeholder="0.00" onfocus="if(Number(this.value)===0) this.select()" oninput="updateSplitTotals()" />
+          </div>
+          <button class="btn btn-ghost btn-sm" id="sp_advanceMaxBtn" type="button" onclick="fillAdvanceApplyMax()">MAX</button>
+        </div>
+        <div id="sp_applyAdvanceHint" style="color:var(--text2);font-size:13px;margin-top:7px">This reduces the outstanding advance and covers part of the selected work. Use MAX to apply the most that fits without overpaying.</div>
+      </div>
+    </div>
     <div class="form-row" style="grid-template-columns:minmax(0,1fr) 170px">
       <div class="form-group">
         <label class="form-label">Description (optional)</label>
@@ -2034,12 +2050,12 @@
 <script src="v2/financial-domain.js?v=20261023-1"></script>
 <script src="v2/billing-domain.js?v=20260928-1"></script>
 <script src="v2/overview-domain.js?v=20261023-1"></script>
-<script src="v2/employee-payment-domain.js?v=20261023-2"></script>
+<script src="v2/employee-payment-domain.js?v=20261028-1"></script>
 <script src="v2/employee-ledger-domain.js?v=20261023-1"></script>
 <script src="v2/legacy-partial-domain.js?v=20260925-1"></script>
 <script src="v2/historical-boundary.js?v=20260928-1"></script>
 <script src="v2/backup-domain.js?v=20260925-1"></script>
-<script src="app.js?v=20261024-1"></script>
+<script src="app.js?v=20261028-1"></script>
 
 <div id="undoToast">Undo applied</div>
 </body>

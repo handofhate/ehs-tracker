@@ -2609,6 +2609,10 @@ function setSplitPaySourceSelected(input) {
 function setSplitPayEmployee(employeeId) {
   splitPayEmployeeId = employeeId || '';
   employeePaymentCtx.employeeId = splitPayEmployeeId;
+  const applyAdvance = document.getElementById('sp_applyAdvance');
+  const advanceApply = document.getElementById('sp_advanceApply');
+  if (applyAdvance) applyAdvance.checked = false;
+  if (advanceApply) advanceApply.value = '0';
   let sourceCleared = false;
   if (splitPaySource) {
     const source = splitPaySource.kind === 'hw'
@@ -2646,6 +2650,10 @@ function openSplitPay(preset = null) {
   splitPaySource = preset?.sourceKind && preset?.sourceId ? { kind: preset.sourceKind, id: preset.sourceId } : null;
   const standaloneEl = document.getElementById('sp_standaloneAdvance');
   if (standaloneEl) standaloneEl.checked = false;
+  const applyAdvanceEl = document.getElementById('sp_applyAdvance');
+  const advanceApplyEl = document.getElementById('sp_advanceApply');
+  if (applyAdvanceEl) applyAdvanceEl.checked = false;
+  if (advanceApplyEl) advanceApplyEl.value = '0';
   const standaloneWrap = document.getElementById('sp_standaloneWrap');
   if (standaloneWrap) standaloneWrap.style.display = splitPaySource ? 'none' : '';
   document.getElementById('sp_total').value = '0';
@@ -2666,26 +2674,93 @@ function openSplitPay(preset = null) {
   toggleStandaloneAdvance();
   document.getElementById('splitPayModal').classList.remove('hidden');
 }
+function _splitPayAdvanceEnabled() {
+  return document.getElementById('sp_applyAdvance')?.checked === true
+    && document.getElementById('sp_standaloneAdvance')?.checked !== true;
+}
+function _splitPayAdvanceRequested() {
+  return Math.max(0, parseFloat(document.getElementById('sp_advanceApply')?.value) || 0);
+}
+function _splitPayGrossOwed() {
+  return _roundMoney([...document.querySelectorAll('.sp-alloc-input')]
+    .reduce((sum, input) => sum + Math.max(0, Number(input.dataset.owed || 0)), 0));
+}
+function updateAdvanceApplicationUi() {
+  const wrap = document.getElementById('sp_applyAdvanceWrap');
+  const controls = document.getElementById('sp_applyAdvanceControls');
+  const toggle = document.getElementById('sp_applyAdvance');
+  const amount = document.getElementById('sp_advanceApply');
+  const available = _employeeAdvanceBalance(splitPayEmployeeId);
+  const standalone = document.getElementById('sp_standaloneAdvance')?.checked === true;
+  if (!wrap || !toggle || !amount) return;
+  if (available <= 0.005 || standalone) {
+    wrap.style.display = 'none';
+    toggle.checked = false;
+    amount.value = '0';
+    if (controls) controls.style.display = 'none';
+    return;
+  }
+  wrap.style.display = '';
+  if (controls) controls.style.display = toggle.checked ? '' : 'none';
+  const hint = document.getElementById('sp_applyAdvanceHint');
+  if (hint && !toggle.checked) {
+    hint.textContent = `Available advance: ${fmt(available)}. Turn this on to apply part of it to the selected work.`;
+  }
+}
+function toggleAdvanceApplication() {
+  if (document.getElementById('sp_standaloneAdvance')?.checked === true) {
+    const toggle = document.getElementById('sp_applyAdvance');
+    if (toggle) toggle.checked = false;
+  }
+  updateAdvanceApplicationUi();
+  updateSplitTotals();
+}
+function fillAdvanceApplyMax() {
+  const toggle = document.getElementById('sp_applyAdvance');
+  const amount = document.getElementById('sp_advanceApply');
+  if (!toggle || !amount) return;
+  toggle.checked = true;
+  updateAdvanceApplicationUi();
+  const available = _employeeAdvanceBalance(splitPayEmployeeId);
+  const grossOwed = _splitPayGrossOwed();
+  const cashPaid = Math.max(0, parseFloat(document.getElementById('sp_total')?.value) || 0);
+  const max = V2_EMPLOYEE_PAYMENT.maxAdvanceApplication(available, grossOwed, cashPaid, _roundMoney);
+  amount.value = max.toFixed(2);
+  fillSplitPayMax();
+}
 function fillSplitPayMax() {
   if (document.getElementById('sp_standaloneAdvance')?.checked) return;
   const inputs = [...document.querySelectorAll('.sp-alloc-input')];
+  const grossOwed = _splitPayGrossOwed();
+  const available = _employeeAdvanceBalance(splitPayEmployeeId);
+  const explicitAdvance = _splitPayAdvanceEnabled();
+  const existingTotal = Math.max(0, parseFloat(document.getElementById('sp_total')?.value) || 0);
+  const requestedAdvance = explicitAdvance ? _splitPayAdvanceRequested() : available;
+  const advanceToApply = _roundMoney(Math.min(
+    available,
+    requestedAdvance,
+    explicitAdvance
+      ? V2_EMPLOYEE_PAYMENT.maxAdvanceApplication(available, grossOwed, existingTotal, _roundMoney)
+      : grossOwed
+  ));
+  const maxCash = _roundMoney(Math.max(0, grossOwed - advanceToApply));
+  const cashTarget = existingTotal > 0.005 ? Math.min(existingTotal, maxCash) : maxCash;
+  let grossRemaining = _roundMoney(cashTarget + advanceToApply);
+  let advanceRemaining = advanceToApply;
   const allocById = {};
-  let total = 0;
-  let advanceRemaining = _employeeAdvanceBalance(splitPayEmployeeId);
+  splitPaySelectedSources = new Set();
   inputs.forEach(input => {
     const owed = Math.max(0, Number(input.dataset.owed || 0));
-    if (owed > 0.005) {
-      splitPaySelectedSources.add(input.id);
-      const advanceApplied = Math.min(owed, advanceRemaining);
-      const cashAmount = _roundMoney(owed - advanceApplied);
-      advanceRemaining = _roundMoney(advanceRemaining - advanceApplied);
-      if (cashAmount > 0.005) {
-        allocById[input.id] = cashAmount;
-        total += cashAmount;
-      }
-    }
+    const grossAmount = _roundMoney(Math.min(owed, grossRemaining));
+    if (grossAmount <= 0.005) return;
+    splitPaySelectedSources.add(input.id);
+    const advanceApplied = _roundMoney(Math.min(grossAmount, advanceRemaining));
+    const cashAmount = _roundMoney(grossAmount - advanceApplied);
+    if (cashAmount > 0.005) allocById[input.id] = cashAmount;
+    grossRemaining = _roundMoney(grossRemaining - grossAmount);
+    advanceRemaining = _roundMoney(advanceRemaining - advanceApplied);
   });
-  document.getElementById('sp_total').value = total.toFixed(2);
+  document.getElementById('sp_total').value = cashTarget.toFixed(2);
   document.querySelectorAll('.sp-alloc-input').forEach(el => {
     const amount = Number(allocById[el.id] || 0);
     el.value = Math.abs(amount) > 0.005 ? amount.toFixed(2) : '';
@@ -2707,6 +2782,7 @@ function toggleStandaloneAdvance() {
   if (allocationSection) allocationSection.style.display = standalone ? 'none' : '';
   if (hint) hint.style.display = standalone ? '' : 'none';
   if (maxButton) maxButton.style.display = standalone ? 'none' : '';
+  updateAdvanceApplicationUi();
   if (standalone) {
     splitPaySelectedSources = new Set();
     document.querySelectorAll('.sp-alloc-input').forEach(input => {
@@ -2858,7 +2934,8 @@ function updateSplitTotals() {
     const amt = parseFloat(el.value) || 0;
     allocated += amt;
     const owed = Math.max(0, Number(el.dataset.owed || 0));
-    if (splitPaySelectedSources.has(el.id) && owed > 0.005) {
+    const selected = splitPaySelectedSources.has(el.id) || Math.abs(amt) > 0.005;
+    if (selected && owed > 0.005) {
       grossSelected += owed;
       advanceApplicationCapacity += Math.max(0, owed - Math.max(0, amt));
     }
@@ -2874,10 +2951,25 @@ function updateSplitTotals() {
     <span>Allocated <strong style="color:var(--green)">${fmt(allocated)}</strong></span>
     <span>Remaining <strong style="color:${remColor}">${fmt(remaining)}</strong></span>`;
   const advanceAvailable = _employeeAdvanceBalance(splitPayEmployeeId);
-  const { advanceApplied, netCashDue } = V2_EMPLOYEE_PAYMENT.cashDue(grossSelected, advanceAvailable, advanceApplicationCapacity, _roundMoney);
+  const explicitAdvance = _splitPayAdvanceEnabled();
+  const requestedAdvance = explicitAdvance ? _splitPayAdvanceRequested() : advanceAvailable;
+  const advanceLimit = explicitAdvance ? requestedAdvance : advanceAvailable;
+  const { advanceApplied, netCashDue } = V2_EMPLOYEE_PAYMENT.cashDue(grossSelected, advanceLimit, advanceApplicationCapacity, _roundMoney);
+  const maxForSelection = _roundMoney(Math.min(advanceAvailable, advanceApplicationCapacity));
+  const advanceHint = document.getElementById('sp_applyAdvanceHint');
+  if (advanceHint && explicitAdvance) {
+    if (requestedAdvance > maxForSelection + 0.01) {
+      advanceHint.textContent = `This selection can apply up to ${fmt(maxForSelection)}. Enter a smaller amount or allocate more owed work.`;
+      advanceHint.style.color = 'var(--red)';
+    } else {
+      advanceHint.textContent = `Available advance: ${fmt(advanceAvailable)}. This payment will apply ${fmt(advanceApplied)} and leave ${fmt(Math.max(0, advanceAvailable - advanceApplied))} outstanding.`;
+      advanceHint.style.color = 'var(--text2)';
+    }
+  }
   if (summaryEl) summaryEl.innerHTML = `
     <span>Gross pay selected <strong>${fmt(grossSelected)}</strong></span>
     <span>Advance balance <strong style="color:${advanceAvailable > 0.005 ? 'var(--red)' : 'var(--text2)'}">-${fmt(advanceAvailable)}</strong></span>
+    ${explicitAdvance ? `<span>Advance requested <strong>-${fmt(requestedAdvance)}</strong></span>` : ''}
     <span>Advance applied <strong style="color:${advanceApplied > 0.005 ? 'var(--red)' : 'var(--text2)'}">-${fmt(advanceApplied)}</strong></span>
     <span>Net cash due <strong style="color:var(--accent)">${fmt(netCashDue)}</strong></span>`;
 }
@@ -2955,6 +3047,8 @@ async function saveSplitPay() {
   const date    = document.getElementById('sp_date').value;
   const label   = document.getElementById('sp_label').value.trim();
   const standaloneAdvance = document.getElementById('sp_standaloneAdvance')?.checked === true;
+  const explicitAdvance = _splitPayAdvanceEnabled();
+  const requestedAdvance = explicitAdvance ? _splitPayAdvanceRequested() : 0;
   if (standaloneAdvance) {
     if (total <= 0.005) { showAlert('A standalone advance must be a positive amount.'); return; }
     const splitEventId = uid();
@@ -3008,17 +3102,32 @@ async function saveSplitPay() {
   document.querySelectorAll('.sp-alloc-input').forEach(el => {
     const amount = parseFloat(el.value) || 0;
     const owed = Math.max(0, Number(el.dataset.owed || 0));
-    if (splitPaySelectedSources.has(el.id) && owed > 0.005) {
+    const selected = splitPaySelectedSources.has(el.id) || Math.abs(amount) > 0.005;
+    if (selected && owed > 0.005) {
       grossSelected += owed;
       advanceApplicationCapacity += Math.max(0, owed - Math.max(0, amount));
     }
   });
   const { netCashDue } = V2_EMPLOYEE_PAYMENT.cashDue(
     grossSelected,
-    _employeeAdvanceBalance(splitPayEmployeeId),
+    explicitAdvance ? requestedAdvance : _employeeAdvanceBalance(splitPayEmployeeId),
     advanceApplicationCapacity,
     _roundMoney
   );
+  if (explicitAdvance) {
+    const maxForSelection = _roundMoney(Math.min(
+      _employeeAdvanceBalance(splitPayEmployeeId),
+      advanceApplicationCapacity
+    ));
+    if (requestedAdvance <= 0.005) {
+      showAlert('Enter the amount of the existing advance to apply, or use MAX.');
+      return;
+    }
+    if (requestedAdvance > maxForSelection + 0.01) {
+      showAlert(`This selection can apply up to ${fmt(maxForSelection)} of the existing advance.`);
+      return;
+    }
+  }
   if (!hasNewAdvance && !hasAdjustment && total > netCashDue + 0.01) {
     showAlert(`This payment is above the employee's net cash due of ${fmt(netCashDue)} after applying the outstanding advance.`);
     return;
@@ -3044,7 +3153,7 @@ async function saveSplitPay() {
         available: Math.max(0, entry.owed - Math.max(0, entry.amount))
       }));
     const advanceTargets = V2_EMPLOYEE_ADVANCE.allocateToSources(
-      _employeeAdvanceBalance(splitPayEmployeeId),
+      explicitAdvance ? requestedAdvance : _employeeAdvanceBalance(splitPayEmployeeId),
       advanceRequests,
       _roundMoney
     );
