@@ -5362,7 +5362,7 @@ function saveItem() {
     if (itemId) {
       const item = job.addOns.find(x=>x.id===itemId);
       if (item) {
-        item.label = label || 'Hours';
+        item.label = label || 'Hourly labor';
         item.amount = amount;
         item.date = date;
         item.isHours = true;
@@ -5372,7 +5372,7 @@ function saveItem() {
     } else {
       job.addOns.push({
         id: uid(),
-        label: label || 'Hours',
+        label: label || 'Hourly labor',
         amount,
         date,
         status: 'pending',
